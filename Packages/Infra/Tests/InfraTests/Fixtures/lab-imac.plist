@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyLists-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>catalogs</key>
+	<array>
+		<string>production</string>
+	</array>
+	<key>display_name</key>
+	<string>Lab iMacs</string>
+	<key>included_manifests</key>
+	<array>
+		<string>site_default</string>
+	</array>
+	<key>managed_installs</key>
+	<array>
+		<string>Firefox</string>
+		<string>Slack</string>
+	</array>
+	<key>conditional_items</key>
+	<array>
+		<dict>
+			<key>condition</key>
+			<string>arch == "arm64"</string>
+			<key>managed_installs</key>
+			<array>
+				<string>AppleSiliconOnlyTool</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

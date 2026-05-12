@@ -1,0 +1,37 @@
+name: Firefox
+display_name: Mozilla Firefox
+version: '126.0'
+autoremove: false
+blocking_applications:
+  - Firefox
+  - firefox-bin
+catalogs:
+  - testing
+category: Web Browsers
+description: Mozilla Firefox web browser.
+developer: Mozilla
+installer_item_hash: abc123def456
+installer_item_location: apps/Mozilla/Firefox-126.0.dmg
+installer_item_size: 123456789
+installer_type: copy_from_dmg
+installs:
+  - path: /Applications/Firefox.app
+    CFBundleIdentifier: org.mozilla.firefox
+    CFBundleShortVersionString: '126.0'
+    type: bundle
+items_to_copy:
+  - source_item: Firefox.app
+    destination_path: /Applications
+minimum_os_version: '10.15'
+postinstall_script: |
+  #!/bin/bash
+  /usr/bin/defaults write org.mozilla.firefox preset -bool true
+  exit 0
+supported_architectures:
+  - arm64
+  - x86_64
+unattended_install: true
+uninstall_method: remove_copied_items
+uninstallable: true
+_metadata:
+  created_by: autopkg
