@@ -60,12 +60,12 @@ private struct PackageEditor: View {
                 twoColumn {
                     catalogsSection
                 } right: {
-                    architecturesSection
+                    behaviorSection
                 }
                 descriptionSection
                 scriptsSection
                 twoColumn {
-                    behaviorSection
+                    architecturesSection
                 } right: {
                     fileSection
                 }
@@ -153,20 +153,20 @@ private struct PackageEditor: View {
     private var scriptsSection: some View {
         Card(title: "Scripts") {
             VStack(spacing: 12) {
+                ScriptEditor(label: "Install check", text: optional($draft.installcheckScript))
                 HStack(alignment: .top, spacing: 12) {
                     ScriptEditor(label: "Pre-install", text: optional($draft.preinstallScript))
                         .frame(maxWidth: .infinity)
                     ScriptEditor(label: "Post-install", text: optional($draft.postinstallScript))
                         .frame(maxWidth: .infinity)
                 }
+                ScriptEditor(label: "Uninstall check", text: optional($draft.uninstallcheckScript))
                 HStack(alignment: .top, spacing: 12) {
                     ScriptEditor(label: "Pre-uninstall", text: optional($draft.preuninstallScript))
                         .frame(maxWidth: .infinity)
                     ScriptEditor(label: "Post-uninstall", text: optional($draft.postuninstallScript))
                         .frame(maxWidth: .infinity)
                 }
-                ScriptEditor(label: "Install check", text: optional($draft.installcheckScript))
-                ScriptEditor(label: "Uninstall check", text: optional($draft.uninstallcheckScript))
                 ScriptEditor(label: "Uninstall script", text: optional($draft.uninstallScript))
             }
         }

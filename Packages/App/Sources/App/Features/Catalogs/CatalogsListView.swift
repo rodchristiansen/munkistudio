@@ -63,10 +63,12 @@ struct CatalogDetailView: View {
                     ForEach(groupedPackages(in: catalog), id: \.name) { group in
                         if group.records.count == 1, let only = group.records.first {
                             CatalogPackageRow(record: only)
+                                .onTapGesture(count: 2) { openInPackages(only) }
                         } else {
                             DisclosureGroup {
                                 ForEach(group.records, id: \.id) { record in
                                     CatalogPackageRow(record: record)
+                                        .onTapGesture(count: 2) { openInPackages(record) }
                                 }
                             } label: {
                                 HStack(spacing: 6) {
@@ -127,6 +129,18 @@ struct CatalogDetailView: View {
     }
 
     private struct VersionGroup { let name: String; let records: [PkginfoRecord] }
+
+    /// Switch the workspace to the Packages section and select the
+    /// double-clicked pkginfo. Wraps the store mutation so the view
+    /// stays declarative.
+    private func openInPackages(_ record: PkginfoRecord) {
+        store.selectedSection = .packages
+        store.selectedItemID = AnyHashable(record.id)
+        // Expand the category the package lives in so the user sees the
+        // selection rather than a collapsed folder.
+        let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "Uncategorized"
+        store.expandedCategories.insert(category)
+    }
 }
 
 struct CatalogPackageRow: View {

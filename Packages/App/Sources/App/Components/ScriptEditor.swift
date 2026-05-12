@@ -1,21 +1,27 @@
 import SwiftUI
 import AppKit
 
-/// Always-expanded inline script editor with a "full screen" affordance.
-/// Mirrors CimianAdmin's pattern: the inline view is compact but never
-/// hidden behind a disclosure, and a button opens a dedicated editor
-/// window with line numbers and basic lint feedback.
+/// Always-expanded script editor. Each section shows the inline editor
+/// with line numbers and a small "Expand" affordance opening a full-
+/// screen sheet with syntax highlighting and a lint panel.
 struct ScriptEditor: View {
     let label: String
     @Binding var text: String
 
     @State private var fullScreenPresented: Bool = false
 
+    private var language: ScriptLanguage { ScriptLanguage.detect(in: text) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(label).font(.headline)
                 if !text.isEmpty {
+                    Text(language.displayName)
+                        .font(.caption.monospaced())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(.regularMaterial, in: .capsule)
                     Text("\(lineCount) lines")
                         .font(.caption.monospaced())
                         .foregroundStyle(.tertiary)
@@ -24,11 +30,11 @@ struct ScriptEditor: View {
                 Button {
                     fullScreenPresented = true
                 } label: {
-                    Label("Expand", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .labelStyle(.iconOnly)
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
                 }
                 .buttonStyle(.borderless)
-                .help("Open in full-screen editor")
+                .help("Open full-screen editor")
+                .accessibilityLabel("Open full-screen editor for \(label)")
                 if !text.isEmpty {
                     Button(role: .destructive) {
                         text = ""
@@ -37,10 +43,11 @@ struct ScriptEditor: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Clear")
+                    .accessibilityLabel("Clear \(label) script")
                 }
             }
 
-            LineNumberedTextEditor(text: $text)
+            LineNumberedTextEditor(text: $text, language: language)
                 .frame(minHeight: 120, maxHeight: 220)
         }
         .sheet(isPresented: $fullScreenPresented) {
@@ -53,23 +60,45 @@ struct ScriptEditor: View {
     }
 }
 
-/// Plain text editor with a left gutter of line numbers. Pure SwiftUI;
-/// uses the height of each rendered line by mirroring the same font.
+/// Plain text editor with a left gutter of line numbers. The text is
+/// rendered live in the editable area; a separate overlay shows the
+/// syntax-highlighted version when `showsHighlighting` is true.
 struct LineNumberedTextEditor: View {
     @Binding var text: String
+    let language: ScriptLanguage
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             gutter
                 .frame(width: 36)
-                .background(.regularMaterial.opacity(0.6))
-            TextEditor(text: $text)
-                .font(.system(.callout, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
+                .background(Color.secondary.opacity(0.08))
+            ZStack(alignment: .topLeading) {
+                // Highlighted overlay (read-only)
+                ScrollView {
+                    Text(SyntaxHighlighter.attributed(text, language: language))
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.disabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                }
+                .allowsHitTesting(false)
+
+                // Editable layer; the text colour is mostly clear so the
+                // overlay above shows through, but we keep cursor &
+                // selection visible.
+                TextEditor(text: $text)
+                    .font(.system(.callout, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(text.isEmpty ? Color.secondary : Color.primary.opacity(0.0))
+                    // 0-opacity primary keeps the I-beam selection /
+                    // cursor accent visible while letting the highlighted
+                    // overlay above carry the visible glyphs.
+            }
         }
-        .background(.regularMaterial.opacity(0.4), in: .rect(cornerRadius: 6))
+        .background(Color.secondary.opacity(0.04), in: .rect(cornerRadius: 6))
     }
 
     private var gutter: some View {
@@ -94,30 +123,40 @@ struct LineNumberedTextEditor: View {
     }
 }
 
-/// Full-screen script editor sheet. Shows line numbers, basic lint
-/// feedback (empty body / missing shebang / etc.), and a save button
-/// that dismisses with the new text in place via the binding.
+/// Full-screen script editor sheet.
+///
+/// Shows the language badge in the title, the syntax-highlighted body,
+/// and a collapsible lint panel beneath it.
 struct ScriptEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
     @Binding var text: String
 
+    private var language: ScriptLanguage { ScriptLanguage.detect(in: text) }
+    private var warnings: [String] { ScriptLinter.warnings(text, language: language) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            HStack(spacing: 8) {
                 Text(title).font(.title2.bold())
+                Text(language.displayName)
+                    .font(.caption.monospaced())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(.regularMaterial, in: .capsule)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.escape)
                     .keyboardShortcut("w", modifiers: [.command])
             }
-            LineNumberedTextEditor(text: $text)
-                .frame(minWidth: 720, minHeight: 480)
-            if !lintWarnings.isEmpty {
+            LineNumberedTextEditor(text: $text, language: language)
+                .frame(minWidth: 760, minHeight: 480)
+            if !warnings.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(lintWarnings, id: \.self) { warning in
+                    Text("Linter").font(.headline)
+                    ForEach(warnings, id: \.self) { warning in
                         Label(warning, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
+                            .font(.callout)
                             .foregroundStyle(.orange)
                     }
                 }
@@ -125,28 +164,6 @@ struct ScriptEditorSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 760, minHeight: 560)
-    }
-
-    /// Light-weight checks that surface common script mistakes without
-    /// shelling out to shellcheck. Genuinely useful but never blocking.
-    private var lintWarnings: [String] {
-        guard !text.isEmpty else { return [] }
-        var warnings: [String] = []
-        let firstLine = text.split(separator: "\n", omittingEmptySubsequences: false).first ?? ""
-        if !firstLine.hasPrefix("#!") {
-            warnings.append("Missing shebang on first line (e.g. #!/bin/bash).")
-        }
-        if text.contains("\r") {
-            warnings.append("Contains CR characters (Windows line endings) — may break on macOS.")
-        }
-        if text.range(of: #"\bsudo\b"#, options: .regularExpression) != nil {
-            warnings.append("Calls `sudo`; Munki already runs scripts as root.")
-        }
-        if text.range(of: #"\$\{?\w+\}?"#, options: .regularExpression) != nil
-            && text.range(of: #"set -[eu]"#, options: .regularExpression) == nil {
-            warnings.append("Uses variables but doesn't `set -eu` — typos may pass silently.")
-        }
-        return warnings
+        .frame(minWidth: 820, minHeight: 600)
     }
 }

@@ -1,76 +1,133 @@
 import SwiftUI
 import Core
 
-/// Outline view of pkginfo records grouped by category. Folder rows show
-/// a chevron, a category icon, and a count; leaf rows show package name
-/// and version (no format badge — Rod's feedback was that per-row format
-/// labels are visual noise).
+/// Flat list of category folder + package leaf rows so `List(selection:)`
+/// actually tags every selectable row. Folder rows are Buttons that
+/// toggle expansion when *any* part is clicked, not just the chevron.
 struct PackageTreeList: View {
     @Environment(RepositoryStore.self) private var store
     let records: [PkginfoRecord]
 
     var body: some View {
         @Bindable var bindableStore = store
-        List(selection: $bindableStore.selectedItemID) {
-            ForEach(nodes, id: \.id) { node in
-                DisclosureGroup(isExpanded: expansionBinding(for: node)) {
-                    ForEach(node.records, id: \.id) { record in
-                        PackageRow(record: record).tag(AnyHashable(record.id))
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder")
-                            .foregroundStyle(.secondary)
-                        Text(node.category).bold()
-                        Text("\(node.records.count)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.tertiary)
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(.rect)
+        List(rows, selection: $bindableStore.selectedItemID) { row in
+            PackageRowView(row: row)
+                .tag(row.selectionTag)
+                .listRowSeparator(.hidden)
+                .accessibilityLabel(row.accessibilityLabel)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var rows: [PackageFlatRow] {
+        var result: [PackageFlatRow] = []
+        for node in nodes {
+            let isExpanded = store.expandedCategories.contains(node.category)
+            result.append(PackageFlatRow(
+                id: node.category + ".__folder__",
+                kind: .folder(category: node.category, count: node.records.count, expanded: isExpanded)
+            ))
+            if isExpanded {
+                for record in node.records {
+                    result.append(PackageFlatRow(
+                        id: record.fileURL.path,
+                        kind: .leaf(record)
+                    ))
                 }
             }
         }
+        return result
     }
 
     private var nodes: [CategoryNode] {
-        let grouped = Dictionary(grouping: records) { record in
+        Dictionary(grouping: records) { record in
             (record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty) ?? "Uncategorized"
         }
-        return grouped
-            .map { CategoryNode(category: $0.key, records: $0.value.sorted { $0.pkginfo.name < $1.pkginfo.name }) }
-            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
-    }
-
-    private func expansionBinding(for node: CategoryNode) -> Binding<Bool> {
-        Binding(
-            get: { store.expandedCategories.contains(node.category) },
-            set: { isExpanded in
-                if isExpanded {
-                    store.expandedCategories.insert(node.category)
-                } else {
-                    store.expandedCategories.remove(node.category)
-                }
-            }
-        )
+        .map { CategoryNode(category: $0.key, records: $0.value.sorted { $0.pkginfo.name < $1.pkginfo.name }) }
+        .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
     }
 }
 
-struct PackageRow: View {
-    let record: PkginfoRecord
+struct PackageFlatRow: Identifiable, Hashable {
+    let id: String
+    let kind: Kind
+
+    enum Kind: Hashable {
+        case folder(category: String, count: Int, expanded: Bool)
+        case leaf(PkginfoRecord)
+    }
+
+    var selectionTag: AnyHashable? {
+        switch kind {
+        case .leaf(let record): AnyHashable(record.id)
+        case .folder: nil
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch kind {
+        case .leaf(let record):
+            let version = record.pkginfo.version.map { " version \($0)" } ?? ""
+            return "Package \(record.pkginfo.name)\(version)"
+        case .folder(let category, let count, let expanded):
+            return "Category \(category), \(count) packages, \(expanded ? "expanded" : "collapsed")"
+        }
+    }
+}
+
+struct PackageRowView: View {
+    @Environment(RepositoryStore.self) private var store
+    let row: PackageFlatRow
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "shippingbox")
-                .foregroundStyle(.secondary)
-                .imageScale(.small)
-            Text(record.pkginfo.name)
-            if let version = record.pkginfo.version {
-                Text(version)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
+        switch row.kind {
+        case .folder(let category, let count, let expanded):
+            Button {
+                toggle(category)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .foregroundStyle(.secondary)
+                        .imageScale(.small)
+                        .frame(width: 14)
+                    Image(systemName: "folder")
+                        .foregroundStyle(.secondary)
+                    Text(category).bold()
+                    Text("\(count)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 3)
+                .contentShape(.rect)
             }
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
+        case .leaf(let record):
+            HStack(spacing: 6) {
+                // Reserve chevron column so leaves align with folder rows.
+                Color.clear.frame(width: 14, height: 1)
+                Image(systemName: "shippingbox")
+                    .foregroundStyle(.secondary)
+                    .imageScale(.small)
+                Text(record.pkginfo.name)
+                if let version = record.pkginfo.version {
+                    Text(version)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 3)
+        }
+    }
+
+    private func toggle(_ category: String) {
+        if store.expandedCategories.contains(category) {
+            store.expandedCategories.remove(category)
+        } else {
+            store.expandedCategories.insert(category)
         }
     }
 }

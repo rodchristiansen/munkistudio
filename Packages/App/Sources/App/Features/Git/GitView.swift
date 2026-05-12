@@ -32,8 +32,6 @@ struct GitView: View {
             header
             Divider()
             mainBody
-            Divider()
-            commitComposer
         }
         .task(id: store.gitInfo?.workTreeRoot) { await loadAll() }
         .sheet(isPresented: Bindable(state).helpVisible) { GitHelpSheet() }
@@ -136,8 +134,10 @@ struct GitView: View {
                     .background(.regularMaterial)
                 }
                 focusedPanelContents
+                Divider()
+                commitComposer
             }
-            .frame(minWidth: 280, idealWidth: 360)
+            .frame(minWidth: 320, idealWidth: 400)
 
             DiffPane(text: state.diffText)
                 .frame(minWidth: 280)

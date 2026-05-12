@@ -17,6 +17,17 @@ struct ContentView: View {
             }
         }
         .navigationTitle(store.repository?.displayName ?? "MunkiAdmin")
+        .task { await autoOpenIfAvailable() }
+    }
+
+    /// Re-open the last repo automatically. Fires at most once per
+    /// launch because `store.repository` is non-nil after the first
+    /// successful open.
+    private func autoOpenIfAvailable() async {
+        guard store.repository == nil,
+              let recent = store.recentRepositories.first,
+              FileManager.default.fileExists(atPath: recent.path) else { return }
+        await store.open(rootURL: recent)
     }
 }
 
