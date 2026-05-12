@@ -1,138 +1,536 @@
 import SwiftUI
+import AppKit
 import Core
 
-/// Git status pane (middle column). Lists changed files with stage
-/// toggles; selecting one drives the diff viewer in the detail column.
-/// Mirrors Cimian's GitPage layout in spirit.
+/// Lazygit-style Git pane.
+///
+/// Layout:
+/// ```
+/// ┌──────────────────────────────────────────────────────────────┐
+/// │ [branch chip]  [↺] [⬆] [⬇] [⤓]                          [?] │
+/// ├───────────────────────────┬──────────────────────────────────┤
+/// │ ▸ 1 Files                 │  Diff / details                  │
+/// │   2 Branches              │                                  │
+/// │   3 Commits               │                                  │
+/// │ ─────────────────────────  │                                  │
+/// │ (focused panel contents)  │                                  │
+/// ├───────────────────────────┴──────────────────────────────────┤
+/// │ Commit subject:                                              │
+/// │ [____________________________________________________]       │
+/// │ Body:                                                        │
+/// │ [____________________________________________________]       │
+/// │ ☑ Run hooks                       [Commit]  [Commit & Push]  │
+/// └──────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// Every panel responds to the same keymap; the active panel is highlighted
+/// with a tinted border. Pressing `1`/`2`/`3` jumps to a panel, `j`/`k`
+/// navigates rows, `space` toggles staging in Files, `c` focuses the
+/// commit composer, `?` reveals the help sheet.
 struct GitView: View {
     @Environment(RepositoryStore.self) private var store
-    @State private var statusEntries: [GitStatusEntry] = []
-    @State private var loading: Bool = false
-    @State private var loadError: String?
-    @State private var stagedPaths: Set<String> = []
+    @State private var state = GitPaneState()
+    @FocusState private var paneFocused: Bool
+    @FocusState private var commitSubjectFocused: Bool
 
     var body: some View {
-        @Bindable var bindableStore = store
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            mainBody
+            Divider()
+            commitComposer
+        }
+        .task(id: store.gitInfo?.workTreeRoot) { await loadAll() }
+        .sheet(isPresented: Bindable(state).helpVisible) {
+            GitHelpSheet()
+        }
+        .focusable()
+        .focused($paneFocused)
+        .focusEffectDisabled()
+        .onKeyPress { press in handleKey(press) }
+        .onAppear { paneFocused = true }
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack(spacing: 12) {
             if let info = store.gitInfo {
-                statusList(info: info)
+                RepositoryChip(info: info)
             } else {
-                ContentUnavailableView(
-                    "No git repository",
-                    systemImage: "arrow.triangle.branch",
-                    description: Text("This repo doesn't live inside a git working tree.")
-                )
+                Text("Not a git repository").foregroundStyle(.secondary)
             }
+            Spacer()
+            Button { Task { await refresh() } } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help("Refresh (r)")
+            Button { Task { await runPush() } } label: {
+                Image(systemName: "arrow.up.circle")
+            }
+            .help("Push (P)")
+            Button { Task { await runPull() } } label: {
+                Image(systemName: "arrow.down.circle")
+            }
+            .help("Pull (p)")
+            Button { Task { await runFetch() } } label: {
+                Image(systemName: "arrow.down.to.line.circle")
+            }
+            .help("Fetch (f)")
+            Button { state.helpVisible.toggle() } label: {
+                Image(systemName: "questionmark.circle")
+            }
+            .help("Show shortcuts (?)")
         }
-        .task(id: store.gitInfo?.workTreeRoot) { await refresh() }
-        .navigationTitle("Git")
-        .toolbar {
-            ToolbarItemGroup {
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: Body
+
+    private var mainBody: some View {
+        HSplitView {
+            VStack(spacing: 0) {
+                panelTabs
+                Divider()
+                if state.filterVisible {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Filter", text: Bindable(state).filter)
+                            .textFieldStyle(.plain)
+                        Button {
+                            state.filter = ""
+                            state.filterVisible = false
+                        } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.regularMaterial)
+                }
+                focusedPanelContents
+            }
+            .frame(minWidth: 280, idealWidth: 360)
+
+            DiffPane(text: state.diffText)
+                .frame(minWidth: 280)
+        }
+    }
+
+    private var panelTabs: some View {
+        HStack(spacing: 0) {
+            ForEach(GitPaneState.Panel.allCases, id: \.self) { panel in
                 Button {
-                    Task { await refresh() }
+                    state.focusedPanel = panel
+                    paneFocused = true
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-            }
-        }
-    }
-
-    private func statusList(info: GitRepositoryInfo) -> some View {
-        @Bindable var bindableStore = store
-        return List(selection: $bindableStore.selectedItemID) {
-            if loading { ProgressView() }
-            if let loadError {
-                Text(loadError).foregroundStyle(.red)
-            }
-            Section("Working tree") {
-                if statusEntries.isEmpty {
-                    Text("No changes").foregroundStyle(.secondary)
-                }
-                ForEach(statusEntries, id: \.relativePath) { entry in
-                    GitStatusRow(
-                        entry: entry,
-                        isStaged: stagedPaths.contains(entry.relativePath),
-                        toggle: { Task { await toggleStage(entry: entry, info: info) } }
+                    HStack(spacing: 4) {
+                        Text(numberLabel(for: panel))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                        Text(label(for: panel))
+                        Text("(\(count(for: panel)))")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        state.focusedPanel == panel ? Color.accentColor.opacity(0.15) : Color.clear,
+                        in: .rect(cornerRadius: 5)
                     )
-                    .tag(AnyHashable(entry.relativePath))
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
+    private func numberLabel(for panel: GitPaneState.Panel) -> String {
+        switch panel {
+        case .files: "1"
+        case .branches: "2"
+        case .commits: "3"
+        }
+    }
+
+    private func label(for panel: GitPaneState.Panel) -> String {
+        switch panel {
+        case .files: "Files"
+        case .branches: "Branches"
+        case .commits: "Commits"
+        }
+    }
+
+    private func count(for panel: GitPaneState.Panel) -> Int {
+        switch panel {
+        case .files: state.files.count
+        case .branches: state.branches.count
+        case .commits: state.commits.count
+        }
+    }
+
+    @ViewBuilder
+    private var focusedPanelContents: some View {
+        switch state.focusedPanel {
+        case .files: GitFilesPanel(state: state)
+        case .branches: GitBranchesPanel(state: state)
+        case .commits: GitCommitsPanel(state: state)
+        }
+    }
+
+    // MARK: Commit composer
+
+    private var commitComposer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Commit").font(.headline)
+                Spacer()
+                if let message = state.statusMessage {
+                    Label(message, systemImage: statusIcon(for: state.statusKind))
+                        .foregroundStyle(statusColor(for: state.statusKind))
+                        .font(.callout)
                 }
             }
-        }
-    }
-
-    @MainActor
-    private func refresh() async {
-        guard let info = store.gitInfo else {
-            statusEntries = []
-            return
-        }
-        loading = true
-        defer { loading = false }
-        do {
-            let entries = try await store.services.git.status(in: info)
-            statusEntries = entries
-            stagedPaths = Set(entries.filter(\.staged).map(\.relativePath))
-            loadError = nil
-        } catch {
-            loadError = error.localizedDescription
-        }
-    }
-
-    private func toggleStage(entry: GitStatusEntry, info: GitRepositoryInfo) async {
-        do {
-            if stagedPaths.contains(entry.relativePath) {
-                try await store.services.git.unstage(in: info, relativePaths: [entry.relativePath])
-            } else {
-                try await store.services.git.stage(in: info, relativePaths: [entry.relativePath])
+            TextField("Subject", text: Bindable(state).commitSubject)
+                .textFieldStyle(.roundedBorder)
+                .focused($commitSubjectFocused)
+            TextEditor(text: Bindable(state).commitBody)
+                .frame(minHeight: 60, maxHeight: 100)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(.regularMaterial, in: .rect(cornerRadius: 6))
+            HStack {
+                Toggle("Run hooks", isOn: Bindable(state).runHooks)
+                Spacer()
+                Button("Commit") { Task { await runCommit() } }
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .disabled(state.commitSubject.isEmpty)
+                Button("Commit & Push") { Task { await runCommitAndPush() } }
+                    .disabled(state.commitSubject.isEmpty)
             }
-            await refresh()
-        } catch {
-            loadError = error.localizedDescription
+            if !state.processOutput.isEmpty {
+                ScrollView {
+                    Text(state.processOutput)
+                        .font(.caption.monospaced())
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: 100)
+                .background(.regularMaterial, in: .rect(cornerRadius: 6))
+            }
+        }
+        .padding(12)
+    }
+
+    private func statusIcon(for kind: GitPaneState.StatusKind) -> String {
+        switch kind {
+        case .info: "info.circle"
+        case .success: "checkmark.circle.fill"
+        case .error: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func statusColor(for kind: GitPaneState.StatusKind) -> Color {
+        switch kind {
+        case .info: .secondary
+        case .success: .green
+        case .error: .red
         }
     }
 }
 
-struct GitStatusRow: View {
-    let entry: GitStatusEntry
-    let isStaged: Bool
-    let toggle: () -> Void
+// MARK: Key handling
+
+private extension GitView {
+    func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        // Don't swallow keys while typing in commit composer or filter field.
+        if commitSubjectFocused { return .ignored }
+        let characters = press.characters
+
+        switch characters {
+        case "1": state.focusedPanel = .files; return .handled
+        case "2": state.focusedPanel = .branches; return .handled
+        case "3": state.focusedPanel = .commits; return .handled
+        case "j": state.moveSelectionDown(); Task { await syncDiff() }; return .handled
+        case "k": state.moveSelectionUp(); Task { await syncDiff() }; return .handled
+        case " ":
+            if state.focusedPanel == .files { Task { await toggleStageSelected() } }
+            return .handled
+        case "a":
+            if state.focusedPanel == .files { Task { await toggleStageAll() } }
+            return .handled
+        case "c":
+            commitSubjectFocused = true
+            return .handled
+        case "C":
+            Task { await runCommitAndPush() }
+            return .handled
+        case "P":
+            Task { await runPush() }
+            return .handled
+        case "p":
+            Task { await runPull() }
+            return .handled
+        case "f":
+            Task { await runFetch() }
+            return .handled
+        case "r":
+            Task { await refresh() }
+            return .handled
+        case "o":
+            if state.focusedPanel == .files { openSelectedInEditor() }
+            return .handled
+        case "d":
+            if state.focusedPanel == .files { Task { await discardSelected() } }
+            return .handled
+        case "?":
+            state.helpVisible.toggle()
+            return .handled
+        case "/":
+            state.filterVisible = true
+            return .handled
+        default: break
+        }
+
+        switch press.key {
+        case .tab:
+            press.modifiers.contains(.shift) ? state.focusPreviousPanel() : state.focusNextPanel()
+            return .handled
+        case .upArrow:
+            state.moveSelectionUp(); Task { await syncDiff() }; return .handled
+        case .downArrow:
+            state.moveSelectionDown(); Task { await syncDiff() }; return .handled
+        case .return:
+            if state.focusedPanel == .files { Task { await syncDiff() } }
+            return .handled
+        case .escape:
+            if state.helpVisible { state.helpVisible = false; return .handled }
+            if state.filterVisible {
+                state.filter = ""
+                state.filterVisible = false
+                return .handled
+            }
+            return .ignored
+        default: return .ignored
+        }
+    }
+}
+
+// MARK: Async actions
+
+private extension GitView {
+    func loadAll() async {
+        await refresh()
+    }
+
+    func refresh() async {
+        guard let info = store.gitInfo else { state.info = nil; return }
+        state.info = info
+        do {
+            async let files = store.services.git.status(in: info)
+            async let branches = store.services.git.branches(in: info)
+            async let commits = store.services.git.log(in: info, max: 50)
+            state.files = try await files
+            state.branches = try await branches
+            state.commits = try await commits
+            if state.fileSelection == nil { state.fileSelection = state.files.first?.relativePath }
+            if state.branchSelection == nil { state.branchSelection = state.branches.first(where: \.isCurrent)?.name }
+            if state.commitSelection == nil { state.commitSelection = state.commits.first?.sha }
+            await syncDiff()
+            note("Refreshed", kind: .info)
+        } catch {
+            note("Refresh failed: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    func syncDiff() async {
+        guard let info = state.info else { state.diffText = ""; return }
+        switch state.focusedPanel {
+        case .files:
+            guard let path = state.fileSelection else { state.diffText = ""; return }
+            state.diffText = (try? await store.services.git.diff(in: info, relativePath: path)) ?? ""
+        case .branches:
+            state.diffText = "(branch view)"
+        case .commits:
+            state.diffText = "(commit view)"
+        }
+    }
+
+    func toggleStageSelected() async {
+        guard let info = state.info, let path = state.fileSelection else { return }
+        let entry = state.files.first { $0.relativePath == path }
+        let isStaged = entry?.staged ?? false
+        do {
+            if isStaged {
+                try await store.services.git.unstage(in: info, relativePaths: [path])
+            } else {
+                try await store.services.git.stage(in: info, relativePaths: [path])
+            }
+            await refresh()
+        } catch {
+            note("Stage failed: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    func toggleStageAll() async {
+        guard let info = state.info else { return }
+        let stagedPaths = Set(state.files.filter(\.staged).map(\.relativePath))
+        let allPaths = state.files.map(\.relativePath)
+        let allStaged = !allPaths.isEmpty && allPaths.allSatisfy { stagedPaths.contains($0) }
+        do {
+            if allStaged {
+                try await store.services.git.unstage(in: info, relativePaths: allPaths)
+            } else {
+                try await store.services.git.stage(in: info, relativePaths: allPaths)
+            }
+            await refresh()
+        } catch {
+            note("Stage-all failed: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    func runCommit() async {
+        guard let info = state.info else { return }
+        state.processOutput = ""
+        do {
+            for try await event in store.services.git.commit(
+                in: info,
+                subject: state.commitSubject,
+                body: state.commitBody.isEmpty ? nil : state.commitBody,
+                runHooks: state.runHooks
+            ) {
+                switch event {
+                case .line(let line): state.processOutput += line + "\n"
+                case .finished(let outcome):
+                    if outcome.exitCode == 0 {
+                        state.commitSubject = ""
+                        state.commitBody = ""
+                        note("Committed \(outcome.commitSHA?.prefix(8) ?? "")", kind: .success)
+                        await refresh()
+                    } else {
+                        note("Commit failed: exit \(outcome.exitCode)", kind: .error)
+                    }
+                }
+            }
+        } catch {
+            note("Commit error: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    func runCommitAndPush() async {
+        await runCommit()
+        await runPush()
+    }
+
+    func runPush() async {
+        guard let info = state.info else { return }
+        state.processOutput = ""
+        do {
+            for try await event in store.services.git.push(in: info) {
+                switch event {
+                case .line(let line): state.processOutput += line + "\n"
+                case .finished(let outcome):
+                    if outcome.exitCode == 0 {
+                        note("Pushed", kind: .success)
+                        await refresh()
+                    } else {
+                        note("Push failed: exit \(outcome.exitCode)", kind: .error)
+                    }
+                }
+            }
+        } catch {
+            note("Push error: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    func runPull() async {
+        await runShell(["pull"], successMessage: "Pulled")
+    }
+
+    func runFetch() async {
+        await runShell(["fetch"], successMessage: "Fetched")
+    }
+
+    func runShell(_ args: [String], successMessage: String) async {
+        guard let info = state.info else { return }
+        state.processOutput = ""
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        process.currentDirectoryURL = info.workTreeRoot
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+            state.processOutput += String(decoding: data, as: UTF8.self)
+            if process.terminationStatus == 0 {
+                note(successMessage, kind: .success)
+                await refresh()
+            } else {
+                note("\(args.first ?? "git") failed: exit \(process.terminationStatus)", kind: .error)
+            }
+        } catch {
+            note("Process error: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    func openSelectedInEditor() {
+        guard let info = state.info, let path = state.fileSelection else { return }
+        let url = info.workTreeRoot.appending(path: path)
+        NSWorkspace.shared.open(url)
+    }
+
+    func discardSelected() async {
+        guard state.info != nil, let path = state.fileSelection else { return }
+        let alert = NSAlert()
+        alert.messageText = "Discard changes to \(path)?"
+        alert.informativeText = "This is irreversible."
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        await runShell(["checkout", "--", path], successMessage: "Discarded \(path)")
+    }
+
+    func note(_ message: String, kind: GitPaneState.StatusKind) {
+        state.statusMessage = message
+        state.statusKind = kind
+    }
+}
+
+// MARK: Diff pane
+
+struct DiffPane: View {
+    let text: String
 
     var body: some View {
-        HStack {
-            Button(action: toggle) {
-                Image(systemName: isStaged ? "checkmark.square.fill" : "square")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
+                    let s = String(line)
+                    Text(s)
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(color(for: s))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                }
             }
-            .buttonStyle(.plain)
-            Text(letter(for: entry.kind))
-                .font(.caption.monospaced())
-                .frame(width: 18, alignment: .center)
-                .foregroundStyle(color(for: entry.kind))
-            Text(entry.relativePath)
+            .padding(.vertical, 6)
         }
     }
 
-    private func letter(for kind: GitStatusEntry.Kind) -> String {
-        switch kind {
-        case .modified: "M"
-        case .added: "A"
-        case .deleted: "D"
-        case .renamed: "R"
-        case .copied: "C"
-        case .untracked: "?"
-        case .ignored: "!"
-        case .conflicted: "U"
-        }
-    }
-
-    private func color(for kind: GitStatusEntry.Kind) -> Color {
-        switch kind {
-        case .modified: .yellow
-        case .added, .untracked: .green
-        case .deleted: .red
-        case .renamed, .copied: .blue
-        case .conflicted: .orange
-        case .ignored: .secondary
-        }
+    private func color(for line: String) -> Color {
+        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green }
+        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red }
+        if line.hasPrefix("@@") { return .blue }
+        return .primary
     }
 }

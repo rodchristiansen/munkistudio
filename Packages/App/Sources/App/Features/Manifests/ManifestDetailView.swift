@@ -56,27 +56,13 @@ private struct ManifestEditor: View {
                 ChipField(values: bindArray(\.includedManifests), placeholder: "Add manifest name")
             }
 
-            Section("Managed installs") {
-                ChipField(values: bindArray(\.managedInstalls), placeholder: "Add package")
-            }
+            ManifestItemListEditor(title: "Managed installs", kind: .managedInstalls, manifest: $draft)
+            ManifestItemListEditor(title: "Managed updates", kind: .managedUpdates, manifest: $draft)
+            ManifestItemListEditor(title: "Managed uninstalls", kind: .managedUninstalls, manifest: $draft)
+            ManifestItemListEditor(title: "Optional installs", kind: .optionalInstalls, manifest: $draft)
+            ManifestItemListEditor(title: "Featured items", kind: .featuredItems, manifest: $draft)
 
-            Section("Managed updates") {
-                ChipField(values: bindArray(\.managedUpdates), placeholder: "Add package")
-            }
-
-            Section("Managed uninstalls") {
-                ChipField(values: bindArray(\.managedUninstalls), placeholder: "Add package")
-            }
-
-            Section("Optional installs") {
-                ChipField(values: bindArray(\.optionalInstalls), placeholder: "Add package")
-            }
-
-            Section("Featured items") {
-                ChipField(values: bindArray(\.featuredItems), placeholder: "Add package")
-            }
-
-            Section("Conditional items") {
+            Section("Conditions") {
                 ConditionalItemsEditor(items: Binding(
                     get: { draft.conditionalItems ?? [] },
                     set: { draft.conditionalItems = $0.isEmpty ? nil : $0 }

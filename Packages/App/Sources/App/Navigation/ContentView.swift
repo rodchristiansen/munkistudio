@@ -20,22 +20,33 @@ struct ContentView: View {
     }
 }
 
-/// Full three-column workspace. Sidebar destinations swap out the middle
-/// (content list) and right (detail) columns.
+/// Full workspace. The Git section is a single full-width view; the
+/// other sections use the standard sidebar / list / detail split.
 struct RepositoryWorkspace: View {
     @Environment(RepositoryStore.self) private var store
     @State private var makecatalogsPresented: Bool = false
 
     var body: some View {
         @Bindable var bindableStore = store
-        NavigationSplitView {
-            SidebarView(selection: $bindableStore.selectedSection)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
-        } content: {
-            ContentColumn(section: store.selectedSection)
-                .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 600)
-        } detail: {
-            DetailColumn(section: store.selectedSection)
+        Group {
+            if store.selectedSection == .git {
+                NavigationSplitView {
+                    SidebarView(selection: $bindableStore.selectedSection)
+                        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+                } detail: {
+                    GitView()
+                }
+            } else {
+                NavigationSplitView {
+                    SidebarView(selection: $bindableStore.selectedSection)
+                        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+                } content: {
+                    ContentColumn(section: store.selectedSection)
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 600)
+                } detail: {
+                    DetailColumn(section: store.selectedSection)
+                }
+            }
         }
         .toolbar {
             ToolbarItemGroup(placement: .principal) {

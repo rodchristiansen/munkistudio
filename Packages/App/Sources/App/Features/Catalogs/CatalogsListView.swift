@@ -46,17 +46,45 @@ struct CatalogsListView: View {
 
 struct CatalogDetailView: View {
     @Environment(RepositoryStore.self) private var store
+    @State private var packageQuery: String = ""
+    @FocusState private var queryFocused: Bool
 
     var body: some View {
         if let catalog = selected {
-            List {
-                Section("Packages in \(catalog.name)") {
-                    ForEach(catalog.pkginfoNames, id: \.self) { name in
-                        Text(name)
+            VStack(spacing: 0) {
+                FilterField(
+                    text: $packageQuery,
+                    prompt: "Filter packages in \(catalog.name)",
+                    focused: $queryFocused
+                )
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                List {
+                    ForEach(groupedPackages(in: catalog), id: \.name) { group in
+                        if group.records.count == 1, let only = group.records.first {
+                            CatalogPackageRow(record: only)
+                        } else {
+                            DisclosureGroup {
+                                ForEach(group.records, id: \.id) { record in
+                                    CatalogPackageRow(record: record)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "shippingbox")
+                                        .foregroundStyle(.secondary)
+                                        .imageScale(.small)
+                                    Text(group.name).bold()
+                                    Spacer()
+                                    Text("\(group.records.count) versions")
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
                     }
                 }
             }
-            .navigationTitle(catalog.name)
+            .navigationTitle("\(catalog.name) (\(catalog.pkginfoNames.count))")
         } else {
             ContentUnavailableView(
                 "No catalog selected",
@@ -70,5 +98,51 @@ struct CatalogDetailView: View {
         guard let id = store.selectedItemID,
               let name = id.base as? String else { return nil }
         return store.snapshot.catalogs.first { $0.name == name }
+    }
+
+    /// Group all pkginfo records that belong to this catalog by their
+    /// `name`. Same-named packages with multiple versions collapse into
+    /// one row with a disclosure for the versions.
+    private func groupedPackages(in catalog: Catalog) -> [VersionGroup] {
+        let nameSet = Set(catalog.pkginfoNames)
+        var records = store.snapshot.pkginfos.filter { record in
+            nameSet.contains(record.pkginfo.name)
+        }
+        if !packageQuery.isEmpty {
+            let query = packageQuery.lowercased()
+            records = records.filter { record in
+                record.pkginfo.name.lowercased().contains(query)
+                    || (record.pkginfo.version?.lowercased().contains(query) ?? false)
+            }
+        }
+        return Dictionary(grouping: records, by: { $0.pkginfo.name })
+            .map { (name, recs) in
+                VersionGroup(
+                    name: name,
+                    records: recs.sorted { ($0.pkginfo.version ?? "") > ($1.pkginfo.version ?? "") }
+                )
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private struct VersionGroup { let name: String; let records: [PkginfoRecord] }
+}
+
+struct CatalogPackageRow: View {
+    let record: PkginfoRecord
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Image(systemName: "doc.text")
+                .foregroundStyle(.tertiary)
+                .imageScale(.small)
+            Text(record.pkginfo.name)
+            Spacer()
+            if let version = record.pkginfo.version {
+                Text(version)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

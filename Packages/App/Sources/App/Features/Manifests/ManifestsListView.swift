@@ -25,22 +25,7 @@ struct ManifestsListView: View {
                     }
                 }
             } else {
-                List(selection: $bindableStore.selectedItemID) {
-                    ForEach(filtered, id: \.id) { record in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(record.manifest.manifestName)
-                            HStack(spacing: 8) {
-                                if let cats = record.manifest.catalogs, !cats.isEmpty {
-                                    Text(cats.joined(separator: ", ")).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                FormatBadge(format: record.format)
-                            }
-                            .font(.caption)
-                        }
-                        .tag(AnyHashable(record.id))
-                    }
-                }
+                ManifestTreeList(records: filtered)
             }
         }
         .navigationTitle("Manifests (\(store.snapshot.manifests.count))")

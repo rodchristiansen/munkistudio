@@ -40,6 +40,14 @@ final class RepositoryStore {
     /// Free-text query backing the global search pane.
     var searchQuery: String = ""
 
+    /// Category names currently expanded in the Packages outline. Persisted
+    /// only for the duration of a session — we don't want to surprise the
+    /// user with stale expanded state on next launch.
+    var expandedCategories: Set<String> = []
+
+    /// Manifest tree paths currently expanded in the Manifests outline.
+    var expandedManifestPaths: Set<String> = []
+
     /// Most recently opened repositories, newest first.
     private(set) var recentRepositories: [URL]
 

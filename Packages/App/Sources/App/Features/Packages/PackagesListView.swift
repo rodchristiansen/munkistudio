@@ -19,25 +19,7 @@ struct PackagesListView: View {
             if store.snapshot.pkginfos.isEmpty {
                 EmptyPackagesView()
             } else {
-                List(selection: $bindableStore.selectedItemID) {
-                    ForEach(filtered, id: \.id) { record in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(record.pkginfo.name).font(.body)
-                            HStack(spacing: 8) {
-                                if let version = record.pkginfo.version {
-                                    Text(version).foregroundStyle(.secondary)
-                                }
-                                if let category = record.pkginfo.category {
-                                    Text(category).foregroundStyle(.tertiary)
-                                }
-                                Spacer()
-                                FormatBadge(format: record.format)
-                            }
-                            .font(.caption)
-                        }
-                        .tag(AnyHashable(record.id))
-                    }
-                }
+                PackageTreeList(records: filtered)
             }
         }
         .navigationTitle("Packages (\(store.snapshot.pkginfos.count))")
@@ -134,17 +116,3 @@ struct FilterField: View {
     }
 }
 
-struct FormatBadge: View {
-    let format: RepoFormat
-
-    var body: some View {
-        Text(format.preferredExtension.uppercased())
-            .font(.caption2.monospaced())
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(
-                .secondary.opacity(0.15),
-                in: .capsule
-            )
-    }
-}
