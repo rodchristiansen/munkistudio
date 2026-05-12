@@ -9,7 +9,12 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "PredicateBridge",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "Core",
+            dependencies: ["PredicateBridge"],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .enableUpcomingFeature("ExistentialAny"),
