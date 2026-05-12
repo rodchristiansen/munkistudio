@@ -13,11 +13,23 @@ struct ManifestTreeList: View {
 
     var body: some View {
         @Bindable var bindableStore = store
-        List(rows, selection: $bindableStore.selectedItemID) { row in
-            ManifestRow(row: row)
-                .tag(row.selectionTag)
-                .listRowSeparator(.hidden)
-                .accessibilityLabel(row.accessibilityLabel)
+        // Use the `List(selection:) { ForEach }` form so `.tag()` is
+        // honoured. The `List(data, selection:)` overload ignores tags
+        // and selects by `Identifiable.id`, which broke leaf selection
+        // because our FlatRow ids are strings, not URLs.
+        List(selection: $bindableStore.selectedItemID) {
+            ForEach(rows) { row in
+                if let tag = row.selectionTag {
+                    ManifestRow(row: row)
+                        .tag(tag)
+                        .listRowSeparator(.hidden)
+                        .accessibilityLabel(row.accessibilityLabel)
+                } else {
+                    ManifestRow(row: row)
+                        .listRowSeparator(.hidden)
+                        .accessibilityLabel(row.accessibilityLabel)
+                }
+            }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)

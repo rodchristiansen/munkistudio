@@ -10,11 +10,22 @@ struct PackageTreeList: View {
 
     var body: some View {
         @Bindable var bindableStore = store
-        List(rows, selection: $bindableStore.selectedItemID) { row in
-            PackageRowView(row: row)
-                .tag(row.selectionTag)
-                .listRowSeparator(.hidden)
-                .accessibilityLabel(row.accessibilityLabel)
+        // `List(selection:) { ForEach }` form: `.tag()` only works inside
+        // a ForEach. The shorthand `List(data, selection:)` uses item ids,
+        // which makes leaves untaggable for our URL-based selection.
+        List(selection: $bindableStore.selectedItemID) {
+            ForEach(rows) { row in
+                if let tag = row.selectionTag {
+                    PackageRowView(row: row)
+                        .tag(tag)
+                        .listRowSeparator(.hidden)
+                        .accessibilityLabel(row.accessibilityLabel)
+                } else {
+                    PackageRowView(row: row)
+                        .listRowSeparator(.hidden)
+                        .accessibilityLabel(row.accessibilityLabel)
+                }
+            }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)

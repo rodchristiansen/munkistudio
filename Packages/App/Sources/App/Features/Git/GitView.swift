@@ -113,34 +113,39 @@ struct GitView: View {
     // MARK: Body
 
     private var mainBody: some View {
-        HSplitView {
-            VStack(spacing: 0) {
-                panelTabs
-                Divider()
-                if state.filterVisible {
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Filter", text: Bindable(state).filter)
-                            .textFieldStyle(.plain)
-                        Button {
-                            state.filter = ""
-                            state.filterVisible = false
-                        } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
+        // Aim for a 1:2 split — Files/History gets a third, diff gets
+        // two-thirds. HSplitView still lets the user drag from there.
+        GeometryReader { geometry in
+            let leftWidth = max(280, geometry.size.width / 3)
+            HSplitView {
+                VStack(spacing: 0) {
+                    panelTabs
+                    Divider()
+                    if state.filterVisible {
+                        HStack {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField("Filter", text: Bindable(state).filter)
+                                .textFieldStyle(.plain)
+                            Button {
+                                state.filter = ""
+                                state.filterVisible = false
+                            } label: { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.regularMaterial)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.regularMaterial)
+                    focusedPanelContents
+                    Divider()
+                    commitComposer
                 }
-                focusedPanelContents
-                Divider()
-                commitComposer
-            }
-            .frame(minWidth: 320, idealWidth: 400)
+                .frame(minWidth: 280, idealWidth: leftWidth, maxWidth: 600)
 
-            DiffPane(text: state.diffText)
-                .frame(minWidth: 280)
+                DiffPane(text: state.diffText)
+                    .frame(minWidth: 320)
+            }
         }
     }
 
