@@ -2,31 +2,25 @@ import SwiftUI
 import AppKit
 import Core
 
-/// Lazygit-style Git pane.
+/// Lazygit-style Git pane (revised).
 ///
 /// Layout:
 /// ```
 /// ┌──────────────────────────────────────────────────────────────┐
-/// │ [branch chip]  [↺] [⬆] [⬇] [⤓]                          [?] │
+/// │ Branch: [main ▾]                  [↺] [⬆] [⬇] [⤓]      [?] │
 /// ├───────────────────────────┬──────────────────────────────────┤
 /// │ ▸ 1 Files                 │  Diff / details                  │
-/// │   2 Branches              │                                  │
-/// │   3 Commits               │                                  │
-/// │ ─────────────────────────  │                                  │
-/// │ (focused panel contents)  │                                  │
+/// │   2 History               │                                  │
 /// ├───────────────────────────┴──────────────────────────────────┤
 /// │ Commit subject:                                              │
-/// │ [____________________________________________________]       │
-/// │ Body:                                                        │
 /// │ [____________________________________________________]       │
 /// │ ☑ Run hooks                       [Commit]  [Commit & Push]  │
 /// └──────────────────────────────────────────────────────────────┘
 /// ```
 ///
-/// Every panel responds to the same keymap; the active panel is highlighted
-/// with a tinted border. Pressing `1`/`2`/`3` jumps to a panel, `j`/`k`
-/// navigates rows, `space` toggles staging in Files, `c` focuses the
-/// commit composer, `?` reveals the help sheet.
+/// Branches moved to a dropdown picker so the panel strip stays tight
+/// (Files + History only). The in-pane branch chip is gone — the toolbar
+/// already shows branch + ahead/behind.
 struct GitView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var state = GitPaneState()
@@ -42,9 +36,7 @@ struct GitView: View {
             commitComposer
         }
         .task(id: store.gitInfo?.workTreeRoot) { await loadAll() }
-        .sheet(isPresented: Bindable(state).helpVisible) {
-            GitHelpSheet()
-        }
+        .sheet(isPresented: Bindable(state).helpVisible) { GitHelpSheet() }
         .focusable()
         .focused($paneFocused)
         .focusEffectDisabled()
@@ -56,8 +48,8 @@ struct GitView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            if let info = store.gitInfo {
-                RepositoryChip(info: info)
+            if store.gitInfo != nil {
+                branchPicker
             } else {
                 Text("Not a git repository").foregroundStyle(.secondary)
             }
@@ -85,6 +77,39 @@ struct GitView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private var branchPicker: some View {
+        HStack(spacing: 6) {
+            Text("Branch:").foregroundStyle(.secondary)
+            Menu {
+                ForEach(state.branches, id: \.name) { branch in
+                    Button {
+                        Task { await switchBranch(branch.name) }
+                    } label: {
+                        HStack {
+                            Image(systemName: branch.isCurrent ? "checkmark" : "")
+                            Text(branch.name)
+                            if let upstream = branch.upstreamName {
+                                Spacer()
+                                Text(upstream).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(state.info?.currentBranch ?? "(none)")
+                        .font(.callout.monospaced())
+                    Image(systemName: "chevron.down")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .frame(minWidth: 140, alignment: .leading)
+            .fixedSize()
+        }
     }
 
     // MARK: Body
@@ -125,13 +150,15 @@ struct GitView: View {
                 Button {
                     state.focusedPanel = panel
                     paneFocused = true
+                    Task { await syncDiff() }
                 } label: {
                     HStack(spacing: 4) {
                         Text(numberLabel(for: panel))
                             .font(.caption.monospaced())
                             .foregroundStyle(.tertiary)
                         Text(label(for: panel))
-                        Text("(\(count(for: panel)))")
+                            .font(.callout)
+                        Text("\(count(for: panel))")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }
@@ -153,24 +180,21 @@ struct GitView: View {
     private func numberLabel(for panel: GitPaneState.Panel) -> String {
         switch panel {
         case .files: "1"
-        case .branches: "2"
-        case .commits: "3"
+        case .history: "2"
         }
     }
 
     private func label(for panel: GitPaneState.Panel) -> String {
         switch panel {
         case .files: "Files"
-        case .branches: "Branches"
-        case .commits: "Commits"
+        case .history: "History"
         }
     }
 
     private func count(for panel: GitPaneState.Panel) -> Int {
         switch panel {
         case .files: state.files.count
-        case .branches: state.branches.count
-        case .commits: state.commits.count
+        case .history: state.commits.count
         }
     }
 
@@ -178,8 +202,7 @@ struct GitView: View {
     private var focusedPanelContents: some View {
         switch state.focusedPanel {
         case .files: GitFilesPanel(state: state)
-        case .branches: GitBranchesPanel(state: state)
-        case .commits: GitCommitsPanel(state: state)
+        case .history: GitCommitsPanel(state: state)
         }
     }
 
@@ -200,7 +223,7 @@ struct GitView: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($commitSubjectFocused)
             TextEditor(text: Bindable(state).commitBody)
-                .frame(minHeight: 60, maxHeight: 100)
+                .frame(minHeight: 50, maxHeight: 80)
                 .scrollContentBackground(.hidden)
                 .padding(6)
                 .background(.regularMaterial, in: .rect(cornerRadius: 6))
@@ -248,14 +271,12 @@ struct GitView: View {
 
 private extension GitView {
     func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        // Don't swallow keys while typing in commit composer or filter field.
         if commitSubjectFocused { return .ignored }
         let characters = press.characters
 
         switch characters {
-        case "1": state.focusedPanel = .files; return .handled
-        case "2": state.focusedPanel = .branches; return .handled
-        case "3": state.focusedPanel = .commits; return .handled
+        case "1": state.focusedPanel = .files; Task { await syncDiff() }; return .handled
+        case "2": state.focusedPanel = .history; Task { await syncDiff() }; return .handled
         case "j": state.moveSelectionDown(); Task { await syncDiff() }; return .handled
         case "k": state.moveSelectionUp(); Task { await syncDiff() }; return .handled
         case " ":
@@ -300,6 +321,7 @@ private extension GitView {
         switch press.key {
         case .tab:
             press.modifiers.contains(.shift) ? state.focusPreviousPanel() : state.focusNextPanel()
+            Task { await syncDiff() }
             return .handled
         case .upArrow:
             state.moveSelectionUp(); Task { await syncDiff() }; return .handled
@@ -339,7 +361,6 @@ private extension GitView {
             state.branches = try await branches
             state.commits = try await commits
             if state.fileSelection == nil { state.fileSelection = state.files.first?.relativePath }
-            if state.branchSelection == nil { state.branchSelection = state.branches.first(where: \.isCurrent)?.name }
             if state.commitSelection == nil { state.commitSelection = state.commits.first?.sha }
             await syncDiff()
             note("Refreshed", kind: .info)
@@ -354,10 +375,28 @@ private extension GitView {
         case .files:
             guard let path = state.fileSelection else { state.diffText = ""; return }
             state.diffText = (try? await store.services.git.diff(in: info, relativePath: path)) ?? ""
-        case .branches:
-            state.diffText = "(branch view)"
-        case .commits:
-            state.diffText = "(commit view)"
+        case .history:
+            guard let sha = state.commitSelection else { state.diffText = ""; return }
+            state.diffText = await commitDiff(sha: sha)
+        }
+    }
+
+    func commitDiff(sha: String) async -> String {
+        guard let info = state.info else { return "" }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["show", "--stat", "--patch", sha]
+        process.currentDirectoryURL = info.workTreeRoot
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+            return String(decoding: data, as: UTF8.self)
+        } catch {
+            return ""
         }
     }
 
@@ -427,33 +466,11 @@ private extension GitView {
         await runPush()
     }
 
-    func runPush() async {
-        guard let info = state.info else { return }
-        state.processOutput = ""
-        do {
-            for try await event in store.services.git.push(in: info) {
-                switch event {
-                case .line(let line): state.processOutput += line + "\n"
-                case .finished(let outcome):
-                    if outcome.exitCode == 0 {
-                        note("Pushed", kind: .success)
-                        await refresh()
-                    } else {
-                        note("Push failed: exit \(outcome.exitCode)", kind: .error)
-                    }
-                }
-            }
-        } catch {
-            note("Push error: \(error.localizedDescription)", kind: .error)
-        }
-    }
-
-    func runPull() async {
-        await runShell(["pull"], successMessage: "Pulled")
-    }
-
-    func runFetch() async {
-        await runShell(["fetch"], successMessage: "Fetched")
+    func runPush() async { await runShell(["push"], successMessage: "Pushed") }
+    func runPull() async { await runShell(["pull"], successMessage: "Pulled") }
+    func runFetch() async { await runShell(["fetch"], successMessage: "Fetched") }
+    func switchBranch(_ name: String) async {
+        await runShell(["switch", name], successMessage: "Switched to \(name)")
     }
 
     func runShell(_ args: [String], successMessage: String) async {
@@ -521,6 +538,7 @@ struct DiffPane: View {
                         .foregroundStyle(color(for: s))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 8)
+                        .textSelection(.enabled)
                 }
             }
             .padding(.vertical, 6)

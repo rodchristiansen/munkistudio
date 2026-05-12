@@ -10,7 +10,7 @@ import Core
 @MainActor
 final class GitPaneState {
     enum Panel: Hashable, CaseIterable {
-        case files, branches, commits
+        case files, history
     }
 
     var info: GitRepositoryInfo?
@@ -67,9 +67,7 @@ final class GitPaneState {
         switch focusedPanel {
         case .files:
             fileSelection = nextID(in: filteredFiles.map(\.relativePath), after: fileSelection)
-        case .branches:
-            branchSelection = nextID(in: filteredBranches.map(\.name), after: branchSelection)
-        case .commits:
+        case .history:
             commitSelection = nextID(in: filteredCommits.map(\.sha), after: commitSelection)
         }
     }
@@ -78,9 +76,7 @@ final class GitPaneState {
         switch focusedPanel {
         case .files:
             fileSelection = previousID(in: filteredFiles.map(\.relativePath), before: fileSelection)
-        case .branches:
-            branchSelection = previousID(in: filteredBranches.map(\.name), before: branchSelection)
-        case .commits:
+        case .history:
             commitSelection = previousID(in: filteredCommits.map(\.sha), before: commitSelection)
         }
     }

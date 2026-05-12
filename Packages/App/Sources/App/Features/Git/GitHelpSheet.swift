@@ -15,13 +15,11 @@ struct GitHelpSheet: View {
 
             HStack(alignment: .top, spacing: 32) {
                 column("Navigation", entries: [
-                    ("1 / 2 / 3", "Files / Branches / Commits panel"),
+                    ("1 / 2", "Files / History panel"),
                     ("Tab", "Next panel"),
                     ("Shift+Tab", "Previous panel"),
                     ("j / ↓", "Move selection down"),
                     ("k / ↑", "Move selection up"),
-                    ("g g", "Top"),
-                    ("G", "Bottom"),
                     ("/", "Filter visible items"),
                     ("Esc", "Clear filter / close help"),
                 ])

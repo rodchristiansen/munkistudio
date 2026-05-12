@@ -22,12 +22,12 @@ struct CatalogsListView: View {
             } else {
                 List(selection: $bindableStore.selectedItemID) {
                     ForEach(filtered, id: \.id) { catalog in
-                        HStack {
+                        HStack(spacing: 6) {
                             Text(catalog.name)
-                            Spacer()
                             Text("\(catalog.pkginfoNames.count)")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.tertiary)
                                 .font(.caption.monospaced())
+                            Spacer(minLength: 0)
                         }
                         .tag(AnyHashable(catalog.name))
                     }
@@ -69,16 +69,17 @@ struct CatalogDetailView: View {
                                     CatalogPackageRow(record: record)
                                 }
                             } label: {
-                                HStack {
+                                HStack(spacing: 6) {
                                     Image(systemName: "shippingbox")
                                         .foregroundStyle(.secondary)
                                         .imageScale(.small)
                                     Text(group.name).bold()
-                                    Spacer()
                                     Text("\(group.records.count) versions")
                                         .font(.caption.monospaced())
                                         .foregroundStyle(.tertiary)
+                                    Spacer(minLength: 0)
                                 }
+                                .contentShape(.rect)
                             }
                         }
                     }
@@ -132,17 +133,17 @@ struct CatalogPackageRow: View {
     let record: PkginfoRecord
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: "doc.text")
                 .foregroundStyle(.tertiary)
                 .imageScale(.small)
             Text(record.pkginfo.name)
-            Spacer()
             if let version = record.pkginfo.version {
                 Text(version)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
             }
+            Spacer(minLength: 0)
         }
     }
 }

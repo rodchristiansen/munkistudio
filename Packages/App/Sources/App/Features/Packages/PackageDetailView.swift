@@ -1,12 +1,17 @@
 import SwiftUI
 import Core
 
-/// Detail editor for the selected pkginfo. Built as one scrolling `Form`
-/// with collapsible sections so the user sees structure but doesn't have
-/// to click between tabs.
+/// Two-column pkginfo editor.
 ///
-/// Editing mutates a `@State` copy of the record; the Save button writes
-/// it back to disk through the package service and patches the snapshot.
+/// Layout (top → bottom):
+/// 1. Identity ║ Installer
+/// 2. Catalogs ║ Architectures
+/// 3. Description (full width)
+/// 4. Scripts (full width, side-by-side pre/post pairs)
+/// 5. Behavior ║ File
+///
+/// Sections always show their content — no disclosure groups. Scripts
+/// take over the full width because they're the part users edit most.
 struct PackageDetailView: View {
     @Environment(RepositoryStore.self) private var store
 
@@ -45,86 +50,32 @@ private struct PackageEditor: View {
     }
 
     var body: some View {
-        Form {
-            Section("Identity") {
-                TextField("Name", text: $draft.name)
-                TextField("Display name", text: optional($draft.displayName))
-                TextField("Version", text: optional($draft.version))
-                TextField("Developer", text: optional($draft.developer))
-                TextField("Category", text: optional($draft.category))
-            }
-
-            Section("Description") {
-                TextEditor(text: optional($draft.description))
-                    .frame(minHeight: 80)
-            }
-
-            Section("Installer") {
-                TextField("Installer item location", text: optional($draft.installerItemLocation))
-                TextField("Installer item hash", text: optional($draft.installerItemHash))
-                if let size = draft.installerItemSize {
-                    LabeledContent("Installer item size", value: ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                twoColumn {
+                    identitySection
+                } right: {
+                    installerSection
                 }
-                Picker("Installer type", selection: typePicker) {
-                    ForEach(InstallerType.knownCases, id: \.rawValue) { type in
-                        Text(type.rawValue).tag(InstallerType?(type))
-                    }
-                    if case .unknown(let value) = draft.installerType ?? .pkg {
-                        Text(value).tag(draft.installerType)
-                    }
+                twoColumn {
+                    catalogsSection
+                } right: {
+                    architecturesSection
+                }
+                descriptionSection
+                scriptsSection
+                twoColumn {
+                    behaviorSection
+                } right: {
+                    fileSection
+                }
+
+                if let saveError {
+                    Text(saveError).foregroundStyle(.red)
                 }
             }
-
-            Section("Catalogs") {
-                ChipField(values: bindArray(\.catalogs), placeholder: "Add catalog")
-            }
-
-            Section("Architectures") {
-                ChipField(
-                    values: Binding(
-                        get: { (draft.supportedArchitectures ?? []).map(\.rawValue) },
-                        set: { draft.supportedArchitectures = $0.isEmpty ? nil : $0.map(SupportedArchitecture.init(rawValue:)) }
-                    ),
-                    placeholder: "arm64 / x86_64"
-                )
-            }
-
-            Section("Scripts") {
-                ScriptEditor(label: "Pre-install", text: optional($draft.preinstallScript))
-                ScriptEditor(label: "Post-install", text: optional($draft.postinstallScript))
-                ScriptEditor(label: "Pre-uninstall", text: optional($draft.preuninstallScript))
-                ScriptEditor(label: "Post-uninstall", text: optional($draft.postuninstallScript))
-                ScriptEditor(label: "Install check", text: optional($draft.installcheckScript))
-                ScriptEditor(label: "Uninstall check", text: optional($draft.uninstallcheckScript))
-            }
-
-            Section("Behavior") {
-                Toggle("Unattended install", isOn: optionalBool($draft.unattendedInstall))
-                Toggle("Unattended uninstall", isOn: optionalBool($draft.unattendedUninstall))
-                Toggle("Auto-remove", isOn: optionalBool($draft.autoremove))
-                Toggle("Featured", isOn: optionalBool($draft.featured))
-                Picker("Restart action", selection: restartPicker) {
-                    Text("Unspecified").tag(RestartAction?.none)
-                    ForEach(RestartAction.allCases, id: \.rawValue) { action in
-                        Text(action.rawValue).tag(RestartAction?(action))
-                    }
-                }
-            }
-
-            Section("File") {
-                LabeledContent("Path", value: fileURL.path)
-                Picker("Format", selection: $format) {
-                    ForEach(RepoFormat.allCases, id: \.self) { format in
-                        Text(format.preferredExtension.uppercased()).tag(format)
-                    }
-                }
-            }
-
-            if let saveError {
-                Section { Text(saveError).foregroundStyle(.red) }
-            }
+            .padding(16)
         }
-        .formStyle(.grouped)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Save") { Task { await save() } }
@@ -136,11 +87,163 @@ private struct PackageEditor: View {
         .onChange(of: format) { isDirty = true }
     }
 
-    private var typePicker: Binding<InstallerType?> {
+    // MARK: Sections
+
+    private var identitySection: some View {
+        Card(title: "Identity") {
+            LabelledField("Name") { TextField("", text: $draft.name) }
+            LabelledField("Display name") { TextField("", text: optional($draft.displayName)) }
+            LabelledField("Version") { TextField("", text: optional($draft.version)) }
+            LabelledField("Developer") { TextField("", text: optional($draft.developer)) }
+            LabelledField("Category") { TextField("", text: optional($draft.category)) }
+        }
+    }
+
+    private var installerSection: some View {
+        Card(title: "Installer") {
+            LabelledField("Location") { TextField("", text: optional($draft.installerItemLocation)) }
+            LabelledField("Hash") {
+                TextField("", text: optional($draft.installerItemHash))
+                    .font(.system(.callout, design: .monospaced))
+            }
+            if let size = draft.installerItemSize {
+                LabelledField("Size") {
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            LabelledField("Type") {
+                Picker("", selection: typeBinding) {
+                    ForEach(InstallerType.knownCases, id: \.rawValue) { type in
+                        Text(type.rawValue).tag(InstallerType?(type))
+                    }
+                    if case .unknown(let value) = draft.installerType ?? .pkg {
+                        Text(value).tag(draft.installerType)
+                    }
+                    Text("Unspecified").tag(InstallerType?.none)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+        }
+    }
+
+    private var catalogsSection: some View {
+        Card(title: "Catalogs") {
+            CatalogChecklist(selected: bindArray(\.catalogs))
+        }
+    }
+
+    private var architecturesSection: some View {
+        Card(title: "Architectures") {
+            ArchitecturePicker(selected: $draft.supportedArchitectures)
+        }
+    }
+
+    private var descriptionSection: some View {
+        Card(title: "Description") {
+            TextEditor(text: optional($draft.description))
+                .frame(minHeight: 80, maxHeight: 140)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(.regularMaterial.opacity(0.5), in: .rect(cornerRadius: 6))
+        }
+    }
+
+    private var scriptsSection: some View {
+        Card(title: "Scripts") {
+            VStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    ScriptEditor(label: "Pre-install", text: optional($draft.preinstallScript))
+                        .frame(maxWidth: .infinity)
+                    ScriptEditor(label: "Post-install", text: optional($draft.postinstallScript))
+                        .frame(maxWidth: .infinity)
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    ScriptEditor(label: "Pre-uninstall", text: optional($draft.preuninstallScript))
+                        .frame(maxWidth: .infinity)
+                    ScriptEditor(label: "Post-uninstall", text: optional($draft.postuninstallScript))
+                        .frame(maxWidth: .infinity)
+                }
+                ScriptEditor(label: "Install check", text: optional($draft.installcheckScript))
+                ScriptEditor(label: "Uninstall check", text: optional($draft.uninstallcheckScript))
+                ScriptEditor(label: "Uninstall script", text: optional($draft.uninstallScript))
+            }
+        }
+    }
+
+    private var behaviorSection: some View {
+        Card(title: "Behavior") {
+            Toggle("Unattended install", isOn: optionalBool($draft.unattendedInstall))
+            Toggle("Unattended uninstall", isOn: optionalBool($draft.unattendedUninstall))
+            Toggle("Auto-remove", isOn: optionalBool($draft.autoremove))
+            Toggle("Featured", isOn: optionalBool($draft.featured))
+            Toggle("Uninstallable", isOn: optionalBool($draft.uninstallable))
+            LabelledField("Restart action") {
+                Picker("", selection: restartBinding) {
+                    Text("Unspecified").tag(RestartAction?.none)
+                    ForEach(RestartAction.allCases, id: \.rawValue) { action in
+                        Text(action.rawValue).tag(RestartAction?(action))
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+            LabelledField("Min macOS") { TextField("", text: optional($draft.minimumOSVersion)) }
+            LabelledField("Max macOS") { TextField("", text: optional($draft.maximumOSVersion)) }
+        }
+    }
+
+    private var fileSection: some View {
+        Card(title: "File") {
+            LabelledField("Path") {
+                Text(fileURL.path)
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            LabelledField("Format") {
+                Picker("", selection: $format) {
+                    ForEach(RepoFormat.allCases, id: \.self) { format in
+                        Text(format.preferredExtension.uppercased()).tag(format)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+        }
+    }
+
+    // MARK: Layout helpers
+
+    /// Two equal columns that collapse to a single column when the view
+    /// is narrower than a threshold (so it stays usable on a half-width
+    /// detail pane).
+    @ViewBuilder
+    private func twoColumn<L: View, R: View>(
+        @ViewBuilder _ left: () -> L,
+        @ViewBuilder right: () -> R
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                left().frame(maxWidth: .infinity, alignment: .topLeading)
+                right().frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                left()
+                right()
+            }
+        }
+    }
+
+    // MARK: Bindings
+
+    private var typeBinding: Binding<InstallerType?> {
         Binding(get: { draft.installerType }, set: { draft.installerType = $0 })
     }
 
-    private var restartPicker: Binding<RestartAction?> {
+    private var restartBinding: Binding<RestartAction?> {
         Binding(get: { draft.restartAction }, set: { draft.restartAction = $0 })
     }
 
@@ -159,8 +262,9 @@ private struct PackageEditor: View {
         )
     }
 
+    // MARK: Save
+
     private func save() async {
-        // Convert format if needed.
         var url = fileURL
         if url.pathExtension != format.preferredExtension {
             url = url.deletingPathExtension().appendingPathExtension(format.preferredExtension)
@@ -169,7 +273,6 @@ private struct PackageEditor: View {
         do {
             try await store.services.packages.save(record)
             if url != fileURL {
-                // Remove the old-extension file.
                 try? FileManager.default.removeItem(at: fileURL)
                 fileURL = url
             }
@@ -178,6 +281,50 @@ private struct PackageEditor: View {
             saveError = nil
         } catch {
             saveError = error.localizedDescription
+        }
+    }
+}
+
+// MARK: Reusable views
+
+/// Section card with a header. We avoid SwiftUI's `Form` here because
+/// we want full control over the two-column layout and we don't want
+/// the implicit insets `Form` adds.
+struct Card<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                content
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(.regularMaterial.opacity(0.5), in: .rect(cornerRadius: 8))
+        }
+    }
+}
+
+/// `LabeledContent`-shaped row with a left-aligned label.
+struct LabelledField<Value: View>: View {
+    let label: String
+    @ViewBuilder var value: Value
+
+    init(_ label: String, @ViewBuilder value: () -> Value) {
+        self.label = label
+        self.value = value()
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 120, alignment: .leading)
+            value
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

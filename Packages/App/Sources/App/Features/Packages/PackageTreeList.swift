@@ -18,15 +18,16 @@ struct PackageTreeList: View {
                         PackageRow(record: record).tag(AnyHashable(record.id))
                     }
                 } label: {
-                    HStack {
+                    HStack(spacing: 6) {
                         Image(systemName: "folder")
                             .foregroundStyle(.secondary)
                         Text(node.category).bold()
-                        Spacer()
                         Text("\(node.records.count)")
                             .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
                     }
+                    .contentShape(.rect)
                 }
             }
         }
@@ -59,17 +60,17 @@ struct PackageRow: View {
     let record: PkginfoRecord
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: "shippingbox")
                 .foregroundStyle(.secondary)
                 .imageScale(.small)
             Text(record.pkginfo.name)
-            Spacer()
             if let version = record.pkginfo.version {
                 Text(version)
                     .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
             }
+            Spacer(minLength: 0)
         }
     }
 }
