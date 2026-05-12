@@ -59,10 +59,20 @@ public enum ManifestFileCoder {
     /// Manifest name = the path of the file relative to `manifests/`, with
     /// the extension dropped. Subdirectories become slash-separated parts
     /// in the name, which matches Munki's `included_manifests` references.
+    ///
+    /// We resolve symlinks on both sides because macOS exposes the temp
+    /// directory under both `/var/folders/...` and
+    /// `/private/var/folders/...`; the prefix-strip needs them to agree.
     public static func manifestName(for url: URL, repositoryRoot: URL) -> String {
-        let manifestsRoot = repositoryRoot.appending(path: "manifests")
-        let relative = url.path.replacingOccurrences(of: manifestsRoot.path + "/", with: "")
-        let withoutExtension = (relative as NSString).deletingPathExtension
-        return withoutExtension
+        let resolvedURL = url.resolvingSymlinksInPath().path
+        let manifestsRoot = repositoryRoot
+            .resolvingSymlinksInPath()
+            .appending(path: "manifests")
+            .path
+        let prefix = manifestsRoot + "/"
+        let relative = resolvedURL.hasPrefix(prefix)
+            ? String(resolvedURL.dropFirst(prefix.count))
+            : url.lastPathComponent
+        return (relative as NSString).deletingPathExtension
     }
 }
