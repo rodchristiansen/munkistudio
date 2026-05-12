@@ -38,6 +38,10 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
     public var uninstallerItemLocation: String?
     public var uninstallerItemHash: String?
     public var uninstallerItemSize: Int?
+    public var allowUntrusted: Bool?
+    public var precache: Bool?
+    public var installerEnvironment: [String: String]?
+    public var installerChoicesXml: [PlistValue]?
 
     // MARK: Install detection
 
@@ -56,6 +60,13 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
     public var uninstallScript: String?
     public var uninstallMethod: String?
     public var uninstallable: Bool?
+    public var versionScript: String?
+
+    // MARK: User-facing alerts
+
+    public var preinstallAlert: PreinstallAlert?
+    public var preuninstallAlert: PreinstallAlert?
+    public var preupgradeAlert: PreinstallAlert?
 
     // MARK: Conditions & targeting
 
@@ -85,6 +96,14 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
 
     public var iconName: String?
     public var iconHash: String?
+
+    // MARK: Staged OS installer / localization / Apple updates
+
+    public var displayNameStaged: String?
+    public var descriptionStaged: String?
+    public var appleItem: Bool?
+    public var localizedStrings: [String: PlistValue]?
+    public var payloadIdentifier: String?
 
     // MARK: Munki Admin / tool metadata
 
@@ -122,6 +141,10 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         case uninstallerItemLocation = "uninstaller_item_location"
         case uninstallerItemHash = "uninstaller_item_hash"
         case uninstallerItemSize = "uninstaller_item_size"
+        case allowUntrusted = "allow_untrusted"
+        case precache
+        case installerEnvironment = "installer_environment"
+        case installerChoicesXml = "installer_choices_xml"
 
         case installs
         case receipts
@@ -136,6 +159,11 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         case uninstallScript = "uninstall_script"
         case uninstallMethod = "uninstall_method"
         case uninstallable
+        case versionScript = "version_script"
+
+        case preinstallAlert = "preinstall_alert"
+        case preuninstallAlert = "preuninstall_alert"
+        case preupgradeAlert = "preupgrade_alert"
 
         case catalogs
         case requires
@@ -160,6 +188,12 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         case iconName = "icon_name"
         case iconHash = "icon_hash"
 
+        case displayNameStaged = "display_name_staged"
+        case descriptionStaged = "description_staged"
+        case appleItem = "apple_item"
+        case localizedStrings = "localized_strings"
+        case payloadIdentifier = "PayloadIdentifier"
+
         case metadata = "_metadata"
     }
 
@@ -171,11 +205,14 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         "installer_type", "installer_item_location", "installer_item_hash",
         "installer_item_size", "package_path", "uninstaller_item_location",
         "uninstaller_item_hash", "uninstaller_item_size",
+        "allow_untrusted", "precache", "installer_environment",
+        "installer_choices_xml",
         "installs", "receipts", "items_to_copy",
         "installcheck_script", "uninstallcheck_script",
         "preinstall_script", "postinstall_script", "preuninstall_script",
         "postuninstall_script", "uninstall_script", "uninstall_method",
-        "uninstallable",
+        "uninstallable", "version_script",
+        "preinstall_alert", "preuninstall_alert", "preupgrade_alert",
         "catalogs", "requires", "update_for", "supported_architectures",
         "minimum_os_version", "maximum_os_version", "minimum_munki_version",
         "installable_condition", "blocking_applications",
@@ -183,6 +220,8 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         "RestartAction", "OnDemand", "autoremove", "featured",
         "suppress_bundle_relocation", "default_installs",
         "icon_name", "icon_hash",
+        "display_name_staged", "description_staged", "apple_item",
+        "localized_strings", "PayloadIdentifier",
         "_metadata",
     ]
 
@@ -204,6 +243,10 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         self.uninstallerItemLocation = try container.decodeIfPresent(String.self, forKey: .uninstallerItemLocation)
         self.uninstallerItemHash = try container.decodeIfPresent(String.self, forKey: .uninstallerItemHash)
         self.uninstallerItemSize = try container.decodeIfPresent(Int.self, forKey: .uninstallerItemSize)
+        self.allowUntrusted = try container.decodeIfPresent(Bool.self, forKey: .allowUntrusted)
+        self.precache = try container.decodeIfPresent(Bool.self, forKey: .precache)
+        self.installerEnvironment = try container.decodeIfPresent([String: String].self, forKey: .installerEnvironment)
+        self.installerChoicesXml = try container.decodeIfPresent([PlistValue].self, forKey: .installerChoicesXml)
 
         self.installs = try container.decodeIfPresent([InstallsItem].self, forKey: .installs)
         self.receipts = try container.decodeIfPresent([Receipt].self, forKey: .receipts)
@@ -218,6 +261,11 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         self.uninstallScript = try container.decodeIfPresent(String.self, forKey: .uninstallScript)
         self.uninstallMethod = try container.decodeIfPresent(String.self, forKey: .uninstallMethod)
         self.uninstallable = try container.decodeIfPresent(Bool.self, forKey: .uninstallable)
+        self.versionScript = try container.decodeIfPresent(String.self, forKey: .versionScript)
+
+        self.preinstallAlert = try container.decodeIfPresent(PreinstallAlert.self, forKey: .preinstallAlert)
+        self.preuninstallAlert = try container.decodeIfPresent(PreinstallAlert.self, forKey: .preuninstallAlert)
+        self.preupgradeAlert = try container.decodeIfPresent(PreinstallAlert.self, forKey: .preupgradeAlert)
 
         self.catalogs = try container.decodeIfPresent([String].self, forKey: .catalogs)
         self.requires = try container.decodeIfPresent([String].self, forKey: .requires)
@@ -241,6 +289,12 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
 
         self.iconName = try container.decodeIfPresent(String.self, forKey: .iconName)
         self.iconHash = try container.decodeIfPresent(String.self, forKey: .iconHash)
+
+        self.displayNameStaged = try container.decodeIfPresent(String.self, forKey: .displayNameStaged)
+        self.descriptionStaged = try container.decodeIfPresent(String.self, forKey: .descriptionStaged)
+        self.appleItem = try container.decodeIfPresent(Bool.self, forKey: .appleItem)
+        self.localizedStrings = try container.decodeIfPresent([String: PlistValue].self, forKey: .localizedStrings)
+        self.payloadIdentifier = try container.decodeIfPresent(String.self, forKey: .payloadIdentifier)
 
         self.metadata = try container.decodeIfPresent([String: PlistValue].self, forKey: .metadata)
 
@@ -271,6 +325,10 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         try container.encodeIfPresent(uninstallerItemLocation, forKey: .uninstallerItemLocation)
         try container.encodeIfPresent(uninstallerItemHash, forKey: .uninstallerItemHash)
         try container.encodeIfPresent(uninstallerItemSize, forKey: .uninstallerItemSize)
+        try container.encodeIfPresent(allowUntrusted, forKey: .allowUntrusted)
+        try container.encodeIfPresent(precache, forKey: .precache)
+        try container.encodeIfPresent(installerEnvironment, forKey: .installerEnvironment)
+        try container.encodeIfPresent(installerChoicesXml, forKey: .installerChoicesXml)
 
         try container.encodeIfPresent(installs, forKey: .installs)
         try container.encodeIfPresent(receipts, forKey: .receipts)
@@ -285,6 +343,11 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         try container.encodeIfPresent(uninstallScript, forKey: .uninstallScript)
         try container.encodeIfPresent(uninstallMethod, forKey: .uninstallMethod)
         try container.encodeIfPresent(uninstallable, forKey: .uninstallable)
+        try container.encodeIfPresent(versionScript, forKey: .versionScript)
+
+        try container.encodeIfPresent(preinstallAlert, forKey: .preinstallAlert)
+        try container.encodeIfPresent(preuninstallAlert, forKey: .preuninstallAlert)
+        try container.encodeIfPresent(preupgradeAlert, forKey: .preupgradeAlert)
 
         try container.encodeIfPresent(catalogs, forKey: .catalogs)
         try container.encodeIfPresent(requires, forKey: .requires)
@@ -308,6 +371,12 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
 
         try container.encodeIfPresent(iconName, forKey: .iconName)
         try container.encodeIfPresent(iconHash, forKey: .iconHash)
+
+        try container.encodeIfPresent(displayNameStaged, forKey: .displayNameStaged)
+        try container.encodeIfPresent(descriptionStaged, forKey: .descriptionStaged)
+        try container.encodeIfPresent(appleItem, forKey: .appleItem)
+        try container.encodeIfPresent(localizedStrings, forKey: .localizedStrings)
+        try container.encodeIfPresent(payloadIdentifier, forKey: .payloadIdentifier)
 
         try container.encodeIfPresent(metadata, forKey: .metadata)
 

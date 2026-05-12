@@ -16,6 +16,7 @@ public struct InstallsItem: Sendable, Hashable, Codable {
 
     public var minosversion: String?
     public var versionComparisonKey: String?
+    public var minimumUpdateVersion: String?
 
     public init(
         type: String? = nil,
@@ -27,7 +28,8 @@ public struct InstallsItem: Sendable, Hashable, Codable {
         cfBundleShortVersionString: String? = nil,
         cfBundleVersion: String? = nil,
         minosversion: String? = nil,
-        versionComparisonKey: String? = nil
+        versionComparisonKey: String? = nil,
+        minimumUpdateVersion: String? = nil
     ) {
         self.type = type
         self.path = path
@@ -39,6 +41,7 @@ public struct InstallsItem: Sendable, Hashable, Codable {
         self.cfBundleVersion = cfBundleVersion
         self.minosversion = minosversion
         self.versionComparisonKey = versionComparisonKey
+        self.minimumUpdateVersion = minimumUpdateVersion
     }
 
     enum CodingKeys: String, CodingKey {
@@ -52,5 +55,6 @@ public struct InstallsItem: Sendable, Hashable, Codable {
         case cfBundleVersion = "CFBundleVersion"
         case minosversion
         case versionComparisonKey = "version_comparison_key"
+        case minimumUpdateVersion = "minimum_update_version"
     }
 }

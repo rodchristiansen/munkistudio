@@ -5,13 +5,17 @@ import AppKit
 /// "Open Repository…" affordance backed by a system file picker.
 struct RepositoryPickerView: View {
     @Environment(RepositoryStore.self) private var store
+    // Decorative app icon scales with the user's Dynamic Type setting
+    // so the splash screen stays balanced at every size.
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize: CGFloat = 56
 
     var body: some View {
         VStack(spacing: 28) {
             VStack(spacing: 8) {
                 Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 56))
+                    .font(.system(size: iconSize))
                     .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
                 Text("MunkiAdmin")
                     .font(.largeTitle.bold())
                 Text("Open a Munki repository directory to get started.")

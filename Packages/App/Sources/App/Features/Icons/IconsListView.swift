@@ -40,6 +40,7 @@ struct IconsListView: View {
 struct IconDetailView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var imageData: Data?
+    @ScaledMetric(relativeTo: .largeTitle) private var placeholderSize: CGFloat = 80
 
     var body: some View {
         if let asset = selected {
@@ -52,8 +53,9 @@ struct IconDetailView: View {
                         .frame(maxWidth: 280, maxHeight: 280)
                 } else {
                     Image(systemName: "photo")
-                        .font(.system(size: 80))
+                        .font(.system(size: placeholderSize))
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
                 Text(asset.filename).font(.headline)
                 if let hash = asset.sha256 {
