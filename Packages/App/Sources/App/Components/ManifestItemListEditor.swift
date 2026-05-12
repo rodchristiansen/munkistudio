@@ -28,6 +28,13 @@ struct ManifestItemListEditor: View {
         case optionalInstalls, featuredItems
     }
 
+    /// True when the manifest has at least one conditional_items entry.
+    /// Drives whether each row shows its per-item Conditional dropdown
+    /// — there's no choice to make if conditions don't exist yet.
+    private var conditionsExist: Bool {
+        !(manifest.conditionalItems?.isEmpty ?? true)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             header
@@ -35,6 +42,7 @@ struct ManifestItemListEditor: View {
                 ManifestItemRow(
                     entry: entry,
                     conditionOptions: conditionOptions,
+                    showsConditionalPicker: conditionsExist,
                     onRemove: { remove(entry) },
                     onMoveTo: { newConditionPath in move(entry, to: newConditionPath) }
                 )
@@ -60,10 +68,12 @@ struct ManifestItemListEditor: View {
         HStack {
             Text(title).font(.headline)
             Spacer()
-            Text("Conditional")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 200, alignment: .leading)
+            if conditionsExist {
+                Text("Conditional")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 200, alignment: .leading)
+            }
             // spacer column to align with delete button
             Color.clear.frame(width: 24)
         }
@@ -242,6 +252,7 @@ struct ManifestItemListEditor: View {
 private struct ManifestItemRow: View {
     let entry: Entry
     let conditionOptions: [ConditionOption]
+    let showsConditionalPicker: Bool
     let onRemove: () -> Void
     let onMoveTo: (ConditionPath?) -> Void
 
@@ -250,22 +261,26 @@ private struct ManifestItemRow: View {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
                 .frame(width: 14)
+                .accessibilityHidden(true)
             Text(entry.name)
                 .lineLimit(1)
             Spacer()
-            Picker("Conditional", selection: pickerBinding) {
-                ForEach(conditionOptions, id: \.id) { option in
-                    Text(option.label).tag(option.path)
+            if showsConditionalPicker {
+                Picker("Conditional", selection: pickerBinding) {
+                    ForEach(conditionOptions, id: \.id) { option in
+                        Text(option.label).tag(option.path)
+                    }
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 200)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(width: 200)
             Button(role: .destructive, action: onRemove) {
                 Image(systemName: "minus.circle")
             }
             .buttonStyle(.plain)
             .frame(width: 24)
+            .accessibilityLabel("Remove \(entry.name)")
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)

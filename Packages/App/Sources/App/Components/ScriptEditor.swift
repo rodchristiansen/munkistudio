@@ -1,9 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// Always-expanded script editor. Each section shows the inline editor
-/// with line numbers and a small "Expand" affordance opening a full-
-/// screen sheet with syntax highlighting and a lint panel.
+/// Always-expanded script editor. The inline editor uses
+/// ``HighlightedTextEditor`` (NSTextView under the hood) so 95-line
+/// scripts scroll internally without breaking the parent ScrollView.
+/// An "Expand" button opens the same editor at sheet size with the
+/// linter panel beside it.
 struct ScriptEditor: View {
     let label: String
     @Binding var text: String
@@ -47,8 +49,9 @@ struct ScriptEditor: View {
                 }
             }
 
-            LineNumberedTextEditor(text: $text, language: language)
-                .frame(minHeight: 120, maxHeight: 220)
+            HighlightedTextEditor(text: $text, language: language)
+                .frame(height: 200)
+                .background(Color.secondary.opacity(0.04), in: .rect(cornerRadius: 6))
         }
         .sheet(isPresented: $fullScreenPresented) {
             ScriptEditorSheet(title: label, text: $text)
@@ -60,73 +63,7 @@ struct ScriptEditor: View {
     }
 }
 
-/// Plain text editor with a left gutter of line numbers. The text is
-/// rendered live in the editable area; a separate overlay shows the
-/// syntax-highlighted version when `showsHighlighting` is true.
-struct LineNumberedTextEditor: View {
-    @Binding var text: String
-    let language: ScriptLanguage
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            gutter
-                .frame(width: 36)
-                .background(Color.secondary.opacity(0.08))
-            ZStack(alignment: .topLeading) {
-                // Highlighted overlay (read-only)
-                ScrollView {
-                    Text(SyntaxHighlighter.attributed(text, language: language))
-                        .font(.system(.callout, design: .monospaced))
-                        .textSelection(.disabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                }
-                .allowsHitTesting(false)
-
-                // Editable layer; the text colour is mostly clear so the
-                // overlay above shows through, but we keep cursor &
-                // selection visible.
-                TextEditor(text: $text)
-                    .font(.system(.callout, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
-                    .foregroundStyle(text.isEmpty ? Color.secondary : Color.primary.opacity(0.0))
-                    // 0-opacity primary keeps the I-beam selection /
-                    // cursor accent visible while letting the highlighted
-                    // overlay above carry the visible glyphs.
-            }
-        }
-        .background(Color.secondary.opacity(0.04), in: .rect(cornerRadius: 6))
-    }
-
-    private var gutter: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .trailing, spacing: 0) {
-                ForEach(1...max(1, lines), id: \.self) { lineNumber in
-                    Text("\(lineNumber)")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 32, alignment: .trailing)
-                        .padding(.trailing, 4)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 4)
-        }
-        .disabled(true)
-    }
-
-    private var lines: Int {
-        max(1, text.split(separator: "\n", omittingEmptySubsequences: false).count)
-    }
-}
-
-/// Full-screen script editor sheet.
-///
-/// Shows the language badge in the title, the syntax-highlighted body,
-/// and a collapsible lint panel beneath it.
+/// Full-screen script editor with a wider canvas and the linter panel.
 struct ScriptEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     let title: String
@@ -149,8 +86,9 @@ struct ScriptEditorSheet: View {
                     .keyboardShortcut(.escape)
                     .keyboardShortcut("w", modifiers: [.command])
             }
-            LineNumberedTextEditor(text: $text, language: language)
+            HighlightedTextEditor(text: $text, language: language)
                 .frame(minWidth: 760, minHeight: 480)
+                .background(Color.secondary.opacity(0.04), in: .rect(cornerRadius: 6))
             if !warnings.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Linter").font(.headline)
@@ -164,6 +102,6 @@ struct ScriptEditorSheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 820, minHeight: 600)
+        .frame(minWidth: 820, minHeight: 620)
     }
 }

@@ -49,11 +49,11 @@ private struct ManifestEditor: View {
             }
 
             Section("Catalogs") {
-                ChipField(values: bindArray(\.catalogs), placeholder: "Add catalog")
+                CatalogChecklist(selected: bindArray(\.catalogs))
             }
 
             Section("Included manifests") {
-                ChipField(values: bindArray(\.includedManifests), placeholder: "Add manifest name")
+                IncludedManifestsEditor(values: bindArray(\.includedManifests))
             }
 
             ManifestItemListEditor(title: "Managed installs", kind: .managedInstalls, manifest: $draft)

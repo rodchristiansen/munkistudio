@@ -40,6 +40,19 @@ struct GitView: View {
         .focusEffectDisabled()
         .onKeyPress { press in handleKey(press) }
         .onAppear { paneFocused = true }
+        // SwiftUI's List(selection:) binding fires when the user clicks
+        // a row, but the GitView only re-syncs the diff from key
+        // handlers. Watch the selection bindings explicitly so mouse
+        // clicks also refresh the diff pane.
+        .onChange(of: state.fileSelection) { _, _ in
+            Task { await syncDiff() }
+        }
+        .onChange(of: state.commitSelection) { _, _ in
+            Task { await syncDiff() }
+        }
+        .onChange(of: state.focusedPanel) { _, _ in
+            Task { await syncDiff() }
+        }
     }
 
     // MARK: Header
@@ -155,14 +168,9 @@ struct GitView: View {
                 Button {
                     state.focusedPanel = panel
                     paneFocused = true
-                    Task { await syncDiff() }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(numberLabel(for: panel))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.tertiary)
-                        Text(label(for: panel))
-                            .font(.callout)
+                        Text(label(for: panel)).font(.callout)
                         Text("\(count(for: panel))")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
@@ -175,6 +183,7 @@ struct GitView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .help("\(label(for: panel)) (press \(keyHint(for: panel)))")
             }
             Spacer()
         }
@@ -182,7 +191,7 @@ struct GitView: View {
         .padding(.vertical, 6)
     }
 
-    private func numberLabel(for panel: GitPaneState.Panel) -> String {
+    private func keyHint(for panel: GitPaneState.Panel) -> String {
         switch panel {
         case .files: "1"
         case .history: "2"
