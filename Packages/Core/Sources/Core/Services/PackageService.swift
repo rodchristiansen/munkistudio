@@ -6,7 +6,13 @@ import Foundation
 /// detected default format unless overridden.
 public protocol PackageService: Sendable {
     /// Load every pkginfo under `repository.pkgsinfoURL`, recursively.
-    func load(in repository: MunkiRepository) async throws -> [PkginfoRecord]
+    /// A single bad file mustn't fail the whole batch — implementations
+    /// collect per-file errors into the returned tuple so the UI can show
+    /// what was skipped without losing the rest of the repo.
+    func load(in repository: MunkiRepository) async throws -> (
+        records: [PkginfoRecord],
+        errors: [RepositorySnapshot.LoadError]
+    )
 
     /// Save a single pkginfo back to disk in its original format. Writes are
     /// atomic — readers either see the previous version or the new one,

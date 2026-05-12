@@ -86,11 +86,7 @@ private struct ContentColumn: View {
         case .packages: PackagesListView()
         case .manifests: ManifestsListView()
         case .catalogs: CatalogsListView()
-        case .icons: IconsListView()
-        case .categories: CategoriesListView()
-        case .developers: DevelopersListView()
         case .git: GitView()
-        case .search: SearchView()
         }
     }
 }
@@ -104,11 +100,7 @@ private struct DetailColumn: View {
         case .packages: PackageDetailView()
         case .manifests: ManifestDetailView()
         case .catalogs: CatalogDetailView()
-        case .icons: IconDetailView()
-        case .categories: CategoryDetailView()
-        case .developers: DeveloperDetailView()
         case .git: GitDetailView()
-        case .search: SearchDetailView()
         }
     }
 }

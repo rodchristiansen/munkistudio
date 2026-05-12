@@ -3,7 +3,10 @@ import Foundation
 /// Read / write manifest files. Mirrors ``PackageService`` and preserves
 /// format on save.
 public protocol ManifestService: Sendable {
-    func load(in repository: MunkiRepository) async throws -> [ManifestRecord]
+    func load(in repository: MunkiRepository) async throws -> (
+        records: [ManifestRecord],
+        errors: [RepositorySnapshot.LoadError]
+    )
     func save(_ record: ManifestRecord) async throws
 
     /// Create a new manifest. The filename is derived from `name`; nested

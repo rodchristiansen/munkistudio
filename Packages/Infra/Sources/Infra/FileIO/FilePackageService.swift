@@ -7,16 +7,45 @@ import Core
 public actor FilePackageService: PackageService {
     public init() {}
 
-    public func load(in repository: MunkiRepository) async throws -> [PkginfoRecord] {
+    public func load(in repository: MunkiRepository) async throws -> (
+        records: [PkginfoRecord],
+        errors: [RepositorySnapshot.LoadError]
+    ) {
         let urls = RepoWalker.documentURLs(under: repository.pkgsinfoURL)
-        return try await withThrowingTaskGroup(of: PkginfoRecord.self) { group in
+        // Each file gets its own try so one corrupt pkginfo doesn't blow
+        // up the whole batch.
+        let outcomes = await withTaskGroup(of: Outcome.self) { group -> [Outcome] in
             for url in urls {
-                group.addTask { try PkginfoFileCoder.read(from: url) }
+                group.addTask {
+                    do {
+                        let record = try PkginfoFileCoder.read(from: url)
+                        return .success(record)
+                    } catch {
+                        return .failure(RepositorySnapshot.LoadError(
+                            fileURL: url,
+                            message: String(describing: error)
+                        ))
+                    }
+                }
             }
-            var records: [PkginfoRecord] = []
-            for try await record in group { records.append(record) }
-            return records.sorted { $0.pkginfo.name < $1.pkginfo.name }
+            var results: [Outcome] = []
+            for await outcome in group { results.append(outcome) }
+            return results
         }
+        var records: [PkginfoRecord] = []
+        var errors: [RepositorySnapshot.LoadError] = []
+        for outcome in outcomes {
+            switch outcome {
+            case .success(let record): records.append(record)
+            case .failure(let error): errors.append(error)
+            }
+        }
+        return (records.sorted { $0.pkginfo.name < $1.pkginfo.name }, errors)
+    }
+
+    private enum Outcome: Sendable {
+        case success(PkginfoRecord)
+        case failure(RepositorySnapshot.LoadError)
     }
 
     public func save(_ record: PkginfoRecord) async throws {

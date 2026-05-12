@@ -1,30 +1,48 @@
 import SwiftUI
 import Core
 
-/// Middle-column list of manifests, filtered by a local search field.
+/// Middle-column list of manifests with an inline filter field (the same
+/// `FilterField` the Packages pane uses).
 struct ManifestsListView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var search: String = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var bindableStore = store
-        List(selection: $bindableStore.selectedItemID) {
-            ForEach(filtered, id: \.id) { record in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(record.manifest.manifestName)
-                    HStack(spacing: 8) {
-                        if let cats = record.manifest.catalogs, !cats.isEmpty {
-                            Text(cats.joined(separator: ", ")).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        FormatBadge(format: record.format)
+        VStack(spacing: 0) {
+            FilterField(text: $search, prompt: "Filter manifests", focused: $searchFocused)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            if store.snapshot.manifests.isEmpty {
+                ContentUnavailableView {
+                    Label("No manifests found", systemImage: "list.bullet.rectangle")
+                } description: {
+                    if let repo = store.repository {
+                        Text("Scanned \(repo.manifestsURL.path) — found nothing that parses as a manifest.")
+                    } else {
+                        Text("Open a Munki repository to see manifests here.")
                     }
-                    .font(.caption)
                 }
-                .tag(AnyHashable(record.id))
+            } else {
+                List(selection: $bindableStore.selectedItemID) {
+                    ForEach(filtered, id: \.id) { record in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(record.manifest.manifestName)
+                            HStack(spacing: 8) {
+                                if let cats = record.manifest.catalogs, !cats.isEmpty {
+                                    Text(cats.joined(separator: ", ")).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                FormatBadge(format: record.format)
+                            }
+                            .font(.caption)
+                        }
+                        .tag(AnyHashable(record.id))
+                    }
+                }
             }
         }
-        .searchable(text: $search, placement: .toolbar, prompt: "Filter manifests")
         .navigationTitle("Manifests (\(store.snapshot.manifests.count))")
     }
 

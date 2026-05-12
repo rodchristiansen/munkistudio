@@ -31,16 +31,35 @@ public struct RepositorySnapshot: Sendable {
     public var catalogs: [Catalog]
     public var icons: [IconAsset]
 
+    /// Per-file errors collected during load. A bad pkginfo doesn't fail
+    /// the snapshot; the offending file ends up here so the UI can offer
+    /// a "n files couldn't be parsed" affordance.
+    public var loadErrors: [LoadError]
+
     public init(
         pkginfos: [PkginfoRecord] = [],
         manifests: [ManifestRecord] = [],
         catalogs: [Catalog] = [],
-        icons: [IconAsset] = []
+        icons: [IconAsset] = [],
+        loadErrors: [LoadError] = []
     ) {
         self.pkginfos = pkginfos
         self.manifests = manifests
         self.catalogs = catalogs
         self.icons = icons
+        self.loadErrors = loadErrors
+    }
+
+    public struct LoadError: Sendable, Hashable, Identifiable {
+        public var fileURL: URL
+        public var message: String
+
+        public var id: URL { fileURL }
+
+        public init(fileURL: URL, message: String) {
+            self.fileURL = fileURL
+            self.message = message
+        }
     }
 }
 

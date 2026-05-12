@@ -24,6 +24,7 @@ struct FileRepositoryTests {
         #expect(snapshot.pkginfos.count == 3)
         #expect(snapshot.manifests.count == 1)
         #expect(snapshot.manifests.first?.manifest.manifestName == "lab1")
+        #expect(snapshot.loadErrors.isEmpty)
         let catalogNames = snapshot.catalogs.map(\.name).sorted()
         #expect(catalogNames == ["production", "testing"])
         let production = snapshot.catalogs.first { $0.name == "production" }
@@ -39,7 +40,7 @@ struct FileRepositoryTests {
         let packages = FilePackageService()
         let repo = MunkiRepository(rootURL: scratch.rootURL, defaultFormat: .plist)
         let initial = try await packages.load(in: repo)
-        guard let first = initial.first else {
+        guard let first = initial.records.first else {
             Issue.record("Expected one pkginfo to load")
             return
         }
@@ -50,6 +51,25 @@ struct FileRepositoryTests {
         #expect(converted.fileURL.pathExtension == "yaml")
         #expect(FileManager.default.fileExists(atPath: converted.fileURL.path))
         #expect(!FileManager.default.fileExists(atPath: first.fileURL.path))
+    }
+
+    @Test("bad pkginfo files don't fail the whole load — they appear in loadErrors")
+    func partialLoadWithBadFile() async throws {
+        let scratch = try ScratchRepo.make()
+        defer { scratch.cleanup() }
+
+        try scratch.writePkginfo("Good", version: "1.0", catalogs: ["testing"], format: .yaml)
+        // A bogus file masquerading as YAML — `: : :` is invalid.
+        let badURL = scratch.rootURL.appending(path: "pkgsinfo").appending(path: "Broken.yaml")
+        try Data(": : :".utf8).write(to: badURL)
+
+        let service = FileRepositoryService()
+        let repo = try await service.open(rootURL: scratch.rootURL)
+        let snapshot = try await service.reload(repo)
+        #expect(snapshot.pkginfos.count == 1)
+        #expect(snapshot.pkginfos.first?.pkginfo.name == "Good")
+        #expect(snapshot.loadErrors.count == 1)
+        #expect(snapshot.loadErrors.first?.fileURL.lastPathComponent == "Broken.yaml")
     }
 
     @Test("FileIconService computes hashes and writes _icon_hashes.plist")

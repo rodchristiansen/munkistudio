@@ -45,16 +45,17 @@ public actor FileRepositoryService: RepositoryService {
         async let manifestTask = manifests.load(in: repository)
         async let iconTask = icons.load(in: repository)
 
-        let pkginfoRecords = try await pkginfoTask
-        let manifestRecords = try await manifestTask
+        let pkginfoOutcome = try await pkginfoTask
+        let manifestOutcome = try await manifestTask
         let iconAssets = try await iconTask
-        let catalogList = await catalogsService.catalogs(from: pkginfoRecords)
+        let catalogList = await catalogsService.catalogs(from: pkginfoOutcome.records)
 
         return RepositorySnapshot(
-            pkginfos: pkginfoRecords,
-            manifests: manifestRecords,
+            pkginfos: pkginfoOutcome.records,
+            manifests: manifestOutcome.records,
             catalogs: catalogList,
-            icons: iconAssets
+            icons: iconAssets,
+            loadErrors: pkginfoOutcome.errors + manifestOutcome.errors
         )
     }
 

@@ -7,20 +7,47 @@ import Core
 public actor FileManifestService: ManifestService {
     public init() {}
 
-    public func load(in repository: MunkiRepository) async throws -> [ManifestRecord] {
+    public func load(in repository: MunkiRepository) async throws -> (
+        records: [ManifestRecord],
+        errors: [RepositorySnapshot.LoadError]
+    ) {
         let urls = RepoWalker.documentURLs(
             under: repository.manifestsURL,
             allowEmptyExtension: true
         )
         let root = repository.rootURL
-        return try await withThrowingTaskGroup(of: ManifestRecord.self) { group in
+        let outcomes = await withTaskGroup(of: Outcome.self) { group -> [Outcome] in
             for url in urls {
-                group.addTask { try ManifestFileCoder.read(from: url, repositoryRoot: root) }
+                group.addTask {
+                    do {
+                        let record = try ManifestFileCoder.read(from: url, repositoryRoot: root)
+                        return .success(record)
+                    } catch {
+                        return .failure(RepositorySnapshot.LoadError(
+                            fileURL: url,
+                            message: String(describing: error)
+                        ))
+                    }
+                }
             }
-            var records: [ManifestRecord] = []
-            for try await record in group { records.append(record) }
-            return records.sorted { $0.manifest.manifestName < $1.manifest.manifestName }
+            var results: [Outcome] = []
+            for await outcome in group { results.append(outcome) }
+            return results
         }
+        var records: [ManifestRecord] = []
+        var errors: [RepositorySnapshot.LoadError] = []
+        for outcome in outcomes {
+            switch outcome {
+            case .success(let record): records.append(record)
+            case .failure(let error): errors.append(error)
+            }
+        }
+        return (records.sorted { $0.manifest.manifestName < $1.manifest.manifestName }, errors)
+    }
+
+    private enum Outcome: Sendable {
+        case success(ManifestRecord)
+        case failure(RepositorySnapshot.LoadError)
     }
 
     public func save(_ record: ManifestRecord) async throws {
