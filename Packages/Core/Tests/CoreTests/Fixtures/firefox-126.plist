@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyLists-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>autoremove</key>
+	<false/>
+	<key>blocking_applications</key>
+	<array>
+		<string>Firefox</string>
+		<string>firefox-bin</string>
+	</array>
+	<key>catalogs</key>
+	<array>
+		<string>testing</string>
+	</array>
+	<key>category</key>
+	<string>Web Browsers</string>
+	<key>description</key>
+	<string>Mozilla Firefox web browser.</string>
+	<key>developer</key>
+	<string>Mozilla</string>
+	<key>display_name</key>
+	<string>Mozilla Firefox</string>
+	<key>installer_item_hash</key>
+	<string>abc123def456</string>
+	<key>installer_item_location</key>
+	<string>apps/Mozilla/Firefox-126.0.dmg</string>
+	<key>installer_item_size</key>
+	<integer>123456789</integer>
+	<key>installer_type</key>
+	<string>copy_from_dmg</string>
+	<key>installs</key>
+	<array>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>org.mozilla.firefox</string>
+			<key>CFBundleShortVersionString</key>
+			<string>126.0</string>
+			<key>path</key>
+			<string>/Applications/Firefox.app</string>
+			<key>type</key>
+			<string>bundle</string>
+		</dict>
+	</array>
+	<key>items_to_copy</key>
+	<array>
+		<dict>
+			<key>destination_path</key>
+			<string>/Applications</string>
+			<key>source_item</key>
+			<string>Firefox.app</string>
+		</dict>
+	</array>
+	<key>minimum_os_version</key>
+	<string>10.15</string>
+	<key>name</key>
+	<string>Firefox</string>
+	<key>supported_architectures</key>
+	<array>
+		<string>arm64</string>
+		<string>x86_64</string>
+	</array>
+	<key>unattended_install</key>
+	<true/>
+	<key>uninstallable</key>
+	<true/>
+	<key>uninstall_method</key>
+	<string>remove_copied_items</string>
+	<key>version</key>
+	<string>126.0</string>
+	<key>_metadata</key>
+	<dict>
+		<key>created_by</key>
+		<string>autopkg</string>
+		<key>creation_date</key>
+		<date>2025-12-01T08:00:00Z</date>
+	</dict>
+</dict>
+</plist>

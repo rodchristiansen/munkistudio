@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Packages/*/.build/
+Packages/*/.swiftpm/
+Package.resolved
+
+# Xcode workspace state
+*.xcworkspace/xcuserdata/
+
+# Misc
+*.log
+.env
