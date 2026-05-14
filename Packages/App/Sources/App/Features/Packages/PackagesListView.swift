@@ -10,14 +10,13 @@ struct PackagesListView: View {
     @State private var search: String = ""
     @State private var grouping: PackageGrouping = .categories
     @State private var sort: PackageSort = .name
+    @State private var criteriaGroup = PackageCriteriaGroup()
+    @State private var filterPopoverShown = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var bindableStore = store
         VStack(spacing: 0) {
-            // Mail.app-style scope strip: switch how the list is
-            // grouped without leaving the view. Sort sits inline as a
-            // popover menu so the strip stays a single line.
             HStack(spacing: 8) {
                 Picker("", selection: $grouping) {
                     ForEach(PackageGrouping.allCases) { mode in
@@ -27,17 +26,8 @@ struct PackagesListView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 Spacer()
-                Menu {
-                    Picker("Sort", selection: $sort) {
-                        ForEach(PackageSort.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                } label: {
-                    Label("Sort: \(sort.title)", systemImage: "arrow.up.arrow.down")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                filterButton
+                SortMenu(sort: $sort)
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)
@@ -47,17 +37,52 @@ struct PackagesListView: View {
             if store.snapshot.pkginfos.isEmpty {
                 EmptyPackagesView()
             } else {
-                PackageTreeList(records: filtered, grouping: grouping, sort: sort)
+                PackageTreeList(
+                    records: filtered,
+                    grouping: grouping,
+                    sort: sort,
+                    forceExpandAll: !search.isEmpty || !criteriaGroup.criteria.isEmpty
+                )
             }
         }
         .navigationTitle("Packages (\(store.snapshot.pkginfos.count))")
         .onAppear { searchFocused = false }
     }
 
+    @ViewBuilder
+    private var filterButton: some View {
+        FilterButton(
+            isActive: !criteriaGroup.criteria.isEmpty,
+            count: criteriaGroup.criteria.count,
+            onClear: { criteriaGroup.criteria.removeAll() }
+        ) {
+            if criteriaGroup.criteria.isEmpty {
+                let attr: PackageAttribute = .name
+                criteriaGroup.criteria.append(
+                    PackageCriterion(attribute: attr, op: attr.allowedOperators.first ?? .contains, value: "")
+                )
+            }
+            filterPopoverShown = true
+        }
+        .popover(isPresented: $filterPopoverShown, arrowEdge: .top) {
+            PackageCriteriaEditor(group: $criteriaGroup)
+                .frame(minWidth: 520, idealWidth: 580)
+                .padding(12)
+        }
+    }
+
     private var filtered: [PkginfoRecord] {
-        guard !search.isEmpty else { return store.snapshot.pkginfos }
+        var base = store.snapshot.pkginfos
+        if !criteriaGroup.criteria.isEmpty {
+            base = base.filter { record in
+                criteriaGroup.matches(
+                    PackageRecordContext(pkginfo: record.pkginfo, filename: record.fileURL.lastPathComponent)
+                )
+            }
+        }
+        guard !search.isEmpty else { return base }
         let query = search.lowercased()
-        return store.snapshot.pkginfos.filter { record in
+        return base.filter { record in
             record.pkginfo.name.lowercased().contains(query)
                 || (record.pkginfo.displayName?.lowercased().contains(query) ?? false)
                 || (record.pkginfo.category?.lowercased().contains(query) ?? false)
@@ -110,14 +135,24 @@ struct EmptyPackagesView: View {
 }
 
 enum PackageGrouping: String, CaseIterable, Identifiable, Hashable {
-    case types, categories, developers, directories
+    case categories, types, developers, directories
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .types: "Types"
         case .categories: "Categories"
+        case .types: "Types"
         case .developers: "Developers"
         case .directories: "Directories"
+        }
+    }
+
+    /// SF Symbol for folder rows when grouping by this scope.
+    var folderIcon: String {
+        switch self {
+        case .categories: "square.grid.2x2"
+        case .types: "circle.grid.cross"
+        case .developers: "person"
+        case .directories: "folder"
         }
     }
 }
@@ -129,6 +164,82 @@ enum PackageSort: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .name: "Name"
         case .recentlyModified: "Recently Modified"
+        }
+    }
+}
+
+/// Compact sort menu used in both the Packages and Manifests list
+/// headers. Flat single-click choices (no nested submenu) — selected
+/// option is marked with a checkmark inline. Icon-only trigger so it
+/// stays out of the way; hover shows the current sort.
+struct SortMenu: View {
+    @Binding var sort: PackageSort
+
+    var body: some View {
+        Menu {
+            ForEach(PackageSort.allCases) { mode in
+                Button {
+                    sort = mode
+                } label: {
+                    if sort == mode {
+                        Label(mode.title, systemImage: "checkmark")
+                    } else {
+                        Text(mode.title)
+                    }
+                }
+            }
+        } label: {
+            Label("Sort", systemImage: "arrow.up.arrow.down")
+                .labelStyle(.iconOnly)
+                .fontWeight(.semibold)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Sort: \(sort.title)")
+    }
+}
+
+/// Shared icon-only filter button with an inline clear-X that appears
+/// to its left when criteria are active. Used by both Packages and
+/// Manifests list panes so they behave identically.
+struct FilterButton: View {
+    let isActive: Bool
+    let count: Int
+    let onClear: () -> Void
+    let onOpen: () -> Void
+
+    init(isActive: Bool, count: Int, onClear: @escaping () -> Void, _ onOpen: @escaping () -> Void) {
+        self.isActive = isActive
+        self.count = count
+        self.onClear = onClear
+        self.onOpen = onOpen
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if isActive {
+                Button(action: onClear) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.yellow)
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.plain)
+                .help("Clear filter")
+            }
+            Button(action: onOpen) {
+                Label(
+                    "Filter",
+                    systemImage: isActive
+                        ? "line.3.horizontal.decrease.circle.fill"
+                        : "line.3.horizontal.decrease.circle"
+                )
+                .labelStyle(.iconOnly)
+                .fontWeight(.semibold)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help(isActive ? "Filter (\(count) rule\(count == 1 ? "" : "s"))" : "Filter")
         }
     }
 }

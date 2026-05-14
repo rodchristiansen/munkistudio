@@ -9,21 +9,19 @@ struct PackageTreeList: View {
     let records: [PkginfoRecord]
     let grouping: PackageGrouping
     let sort: PackageSort
+    var forceExpandAll: Bool = false
 
     var body: some View {
         @Bindable var bindableStore = store
-        // `List(selection:) { ForEach }` form: `.tag()` only works inside
-        // a ForEach. The shorthand `List(data, selection:)` uses item ids,
-        // which makes leaves untaggable for our URL-based selection.
         List(selection: $bindableStore.selectedItemID) {
             ForEach(rows) { row in
                 if let tag = row.selectionTag {
-                    PackageRowView(row: row)
+                    PackageRowView(row: row, folderIcon: grouping.folderIcon)
                         .tag(tag)
                         .listRowSeparator(.hidden)
                         .accessibilityLabel(row.accessibilityLabel)
                 } else {
-                    PackageRowView(row: row)
+                    PackageRowView(row: row, folderIcon: grouping.folderIcon)
                         .listRowSeparator(.hidden)
                         .accessibilityLabel(row.accessibilityLabel)
                 }
@@ -37,7 +35,7 @@ struct PackageTreeList: View {
     private var rows: [PackageFlatRow] {
         var result: [PackageFlatRow] = []
         for node in nodes {
-            let isExpanded = store.expandedCategories.contains(node.category)
+            let isExpanded = forceExpandAll || store.expandedCategories.contains(node.category)
             result.append(PackageFlatRow(
                 id: node.category + ".__folder__",
                 kind: .folder(category: node.category, count: node.records.count, expanded: isExpanded)
@@ -133,6 +131,7 @@ struct PackageFlatRow: Identifiable, Hashable {
 struct PackageRowView: View {
     @Environment(RepositoryStore.self) private var store
     let row: PackageFlatRow
+    let folderIcon: String
 
     var body: some View {
         switch row.kind {
@@ -145,8 +144,8 @@ struct PackageRowView: View {
                         .foregroundStyle(.secondary)
                         .imageScale(.small)
                         .frame(width: 14)
-                    Image(systemName: "folder")
-                        .foregroundStyle(.secondary)
+                    Image(systemName: folderIcon)
+                        .foregroundStyle(.tint)
                     Text(category).bold()
                     Text("\(count)")
                         .font(.caption.monospaced())
@@ -162,7 +161,7 @@ struct PackageRowView: View {
                 // Reserve chevron column so leaves align with folder rows.
                 Color.clear.frame(width: 14, height: 1)
                 Image(systemName: "shippingbox")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.munkiStudioBrand)
                     .imageScale(.small)
                 Text(record.pkginfo.name)
                 if let version = record.pkginfo.version {

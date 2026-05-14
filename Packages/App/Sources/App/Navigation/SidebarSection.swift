@@ -6,7 +6,6 @@ import Foundation
 /// as inspectors / filters; global search hangs off Cmd-F in each list.
 enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
-    case search = "Search"
     case packages = "Packages"
     case manifests = "Manifests"
     case catalogs = "Catalogs"
@@ -17,7 +16,6 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .dashboard: "rectangle.grid.2x2"
-        case .search: "magnifyingglass"
         case .packages: "shippingbox"
         case .manifests: "list.bullet.rectangle"
         case .catalogs: "books.vertical"
@@ -31,7 +29,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     /// columns. These get a single full-width pane next to the sidebar.
     var prefersFullWidth: Bool {
         switch self {
-        case .dashboard, .search, .git: true
+        case .dashboard, .git: true
         case .packages, .manifests, .catalogs: false
         }
     }

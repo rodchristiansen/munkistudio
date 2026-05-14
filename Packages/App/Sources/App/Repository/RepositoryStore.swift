@@ -54,6 +54,12 @@ final class RepositoryStore {
     /// Free-text query backing the global search pane.
     var searchQuery: String = ""
 
+    /// Cached results for the current `searchQuery`. Recomputed by a
+    /// `.task(id:)` in the workspace so we don't re-scan every pkginfo
+    /// and manifest on every SwiftUI hover — that re-render storm was
+    /// the source of the dropdown flicker.
+    var searchResults: [SearchScanner.FileResult] = []
+
     /// Category names currently expanded in the Packages outline. Persisted
     /// only for the duration of a session — we don't want to surprise the
     /// user with stale expanded state on next launch.

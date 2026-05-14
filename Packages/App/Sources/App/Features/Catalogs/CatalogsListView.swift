@@ -5,14 +5,26 @@ import Core
 struct CatalogsListView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var search: String = ""
+    @State private var makecatalogsPresented: Bool = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var bindableStore = store
         VStack(spacing: 0) {
-            FilterField(text: $search, prompt: "Filter catalogs", focused: $searchFocused)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+            HStack {
+                FilterField(text: $search, prompt: "Filter catalogs", focused: $searchFocused)
+                Button {
+                    makecatalogsPresented = true
+                } label: {
+                    Label("makecatalogs", systemImage: "books.vertical")
+                        .fontWeight(.semibold)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Rebuild catalog files from pkginfo metadata")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             if store.snapshot.catalogs.isEmpty {
                 ContentUnavailableView(
                     "No catalogs",
@@ -35,6 +47,9 @@ struct CatalogsListView: View {
             }
         }
         .navigationTitle("Catalogs (\(store.snapshot.catalogs.count))")
+        .sheet(isPresented: $makecatalogsPresented) {
+            MakecatalogsSheet()
+        }
     }
 
     private var filtered: [Catalog] {
@@ -64,6 +79,7 @@ struct CatalogDetailView: View {
                     ForEach(groupedPackages(in: catalog), id: \.name) { group in
                         if group.records.count == 1, let only = group.records.first {
                             CatalogPackageRow(record: only)
+                                .padding(.leading, 24)
                                 .onTapGesture(count: 2) { openInPackages(only) }
                         } else {
                             // Hand-rolled disclosure: SwiftUI's
@@ -172,7 +188,7 @@ struct CatalogPackageRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: "shippingbox")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.munkiStudioBrand)
                 .imageScale(.small)
             Text(record.pkginfo.name)
             if let version = record.pkginfo.version {

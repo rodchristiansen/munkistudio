@@ -58,10 +58,10 @@ struct GitView: View {
     // MARK: Header
 
     private var header: some View {
-        // Fetch / Pull / Push live in the window toolbar now (one
-        // place, visible from every section). The pane header keeps
-        // only the branch picker plus Refresh and Help — the bits
-        // that are specific to having the Git pane in view.
+        // Branch picker (with inline dirty / ahead / behind indicators)
+        // plus the remote-sync controls (Fetch / Pull / Push) — all
+        // Git-specific actions live here so the window toolbar can
+        // stay focused on Save and Refresh.
         HStack(spacing: 8) {
             if store.gitInfo != nil {
                 branchPicker
@@ -69,6 +69,21 @@ struct GitView: View {
                 Text("Not a git repository").foregroundStyle(.secondary)
             }
             Spacer()
+            if store.gitInfo != nil {
+                Button { Task { await runFetch() } } label: {
+                    Label("Fetch", systemImage: "arrow.down.to.line")
+                }
+                .help("git fetch (f)")
+                Button { Task { await runPull() } } label: {
+                    Label("Pull", systemImage: "arrow.down")
+                }
+                .help("git pull --rebase --autostash (p)")
+                Button { Task { await runPush() } } label: {
+                    Label("Push", systemImage: "arrow.up")
+                }
+                .help("git push (P)")
+                Divider().frame(height: 16)
+            }
             Button { Task { await refresh() } } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
@@ -79,42 +94,67 @@ struct GitView: View {
             .help("Show shortcuts (?)")
         }
         .labelStyle(.titleAndIcon)
+        .fontWeight(.semibold)
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
     private var branchPicker: some View {
-        HStack(spacing: 6) {
-            Text("Branch:").foregroundStyle(.secondary)
-            Menu {
-                ForEach(state.branches, id: \.name) { branch in
-                    Button {
-                        Task { await switchBranch(branch.name) }
-                    } label: {
-                        HStack {
-                            Image(systemName: branch.isCurrent ? "checkmark" : "")
-                            Text(branch.name)
-                            if let upstream = branch.upstreamName {
-                                Spacer()
-                                Text(upstream).foregroundStyle(.secondary)
-                            }
+        Menu {
+            ForEach(state.branches, id: \.name) { branch in
+                Button {
+                    Task { await switchBranch(branch.name) }
+                } label: {
+                    HStack {
+                        Image(systemName: branch.isCurrent ? "checkmark" : "")
+                        Text(branch.name)
+                        if let upstream = branch.upstreamName {
+                            Spacer()
+                            Text(upstream).foregroundStyle(.secondary)
                         }
                     }
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(state.info?.currentBranch ?? "(none)")
-                        .font(.callout.monospaced())
-                    Image(systemName: "chevron.down")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                }
             }
-            .menuStyle(.borderlessButton)
-            .frame(minWidth: 140, alignment: .leading)
-            .fixedSize()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(.secondary)
+                    .imageScale(.small)
+                Text(state.info?.currentBranch ?? "(none)")
+                    .font(.callout.monospaced())
+                    .fontWeight(.semibold)
+                if store.gitDirtyCount > 0 {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                        .help("\(store.gitDirtyCount) uncommitted change\(store.gitDirtyCount == 1 ? "" : "s")")
+                }
+                if let info = state.info {
+                    if info.aheadCount > 0 {
+                        Image(systemName: "arrow.up")
+                            .imageScale(.small)
+                            .foregroundStyle(.secondary)
+                        Text("\(info.aheadCount)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    if info.behindCount > 0 {
+                        Image(systemName: "arrow.down")
+                            .imageScale(.small)
+                            .foregroundStyle(.secondary)
+                        Text("\(info.behindCount)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Image(systemName: "chevron.down")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     // MARK: Body

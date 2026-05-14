@@ -35,7 +35,6 @@ struct ContentView: View {
 /// other sections use the standard sidebar / list / detail split.
 struct RepositoryWorkspace: View {
     @Environment(RepositoryStore.self) private var store
-    @State private var makecatalogsPresented: Bool = false
 
     var body: some View {
         @Bindable var bindableStore = store
@@ -52,11 +51,6 @@ struct RepositoryWorkspace: View {
                     SidebarView(selection: $bindableStore.selectedSection)
                         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
                 } content: {
-                    // No `max:` — when categories or catalog groups
-                    // expand, long folder names like
-                    // `installed_applications_lab` would clip against
-                    // the old 600pt ceiling. Letting the user drag
-                    // arbitrarily wide solves it for every list.
                     ContentColumn(section: store.selectedSection)
                         .navigationSplitViewColumnWidth(min: 300, ideal: 420, max: .infinity)
                 } detail: {
@@ -64,17 +58,54 @@ struct RepositoryWorkspace: View {
                 }
             }
         }
-        .toolbar {
-            // The chip lives in its own ToolbarItem so the trailing
-            // group can't squeeze it. `.fixedSize()` keeps the branch
-            // icon + text from being elided when the toolbar is tight.
-            ToolbarItem(placement: .primaryAction) {
-                if let info = store.gitInfo {
-                    RepositoryChip(info: info, dirtyCount: store.gitDirtyCount)
-                        .fixedSize()
-                }
+        // Floating results panel anchored under the toolbar on the
+        // right. `.searchSuggestions` couldn't escape the field's
+        // width, so we draw our own panel. It only appears when the
+        // user has an active query with hits; clicking a row routes
+        // to the file and clears the query.
+        .overlay(alignment: .topTrailing) {
+            if store.searchQuery.count >= 2 && !store.searchResults.isEmpty {
+                SearchResultsFloatingPanel()
+                    .padding(.trailing, 16)
+                    .padding(.top, 6)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            ToolbarItemGroup(placement: .primaryAction) {
+        }
+        .animation(.easeInOut(duration: 0.12), value: store.searchResults.count)
+        // Native `.searchable` so macOS 26 draws the chrome and the
+        // field collapses / expands consistently with Finder and Mail.
+        .searchable(
+            text: $bindableStore.searchQuery,
+            placement: .toolbar,
+            prompt: "Search the repo"
+        )
+        // Recompute results only when the query changes, not on every
+        // SwiftUI body invocation. Hovering over a suggestion row
+        // re-renders the list; without this cache, each hover ran the
+        // scanner over every file on disk, producing the flicker.
+        .task(id: store.searchQuery) {
+            let query = store.searchQuery
+            guard query.count >= 2 else {
+                store.searchResults = []
+                return
+            }
+            // Tiny debounce so fast typing doesn't kick off a scan
+            // mid-keystroke. 120ms is below human-perceivable latency
+            // but enough to coalesce a burst of keypresses.
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled, store.searchQuery == query else { return }
+            let results = SearchScanner.run(query: query, store: store)
+            guard !Task.isCancelled, store.searchQuery == query else { return }
+            store.searchResults = results
+        }
+        .toolbar {
+            // Save lives in its own ToolbarItem (not a Group) so
+            // macOS 26 gives it breathing room from the trailing
+            // Refresh icon. `.labelStyle(.titleAndIcon)` forces both
+            // the count and the glyph to render — without it the
+            // toolbar auto-collapses to icon-only on tight widths
+            // and the dirty-count badge disappears.
+            ToolbarItem(placement: .primaryAction) {
                 let dirtyCount = store.dirtyDraftCount
                 Button {
                     Task { await store.saveSession() }
@@ -85,46 +116,19 @@ struct RepositoryWorkspace: View {
                         Label("Save", systemImage: "tray.and.arrow.down")
                     }
                 }
+                .labelStyle(.titleAndIcon)
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(dirtyCount == 0)
                 .help("Flush every unsaved edit in this session to disk")
-                if store.gitInfo != nil {
-                    Button {
-                        Task { await store.runGitFetch() }
-                    } label: {
-                        Label("Fetch", systemImage: "arrow.down.to.line")
-                    }
-                    .disabled(store.gitActionInFlight != nil)
-                    .help("git fetch")
-                    Button {
-                        Task { await store.runGitPull() }
-                    } label: {
-                        Label("Pull", systemImage: "arrow.down")
-                    }
-                    .disabled(store.gitActionInFlight != nil)
-                    .help("git pull --rebase --autostash")
-                    Button {
-                        Task { await store.runGitPush() }
-                    } label: {
-                        Label("Push", systemImage: "arrow.up")
-                    }
-                    .disabled(store.gitActionInFlight != nil)
-                    .help("git push")
-                }
-                Button {
-                    makecatalogsPresented = true
-                } label: {
-                    Label("makecatalogs", systemImage: "books.vertical")
-                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { await store.reload() }
                 } label: {
-                    Label("Reload", systemImage: "arrow.clockwise")
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .help("Re-read the repository from disk")
             }
-        }
-        .sheet(isPresented: $makecatalogsPresented) {
-            MakecatalogsSheet()
         }
     }
 }
@@ -151,7 +155,6 @@ private struct ContentColumn: View {
     var body: some View {
         switch section {
         case .dashboard: DashboardView()
-        case .search: SearchView()
         case .packages: PackagesListView()
         case .manifests: ManifestsListView()
         case .catalogs: CatalogsListView()
@@ -167,7 +170,6 @@ private struct DetailColumn: View {
     var body: some View {
         switch section {
         case .dashboard: DashboardDetailView()
-        case .search: SearchDetailView()
         case .packages: PackageDetailView()
         case .manifests: ManifestDetailView()
         case .catalogs: CatalogDetailView()
@@ -182,7 +184,6 @@ private struct FullWidthColumn: View {
     var body: some View {
         switch section {
         case .dashboard: DashboardView()
-        case .search: SearchView()
         case .git: GitView()
         default: EmptyView()
         }

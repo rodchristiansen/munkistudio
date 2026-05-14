@@ -57,7 +57,7 @@ struct RepositoryPickerView: View {
                 Image(systemName: "shippingbox.fill")
                     .font(.system(size: heroSize, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(Color.munkiStudioBrand)
             }
             .accessibilityHidden(true)
             .padding(.bottom, 6)

@@ -91,7 +91,7 @@ struct IconNameField: View {
             } else {
                 Image(systemName: "shippingbox")
                     .imageScale(.large)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.munkiStudioBrand.opacity(0.6))
             }
         }
         .frame(width: 48, height: 48)

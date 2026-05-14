@@ -11,12 +11,11 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                searchHero
                 statsGrid
+                recentlyModifiedRow
                 if let info = store.gitInfo {
                     recentCommitsCard(info: info)
                 }
-                quickActionsCard
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -26,35 +25,137 @@ struct DashboardView: View {
         .task(id: store.gitInfo?.workTreeRoot) { await loadCommits() }
     }
 
-    // MARK: Search hero
+    // MARK: Recently modified
 
-    private var searchHero: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Search the entire repository")
-                .font(.title2.weight(.semibold))
-            Text("Full-content search across every key and value in every pkginfo and manifest file — like Cmd-Shift-F in VS Code.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Button {
-                store.selectedSection = .search
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                    Text("Open global search")
-                    Spacer()
-                    Image(systemName: "arrow.right")
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity)
-                .background(.regularMaterial, in: .rect(cornerRadius: 8))
-                .contentShape(.rect)
+    private var recentlyModifiedRow: some View {
+        let columns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+        return LazyVGrid(columns: columns, spacing: 14) {
+            recentPackagesCard
+            recentManifestsCard
+        }
+    }
+
+    private var recentPackagesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "shippingbox")
+                    .foregroundStyle(Color.munkiStudioBrand)
+                Text("Recently Modified Packages").font(.headline)
+                Spacer()
             }
-            .buttonStyle(.plain)
+            .padding(.bottom, 8)
+            if recentPackages.isEmpty {
+                Text("No packages yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(recentPackages, id: \.id) { record in
+                        Button {
+                            openPackage(record)
+                        } label: {
+                            recentPackageRow(record)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
+    }
+
+    private func recentPackageRow(_ record: PkginfoRecord) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(record.pkginfo.name)
+                .font(.callout)
+                .lineLimit(1)
+            if let version = record.pkginfo.version {
+                Text(version)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+            if let date = record.modifiedAt {
+                Text(relative(date))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(.rect)
+    }
+
+    private var recentManifestsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .foregroundStyle(.tint)
+                Text("Recently Modified Manifests").font(.headline)
+                Spacer()
+            }
+            .padding(.bottom, 8)
+            if recentManifests.isEmpty {
+                Text("No manifests yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(recentManifests, id: \.id) { record in
+                        Button {
+                            openManifest(record)
+                        } label: {
+                            recentManifestRow(record)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
+    }
+
+    private func recentManifestRow(_ record: ManifestRecord) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(record.manifest.manifestName)
+                .font(.callout)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if let date = record.modifiedAt {
+                Text(relative(date))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(.rect)
+    }
+
+    private var recentPackages: [PkginfoRecord] {
+        store.snapshot.pkginfos
+            .filter { $0.modifiedAt != nil }
+            .sorted { ($0.modifiedAt ?? .distantPast) > ($1.modifiedAt ?? .distantPast) }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    private var recentManifests: [ManifestRecord] {
+        store.snapshot.manifests
+            .filter { $0.modifiedAt != nil }
+            .sorted { ($0.modifiedAt ?? .distantPast) > ($1.modifiedAt ?? .distantPast) }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    private func openPackage(_ record: PkginfoRecord) {
+        store.selectedSection = .packages
+        store.selectedItemID = AnyHashable(record.id)
+        let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "Uncategorized"
+        store.expandedCategories.insert(category)
+    }
+
+    private func openManifest(_ record: ManifestRecord) {
+        store.selectedSection = .manifests
+        store.selectedItemID = AnyHashable(record.id)
     }
 
     // MARK: Stats
@@ -66,7 +167,7 @@ struct DashboardView: View {
                 label: "Packages",
                 value: "\(store.snapshot.pkginfos.count)",
                 icon: "shippingbox",
-                color: .blue
+                color: .munkiStudioBrand
             ) { store.selectedSection = .packages }
             StatTile(
                 label: "Manifests",
@@ -137,8 +238,6 @@ struct DashboardView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Open Git") { store.selectedSection = .git }
-                    .controlSize(.small)
             }
             .padding(.bottom, 10)
             if recentCommits.isEmpty {
@@ -163,33 +262,6 @@ struct DashboardView: View {
                         }
                     }
                 }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
-    }
-
-    // MARK: Quick actions
-
-    private var quickActionsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Quick actions").font(.headline)
-            HStack(spacing: 10) {
-                QuickActionButton(label: "Save session", icon: "tray.and.arrow.down", disabled: store.dirtyDraftCount == 0) {
-                    Task { await store.saveSession() }
-                }
-                if store.gitInfo != nil {
-                    QuickActionButton(label: "Git pull", icon: "arrow.down", disabled: store.gitActionInFlight != nil) {
-                        Task { await store.runGitPull() }
-                    }
-                    QuickActionButton(label: "Git push", icon: "arrow.up", disabled: store.gitActionInFlight != nil) {
-                        Task { await store.runGitPush() }
-                    }
-                }
-                QuickActionButton(label: "Reload repo", icon: "arrow.clockwise", disabled: false) {
-                    Task { await store.reload() }
-                }
-                Spacer()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -256,28 +328,6 @@ private struct StatTile: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(color.opacity(interactive ? 0.18 : 0.1), lineWidth: 1)
         )
-    }
-}
-
-private struct QuickActionButton: View {
-    let label: String
-    let icon: String
-    let disabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                Text(label)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(.regularMaterial, in: .capsule)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.5 : 1)
     }
 }
 

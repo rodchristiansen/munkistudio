@@ -9,7 +9,7 @@ struct ManifestsListView: View {
     @State private var grouping: ManifestGrouping = .directories
     @State private var sort: PackageSort = .name
     @State private var criteriaGroup = ManifestCriteriaGroup()
-    @State private var criteriaExpanded = false
+    @State private var filterPopoverShown = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -24,36 +24,11 @@ struct ManifestsListView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 Spacer()
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { criteriaExpanded.toggle() }
-                } label: {
-                    Label(
-                        criteriaGroup.criteria.isEmpty ? "Rules" : "Rules (\(criteriaGroup.criteria.count))",
-                        systemImage: criteriaExpanded ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
-                    )
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .help("Build a smart filter over manifest attributes")
-                Menu {
-                    Picker("Sort", selection: $sort) {
-                        ForEach(PackageSort.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                } label: {
-                    Label("Sort: \(sort.title)", systemImage: "arrow.up.arrow.down")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                filterButton
+                SortMenu(sort: $sort)
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)
-            if criteriaExpanded {
-                ManifestCriteriaEditor(group: $criteriaGroup)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-            }
             FilterField(text: $search, prompt: "Filter manifests", focused: $searchFocused)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -68,10 +43,40 @@ struct ManifestsListView: View {
                     }
                 }
             } else {
-                ManifestTreeList(records: filtered, grouping: grouping, sort: sort)
+                ManifestTreeList(
+                    records: filtered,
+                    grouping: grouping,
+                    sort: sort,
+                    forceExpandAll: !search.isEmpty || !criteriaGroup.criteria.isEmpty
+                )
             }
         }
         .navigationTitle("Manifests (\(store.snapshot.manifests.count))")
+    }
+
+    @ViewBuilder
+    private var filterButton: some View {
+        FilterButton(
+            isActive: !criteriaGroup.criteria.isEmpty,
+            count: criteriaGroup.criteria.count,
+            onClear: { criteriaGroup.criteria.removeAll() }
+        ) {
+            if criteriaGroup.criteria.isEmpty {
+                criteriaGroup.criteria.append(
+                    ManifestCriterion(
+                        attribute: .name,
+                        op: ManifestAttribute.name.allowedOperators.first ?? .contains,
+                        value: ""
+                    )
+                )
+            }
+            filterPopoverShown = true
+        }
+        .popover(isPresented: $filterPopoverShown, arrowEdge: .top) {
+            ManifestCriteriaEditor(group: $criteriaGroup)
+                .frame(minWidth: 520, idealWidth: 580)
+                .padding(12)
+        }
     }
 
     private var filtered: [ManifestRecord] {
@@ -115,18 +120,27 @@ struct ManifestsListView: View {
 }
 
 enum ManifestGrouping: String, CaseIterable, Identifiable, Hashable {
+    /// File-system layout — the existing slash-path tree.
+    case directories
     /// Top-level vs. included — bucket manifests by whether anything
     /// in the repo references them via `included_manifests`.
     case types
     case catalogs
-    /// File-system layout — the existing slash-path tree.
-    case directories
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .directories: "Directories"
         case .types: "Types"
         case .catalogs: "Catalogs"
-        case .directories: "Directories"
+        }
+    }
+
+    /// SF Symbol for folder rows when grouping by this scope.
+    var folderIcon: String {
+        switch self {
+        case .directories: "folder"
+        case .types: "square.stack.3d.up"
+        case .catalogs: "books.vertical"
         }
     }
 }

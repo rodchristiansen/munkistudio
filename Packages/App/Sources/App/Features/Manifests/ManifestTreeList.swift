@@ -12,22 +12,19 @@ struct ManifestTreeList: View {
     let records: [ManifestRecord]
     let grouping: ManifestGrouping
     let sort: PackageSort
+    var forceExpandAll: Bool = false
 
     var body: some View {
         @Bindable var bindableStore = store
-        // Use the `List(selection:) { ForEach }` form so `.tag()` is
-        // honoured. The `List(data, selection:)` overload ignores tags
-        // and selects by `Identifiable.id`, which broke leaf selection
-        // because our FlatRow ids are strings, not URLs.
         List(selection: $bindableStore.selectedItemID) {
             ForEach(rows) { row in
                 if let tag = row.selectionTag {
-                    ManifestRow(row: row)
+                    ManifestRow(row: row, folderIcon: grouping.folderIcon)
                         .tag(tag)
                         .listRowSeparator(.hidden)
                         .accessibilityLabel(row.accessibilityLabel)
                 } else {
-                    ManifestRow(row: row)
+                    ManifestRow(row: row, folderIcon: grouping.folderIcon)
                         .listRowSeparator(.hidden)
                         .accessibilityLabel(row.accessibilityLabel)
                 }
@@ -78,7 +75,7 @@ struct ManifestTreeList: View {
         var result: [ManifestFlatRow] = []
         for name in folderNames {
             let groupRecords = (buckets[name] ?? []).sorted(by: sortRecords)
-            let expanded = store.expandedManifestPaths.contains(name)
+            let expanded = forceExpandAll || store.expandedManifestPaths.contains(name)
             result.append(ManifestFlatRow(
                 id: name + ".__folder__",
                 depth: 0,
@@ -118,7 +115,7 @@ struct ManifestTreeList: View {
             }
             return
         }
-        let isExpanded = store.expandedManifestPaths.contains(node.fullPath)
+        let isExpanded = forceExpandAll || store.expandedManifestPaths.contains(node.fullPath)
         let totalLeaves = countLeaves(in: node)
         result.append(ManifestFlatRow(
             id: node.fullPath + ".__folder__",
@@ -177,13 +174,13 @@ struct ManifestFlatRow: Identifiable, Hashable {
 struct ManifestRow: View {
     @Environment(RepositoryStore.self) private var store
     let row: ManifestFlatRow
+    let folderIcon: String
 
     var body: some View {
         switch row.kind {
         case .leaf(_, let label):
             HStack(spacing: 6) {
                 indentSpacer
-                // Reserve chevron width so leaves align with folder rows.
                 Color.clear.frame(width: 14, height: 1)
                 Image(systemName: "doc.text")
                     .foregroundStyle(.secondary)
@@ -203,8 +200,8 @@ struct ManifestRow: View {
                         .foregroundStyle(.secondary)
                         .imageScale(.small)
                         .frame(width: 14)
-                    Image(systemName: "folder")
-                        .foregroundStyle(.secondary)
+                    Image(systemName: folderIcon)
+                        .foregroundStyle(.tint)
                         .imageScale(.small)
                     Text(name).bold()
                     Text("\(count)")
