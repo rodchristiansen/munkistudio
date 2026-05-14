@@ -47,6 +47,7 @@ struct CatalogsListView: View {
 struct CatalogDetailView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var packageQuery: String = ""
+    @State private var expandedGroups: Set<String> = []
     @FocusState private var queryFocused: Bool
 
     var body: some View {
@@ -65,14 +66,20 @@ struct CatalogDetailView: View {
                             CatalogPackageRow(record: only)
                                 .onTapGesture(count: 2) { openInPackages(only) }
                         } else {
-                            DisclosureGroup {
-                                ForEach(group.records, id: \.id) { record in
-                                    CatalogPackageRow(record: record)
-                                        .onTapGesture(count: 2) { openInPackages(record) }
-                                }
+                            // Hand-rolled disclosure: SwiftUI's
+                            // DisclosureGroup only toggles when you click
+                            // the chevron — we want the whole row to
+                            // expand on tap to match Finder-style trees.
+                            let isExpanded = expandedGroups.contains(group.name)
+                            Button {
+                                toggle(group.name)
                             } label: {
                                 HStack(spacing: 6) {
-                                    Image(systemName: "shippingbox")
+                                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                        .foregroundStyle(.secondary)
+                                        .imageScale(.small)
+                                        .frame(width: 14)
+                                    Image(systemName: "folder")
                                         .foregroundStyle(.secondary)
                                         .imageScale(.small)
                                     Text(group.name).bold()
@@ -82,6 +89,14 @@ struct CatalogDetailView: View {
                                     Spacer(minLength: 0)
                                 }
                                 .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            if isExpanded {
+                                ForEach(group.records, id: \.id) { record in
+                                    CatalogPackageRow(record: record)
+                                        .padding(.leading, 24)
+                                        .onTapGesture(count: 2) { openInPackages(record) }
+                                }
                             }
                         }
                     }
@@ -94,6 +109,14 @@ struct CatalogDetailView: View {
                 systemImage: "books.vertical",
                 description: Text("Pick a catalog from the list.")
             )
+        }
+    }
+
+    private func toggle(_ name: String) {
+        if expandedGroups.contains(name) {
+            expandedGroups.remove(name)
+        } else {
+            expandedGroups.insert(name)
         }
     }
 
@@ -148,8 +171,8 @@ struct CatalogPackageRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "doc.text")
-                .foregroundStyle(.tertiary)
+            Image(systemName: "shippingbox")
+                .foregroundStyle(.secondary)
                 .imageScale(.small)
             Text(record.pkginfo.name)
             if let version = record.pkginfo.version {

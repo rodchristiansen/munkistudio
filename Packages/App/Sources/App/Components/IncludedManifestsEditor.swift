@@ -7,8 +7,9 @@ import UniformTypeIdentifiers
 /// per-row picker would be misleading.
 struct IncludedManifestsEditor: View {
     @Binding var values: [String]
-    @State private var pending: String = ""
-    @FocusState private var addFocused: Bool
+    /// Valid manifest paths in the repo. The add menu only lists these
+    /// — typed entry is intentionally not supported.
+    let availableNames: [String]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -25,29 +26,26 @@ struct IncludedManifestsEditor: View {
                     delegate: ReorderDelegate(targetIndex: index, values: $values)
                 )
             }
-            HStack(spacing: 6) {
-                Image(systemName: "plus")
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-                TextField("Add manifest path", text: $pending)
-                    .textFieldStyle(.plain)
-                    .focused($addFocused)
-                    .onSubmit(commit)
-                Button("Add", action: commit)
-                    .disabled(pending.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .controlSize(.small)
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 6)
+            addRow
         }
     }
 
-    private func commit() {
-        let value = pending.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, !values.contains(value) else { return }
-        values.append(value)
-        pending = ""
-        addFocused = true
+    private var addRow: some View {
+        SearchableAddPicker(
+            placeholder: "Add manifest",
+            availableNames: addableNames,
+            onAdd: { add($0) }
+        )
+    }
+
+    private var addableNames: [String] {
+        let existing = Set(values)
+        return availableNames.filter { !existing.contains($0) }
+    }
+
+    private func add(_ name: String) {
+        guard !values.contains(name) else { return }
+        values.append(name)
     }
 }
 
@@ -56,7 +54,7 @@ private struct IncludedManifestRow: View {
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .center, spacing: 6) {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
                 .frame(width: 14)
@@ -76,7 +74,7 @@ private struct IncludedManifestRow: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
-        .background(.regularMaterial.opacity(0.6), in: .rect(cornerRadius: 6))
+        .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 6))
     }
 }
 
@@ -86,14 +84,15 @@ private struct ReorderDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         guard let provider = info.itemProviders(for: [.plainText]).first else { return }
-        _ = provider.loadObject(ofClass: NSString.self) { value, _ in
-            guard let name = value as? String,
-                  let sourceIndex = values.firstIndex(of: name),
-                  sourceIndex != targetIndex else { return }
+        let target = targetIndex
+        _ = provider.loadObject(ofClass: NSString.self) { [$values] value, _ in
+            guard let name = value as? String else { return }
             Task { @MainActor in
-                values.remove(at: sourceIndex)
-                let insertion = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
-                values.insert(name, at: insertion)
+                guard let sourceIndex = $values.wrappedValue.firstIndex(of: name),
+                      sourceIndex != target else { return }
+                $values.wrappedValue.remove(at: sourceIndex)
+                let insertion = target > sourceIndex ? target - 1 : target
+                $values.wrappedValue.insert(name, at: insertion)
             }
         }
     }

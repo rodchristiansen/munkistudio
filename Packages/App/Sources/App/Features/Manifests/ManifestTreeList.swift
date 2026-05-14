@@ -10,6 +10,8 @@ import Core
 struct ManifestTreeList: View {
     @Environment(RepositoryStore.self) private var store
     let records: [ManifestRecord]
+    let grouping: ManifestGrouping
+    let sort: PackageSort
 
     var body: some View {
         @Bindable var bindableStore = store
@@ -37,11 +39,71 @@ struct ManifestTreeList: View {
     }
 
     private var rows: [ManifestFlatRow] {
+        switch grouping {
+        case .directories:
+            var result: [ManifestFlatRow] = []
+            for node in ManifestNode.build(from: records) {
+                appendFlat(node: node, depth: 0, into: &result)
+            }
+            return result
+        case .types:
+            return flatGrouped { record in
+                referencedNames.contains(record.manifest.manifestName) ? "Included" : "Top-level"
+            }
+        case .catalogs:
+            return flatGrouped { record in
+                record.manifest.catalogs?.first ?? "No catalog"
+            }
+        }
+    }
+
+    /// Names referenced from any other manifest's `included_manifests`.
+    /// Used by the Types grouping to split "top-level" vs. "included".
+    private var referencedNames: Set<String> {
+        var refs: Set<String> = []
+        for record in store.snapshot.manifests {
+            if let included = record.manifest.includedManifests {
+                refs.formUnion(included)
+            }
+        }
+        return refs
+    }
+
+    /// Build a one-level folder/leaf flat list for flat groupings
+    /// (Types, Catalogs). Folder expansion still uses
+    /// `expandedManifestPaths` for persistence across re-renders.
+    private func flatGrouped(by key: (ManifestRecord) -> String) -> [ManifestFlatRow] {
+        let buckets = Dictionary(grouping: records, by: key)
+        let folderNames = buckets.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         var result: [ManifestFlatRow] = []
-        for node in ManifestNode.build(from: records) {
-            appendFlat(node: node, depth: 0, into: &result)
+        for name in folderNames {
+            let groupRecords = (buckets[name] ?? []).sorted(by: sortRecords)
+            let expanded = store.expandedManifestPaths.contains(name)
+            result.append(ManifestFlatRow(
+                id: name + ".__folder__",
+                depth: 0,
+                kind: .folder(path: name, name: name, count: groupRecords.count, expanded: expanded)
+            ))
+            if expanded {
+                for record in groupRecords {
+                    result.append(ManifestFlatRow(
+                        id: name + "/" + record.fileURL.path,
+                        depth: 1,
+                        kind: .leaf(record, label: record.manifest.manifestName)
+                    ))
+                }
+            }
         }
         return result
+    }
+
+    private func sortRecords(_ a: ManifestRecord, _ b: ManifestRecord) -> Bool {
+        switch sort {
+        case .name:
+            return a.manifest.manifestName.localizedCaseInsensitiveCompare(b.manifest.manifestName) == .orderedAscending
+        case .recentlyModified:
+            return (a.modifiedAt ?? .distantPast) > (b.modifiedAt ?? .distantPast)
+        }
     }
 
     private func appendFlat(node: ManifestNode, depth: Int, into result: inout [ManifestFlatRow]) {

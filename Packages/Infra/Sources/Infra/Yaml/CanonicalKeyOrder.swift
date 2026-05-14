@@ -14,10 +14,19 @@ public enum CanonicalKeyOrder {
     public static let manifestPriority: [String] = ["display_name"]
     public static let manifestTrailing: [String] = ["_metadata"]
 
-    public static let installsItemPriority: [String] = ["path"]
+    /// `installs[]` items begin with their identity (`path`) and the
+    /// `type` discriminator (`application` / `file` / etc.) so a
+    /// reader can immediately classify the entry before scanning the
+    /// rest of the metadata. Matches the Munki PR's `installs` sort
+    /// policy.
+    public static let installsItemPriority: [String] = ["path", "type"]
     public static let receiptPriority: [String] = ["packageid"]
     public static let conditionalItemPriority: [String] = ["condition"]
-    public static let itemsToCopyPriority: [String] = ["source_item"]
+    /// `items_to_copy[]` leads with `destination_path` — the Munki
+    /// repository convention (and what real repos in the wild already
+    /// emit). Round-tripping was previously starting with `source_item`,
+    /// causing a meaningless reorder on every save.
+    public static let itemsToCopyPriority: [String] = ["destination_path"]
 
     /// Keys whose value is multi-line shell text. When emitting YAML we
     /// always force the literal (`|`) block scalar style on these so the

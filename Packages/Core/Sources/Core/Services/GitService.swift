@@ -32,7 +32,8 @@ public protocol GitService: Sendable {
         in info: GitRepositoryInfo,
         subject: String,
         body: String?,
-        runHooks: Bool
+        runHooks: Bool,
+        amend: Bool
     ) -> AsyncThrowingStream<GitProcessEvent, any Error>
 
     /// Push the current branch to `origin`. Streams output.

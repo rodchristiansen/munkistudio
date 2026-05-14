@@ -90,7 +90,6 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
     public var autoremove: Bool?
     public var featured: Bool?
     public var suppressBundleRelocation: Bool?
-    public var defaultInstalls: Bool?
 
     // MARK: Icons & artwork
 
@@ -183,7 +182,6 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         case autoremove
         case featured
         case suppressBundleRelocation = "suppress_bundle_relocation"
-        case defaultInstalls = "default_installs"
 
         case iconName = "icon_name"
         case iconHash = "icon_hash"
@@ -218,7 +216,7 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         "installable_condition", "blocking_applications",
         "unattended_install", "unattended_uninstall", "force_install_after_date",
         "RestartAction", "OnDemand", "autoremove", "featured",
-        "suppress_bundle_relocation", "default_installs",
+        "suppress_bundle_relocation",
         "icon_name", "icon_hash",
         "display_name_staged", "description_staged", "apple_item",
         "localized_strings", "PayloadIdentifier",
@@ -230,7 +228,10 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         self.name = try container.decode(String.self, forKey: .name)
         self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
         self.description = try container.decodeIfPresent(String.self, forKey: .description)
-        self.version = try container.decodeIfPresent(String.self, forKey: .version)
+        // Tolerant-read: many real repos commit bare numbers for
+        // `version` (e.g. `version: 1` or `version: 1.2`). Accept
+        // either via `decodeFlexibleStringIfPresent`.
+        self.version = try container.decodeFlexibleStringIfPresent(forKey: .version)
         self.category = try container.decodeIfPresent(String.self, forKey: .category)
         self.developer = try container.decodeIfPresent(String.self, forKey: .developer)
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes)
@@ -271,21 +272,27 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         self.requires = try container.decodeIfPresent([String].self, forKey: .requires)
         self.updateFor = try container.decodeIfPresent([String].self, forKey: .updateFor)
         self.supportedArchitectures = try container.decodeIfPresent([SupportedArchitecture].self, forKey: .supportedArchitectures)
-        self.minimumOSVersion = try container.decodeIfPresent(String.self, forKey: .minimumOSVersion)
-        self.maximumOSVersion = try container.decodeIfPresent(String.self, forKey: .maximumOSVersion)
-        self.minimumMunkiVersion = try container.decodeIfPresent(String.self, forKey: .minimumMunkiVersion)
+        // OS versions are often authored as bare numbers (`10.13`)
+        // and Yams returns them as `Double` after .float is restored
+        // for these specific keys by tools that disagree with us.
+        self.minimumOSVersion = try container.decodeFlexibleStringIfPresent(forKey: .minimumOSVersion)
+        self.maximumOSVersion = try container.decodeFlexibleStringIfPresent(forKey: .maximumOSVersion)
+        self.minimumMunkiVersion = try container.decodeFlexibleStringIfPresent(forKey: .minimumMunkiVersion)
         self.installableCondition = try container.decodeIfPresent(String.self, forKey: .installableCondition)
         self.blockingApplications = try container.decodeIfPresent([BlockingApplication].self, forKey: .blockingApplications)
 
         self.unattendedInstall = try container.decodeIfPresent(Bool.self, forKey: .unattendedInstall)
         self.unattendedUninstall = try container.decodeIfPresent(Bool.self, forKey: .unattendedUninstall)
-        self.forceInstallAfterDate = try container.decodeIfPresent(Date.self, forKey: .forceInstallAfterDate)
+        // `force_install_after_date` is conventionally an ISO-8601
+        // timestamp. With our resolver dropping `.timestamp`, it
+        // arrives as a String; older repos may still have it as a
+        // YAML !!timestamp Date. Accept both forms.
+        self.forceInstallAfterDate = try container.decodeFlexibleDateIfPresent(forKey: .forceInstallAfterDate)
         self.restartAction = try container.decodeIfPresent(RestartAction.self, forKey: .restartAction)
         self.onDemand = try container.decodeIfPresent(Bool.self, forKey: .onDemand)
         self.autoremove = try container.decodeIfPresent(Bool.self, forKey: .autoremove)
         self.featured = try container.decodeIfPresent(Bool.self, forKey: .featured)
         self.suppressBundleRelocation = try container.decodeIfPresent(Bool.self, forKey: .suppressBundleRelocation)
-        self.defaultInstalls = try container.decodeIfPresent(Bool.self, forKey: .defaultInstalls)
 
         self.iconName = try container.decodeIfPresent(String.self, forKey: .iconName)
         self.iconHash = try container.decodeIfPresent(String.self, forKey: .iconHash)
@@ -367,7 +374,6 @@ public struct Pkginfo: Sendable, Hashable, Codable, Identifiable {
         try container.encodeIfPresent(autoremove, forKey: .autoremove)
         try container.encodeIfPresent(featured, forKey: .featured)
         try container.encodeIfPresent(suppressBundleRelocation, forKey: .suppressBundleRelocation)
-        try container.encodeIfPresent(defaultInstalls, forKey: .defaultInstalls)
 
         try container.encodeIfPresent(iconName, forKey: .iconName)
         try container.encodeIfPresent(iconHash, forKey: .iconHash)

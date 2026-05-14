@@ -58,7 +58,11 @@ struct GitView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 12) {
+        // Fetch / Pull / Push live in the window toolbar now (one
+        // place, visible from every section). The pane header keeps
+        // only the branch picker plus Refresh and Help — the bits
+        // that are specific to having the Git pane in view.
+        HStack(spacing: 8) {
             if store.gitInfo != nil {
                 branchPicker
             } else {
@@ -66,26 +70,16 @@ struct GitView: View {
             }
             Spacer()
             Button { Task { await refresh() } } label: {
-                Image(systemName: "arrow.clockwise")
+                Label("Refresh", systemImage: "arrow.clockwise")
             }
             .help("Refresh (r)")
-            Button { Task { await runPush() } } label: {
-                Image(systemName: "arrow.up.circle")
-            }
-            .help("Push (P)")
-            Button { Task { await runPull() } } label: {
-                Image(systemName: "arrow.down.circle")
-            }
-            .help("Pull (p)")
-            Button { Task { await runFetch() } } label: {
-                Image(systemName: "arrow.down.to.line.circle")
-            }
-            .help("Fetch (f)")
             Button { state.helpVisible.toggle() } label: {
-                Image(systemName: "questionmark.circle")
+                Label("Help", systemImage: "questionmark.circle")
             }
             .help("Show shortcuts (?)")
         }
+        .labelStyle(.titleAndIcon)
+        .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
@@ -126,14 +120,22 @@ struct GitView: View {
     // MARK: Body
 
     private var mainBody: some View {
-        // Aim for a 1:2 split — Files/History gets a third, diff gets
-        // two-thirds. HSplitView still lets the user drag from there.
+        // Aim for a 1:2 split — left column (composer + file list) gets
+        // a third, diff gets two-thirds. HSplitView still lets the user
+        // drag from there.
         GeometryReader { geometry in
-            let leftWidth = max(280, geometry.size.width / 3)
+            let leftWidth = max(320, geometry.size.width / 3)
             HSplitView {
                 VStack(spacing: 0) {
                     panelTabs
                     Divider()
+                    // Tower-style: commit composer lives ABOVE the
+                    // file/history list so the subject field is always
+                    // in view as you scan changes.
+                    if state.focusedPanel == .files {
+                        commitComposer
+                        Divider()
+                    }
                     if state.filterVisible {
                         HStack {
                             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -151,10 +153,8 @@ struct GitView: View {
                         .background(.regularMaterial)
                     }
                     focusedPanelContents
-                    Divider()
-                    commitComposer
                 }
-                .frame(minWidth: 280, idealWidth: leftWidth, maxWidth: 600)
+                .frame(minWidth: 320, idealWidth: leftWidth, maxWidth: 640)
 
                 DiffPane(text: state.diffText)
                     .frame(minWidth: 320)
@@ -169,18 +169,14 @@ struct GitView: View {
                     state.focusedPanel = panel
                     paneFocused = true
                 } label: {
-                    HStack(spacing: 4) {
-                        Text(label(for: panel)).font(.callout)
-                        Text("\(count(for: panel))")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        state.focusedPanel == panel ? Color.accentColor.opacity(0.15) : Color.clear,
-                        in: .rect(cornerRadius: 5)
-                    )
+                    Text(label(for: panel))
+                        .font(.callout)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            state.focusedPanel == panel ? Color.accentColor.opacity(0.15) : Color.clear,
+                            in: .rect(cornerRadius: 5)
+                        )
                 }
                 .buttonStyle(.plain)
                 .help("\(label(for: panel)) (press \(keyHint(for: panel)))")
@@ -205,13 +201,6 @@ struct GitView: View {
         }
     }
 
-    private func count(for panel: GitPaneState.Panel) -> Int {
-        switch panel {
-        case .files: state.files.count
-        case .history: state.commits.count
-        }
-    }
-
     @ViewBuilder
     private var focusedPanelContents: some View {
         switch state.focusedPanel {
@@ -221,18 +210,17 @@ struct GitView: View {
     }
 
     // MARK: Commit composer
+    //
+    // Tower-app-inspired layout: subject + body at the top, three
+    // checkboxes (Amend / Sign Off / Skip Hooks) in the middle row,
+    // then a "Stage All" button paired with the primary Commit
+    // action. The composer renders ABOVE the file list (see
+    // `mainBody`) so the subject field stays visible while scanning
+    // changes.
 
     private var commitComposer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Commit").font(.headline)
-                Spacer()
-                if let message = state.statusMessage {
-                    Label(message, systemImage: statusIcon(for: state.statusKind))
-                        .foregroundStyle(statusColor(for: state.statusKind))
-                        .font(.callout)
-                }
-            }
+            commitFieldsHeader
             TextField("Subject", text: Bindable(state).commitSubject)
                 .textFieldStyle(.roundedBorder)
                 .focused($commitSubjectFocused)
@@ -240,16 +228,13 @@ struct GitView: View {
                 .frame(minHeight: 50, maxHeight: 80)
                 .scrollContentBackground(.hidden)
                 .padding(6)
-                .background(.regularMaterial, in: .rect(cornerRadius: 6))
-            HStack {
-                Toggle("Run hooks", isOn: Bindable(state).runHooks)
-                Spacer()
-                Button("Commit") { Task { await runCommit() } }
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(state.commitSubject.isEmpty)
-                Button("Commit & Push") { Task { await runCommitAndPush() } }
-                    .disabled(state.commitSubject.isEmpty)
-            }
+                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+            commitOptionsRow
+            commitActionRow
             if !state.processOutput.isEmpty {
                 ScrollView {
                     Text(state.processOutput)
@@ -258,10 +243,81 @@ struct GitView: View {
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 100)
-                .background(.regularMaterial, in: .rect(cornerRadius: 6))
+                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
             }
         }
         .padding(12)
+    }
+
+    private var commitFieldsHeader: some View {
+        HStack {
+            Text("Commit").font(.headline)
+            Spacer()
+            statusTrailing
+        }
+    }
+
+    @ViewBuilder
+    private var statusTrailing: some View {
+        // Prefer the transient status message (commit failed / pushed)
+        // when one is set; otherwise fall back to the "Last refreshed
+        // Xm ago" stamp so the user always knows how stale the state is.
+        if let message = state.statusMessage {
+            Label(message, systemImage: statusIcon(for: state.statusKind))
+                .foregroundStyle(statusColor(for: state.statusKind))
+                .font(.callout)
+        } else if let stamp = state.lastRefreshedAt {
+            TimelineView(.periodic(from: stamp, by: 30)) { _ in
+                Text("Last refreshed \(Self.relative(from: stamp))")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Compact relative duration with single-character units, matching
+    /// the `m`/`h`/`d` shorthand the user asked for. Uses absolute
+    /// elapsed seconds rather than a calendar-aware DateFormatter — the
+    /// indicator is meant to read like a stopwatch, not a calendar.
+    private static func relative(from date: Date) -> String {
+        let seconds = max(0, Int(Date.now.timeIntervalSince(date)))
+        if seconds < 60 { return "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h ago" }
+        let days = hours / 24
+        return "\(days)d ago"
+    }
+
+    private var commitOptionsRow: some View {
+        HStack(spacing: 16) {
+            Toggle("Amend", isOn: Bindable(state).amend)
+                .help("Amend the last commit instead of creating a new one")
+            Toggle("Skip Hooks", isOn: Bindable(state).skipHooks)
+                .help("Pass --no-verify to bypass pre-commit and commit-msg hooks")
+            Spacer()
+        }
+        .toggleStyle(.checkbox)
+        .controlSize(.small)
+    }
+
+    private var commitActionRow: some View {
+        HStack {
+            Button("Stage All") { Task { await toggleStageAll() } }
+                .controlSize(.small)
+                .disabled(state.files.isEmpty)
+            Spacer()
+            Button("Commit") { Task { await runCommit() } }
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(state.commitSubject.isEmpty)
+            Button("Commit & Push") { Task { await runCommitAndPush() } }
+                .disabled(state.commitSubject.isEmpty)
+        }
     }
 
     private func statusIcon(for kind: GitPaneState.StatusKind) -> String {
@@ -377,7 +433,14 @@ private extension GitView {
             if state.fileSelection == nil { state.fileSelection = state.files.first?.relativePath }
             if state.commitSelection == nil { state.commitSelection = state.commits.first?.sha }
             await syncDiff()
-            note("Refreshed", kind: .info)
+            state.lastRefreshedAt = Date()
+            // Clear the transient status message so the
+            // "Last refreshed Xm ago" stamp takes over once the
+            // info-toast disappears.
+            state.statusMessage = nil
+            // Keep the toolbar's dirty dot in sync with the pane's
+            // file list — both should agree on count and freshness.
+            store.gitDirtyCount = state.files.count
         } catch {
             note("Refresh failed: \(error.localizedDescription)", kind: .error)
         }
@@ -455,7 +518,8 @@ private extension GitView {
                 in: info,
                 subject: state.commitSubject,
                 body: state.commitBody.isEmpty ? nil : state.commitBody,
-                runHooks: state.runHooks
+                runHooks: !state.skipHooks,
+                amend: state.amend
             ) {
                 switch event {
                 case .line(let line): state.processOutput += line + "\n"
@@ -463,6 +527,11 @@ private extension GitView {
                     if outcome.exitCode == 0 {
                         state.commitSubject = ""
                         state.commitBody = ""
+                        // Amend and skip-hooks are one-shot — clear
+                        // them so the next commit defaults back to a
+                        // normal new commit with hooks enabled.
+                        state.amend = false
+                        state.skipHooks = false
                         note("Committed \(outcome.commitSHA?.prefix(8) ?? "")", kind: .success)
                         await refresh()
                     } else {
@@ -481,7 +550,14 @@ private extension GitView {
     }
 
     func runPush() async { await runShell(["push"], successMessage: "Pushed") }
-    func runPull() async { await runShell(["pull"], successMessage: "Pulled") }
+    // Default pull strategy: `--rebase --autostash`. Rebasing keeps
+    // history linear (no incidental merge commits when syncing with
+    // remote), and autostash transparently stashes dirty changes
+    // before the pull and re-applies them after, so the user never
+    // has to interrupt a pull to commit or stash by hand.
+    func runPull() async {
+        await runShell(["pull", "--rebase", "--autostash"], successMessage: "Pulled (rebased)")
+    }
     func runFetch() async { await runShell(["fetch"], successMessage: "Fetched") }
     func switchBranch(_ name: String) async {
         await runShell(["switch", name], successMessage: "Switched to \(name)")

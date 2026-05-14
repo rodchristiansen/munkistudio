@@ -19,20 +19,27 @@ struct ManifestItemListEditor: View {
     let title: String
     let kind: Kind
     @Binding var manifest: Manifest
-
-    @State private var newItemName: String = ""
-    @FocusState private var addFocused: Bool
+    /// Valid package names available in the repo. The add menu only
+    /// lists these — free-text entry is intentionally not supported so
+    /// users can't introduce typos that resolve to nothing at runtime.
+    let availableNames: [String]
 
     enum Kind {
         case managedInstalls, managedUninstalls, managedUpdates
         case optionalInstalls, featuredItems
+        /// `default_installs` only lives at the manifest top level
+        /// (Munki doesn't recognise it inside conditional_items), so
+        /// the per-row conditional picker stays hidden for this kind.
+        case defaultInstalls
     }
 
-    /// True when the manifest has at least one conditional_items entry.
-    /// Drives whether each row shows its per-item Conditional dropdown
-    /// — there's no choice to make if conditions don't exist yet.
+    /// True when the manifest has at least one conditional_items entry
+    /// AND this kind can be conditional. `default_installs` is only
+    /// valid at the manifest top level, so the picker stays hidden
+    /// even when the manifest has conditions defined.
     private var conditionsExist: Bool {
-        !(manifest.conditionalItems?.isEmpty ?? true)
+        if case .defaultInstalls = kind { return false }
+        return !(manifest.conditionalItems?.isEmpty ?? true)
     }
 
     var body: some View {
@@ -59,7 +66,7 @@ struct ManifestItemListEditor: View {
             addRow
         }
         .padding(8)
-        .background(.regularMaterial.opacity(0.4), in: .rect(cornerRadius: 8))
+        .background(Color.secondary.opacity(0.06), in: .rect(cornerRadius: 8))
     }
 
     // MARK: Layout
@@ -80,19 +87,28 @@ struct ManifestItemListEditor: View {
     }
 
     private var addRow: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "plus")
-                .foregroundStyle(.tertiary)
-            TextField("Add package", text: $newItemName)
-                .textFieldStyle(.plain)
-                .focused($addFocused)
-                .onSubmit { addPending() }
-            Button("Add") { addPending() }
-                .disabled(newItemName.trimmingCharacters(in: .whitespaces).isEmpty)
-                .controlSize(.small)
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 6)
+        // Search-first add: a Menu over a thousand packages is
+        // unusable. The popover lets the user type to filter and hit
+        // Return to pick the first match.
+        SearchableAddPicker(
+            placeholder: "Add package",
+            availableNames: addableNames,
+            onAdd: { add($0) }
+        )
+    }
+
+    /// Names not already present anywhere in this list (top-level or
+    /// inside a conditional). Prevents duplicate-add UI noise.
+    private var addableNames: [String] {
+        let existing = Set(entries.map(\.name))
+        return availableNames.filter { !existing.contains($0) }
+    }
+
+    private func add(_ name: String) {
+        var current = manifestArray ?? []
+        guard !current.contains(name) else { return }
+        current.append(name)
+        setManifestArray(current)
     }
 
     // MARK: Data
@@ -133,16 +149,6 @@ struct ManifestItemListEditor: View {
     }
 
     // MARK: Mutation
-
-    private func addPending() {
-        let value = newItemName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        var current = manifestArray ?? []
-        current.append(value)
-        setManifestArray(current)
-        newItemName = ""
-        addFocused = true
-    }
 
     private func remove(_ entry: Entry) {
         switch entry.conditionPath {
@@ -203,6 +209,7 @@ struct ManifestItemListEditor: View {
         case .managedUpdates: manifest.managedUpdates
         case .optionalInstalls: manifest.optionalInstalls
         case .featuredItems: manifest.featuredItems
+        case .defaultInstalls: manifest.defaultInstalls
         }
     }
 
@@ -214,6 +221,7 @@ struct ManifestItemListEditor: View {
         case .managedUpdates: manifest.managedUpdates = normalized
         case .optionalInstalls: manifest.optionalInstalls = normalized
         case .featuredItems: manifest.featuredItems = normalized
+        case .defaultInstalls: manifest.defaultInstalls = normalized
         }
     }
 
@@ -226,6 +234,9 @@ struct ManifestItemListEditor: View {
         case .managedUpdates: item.managedUpdates
         case .optionalInstalls: item.optionalInstalls
         case .featuredItems: item.featuredItems
+        // default_installs can't be nested inside conditional_items
+        // in Munki — return nil so the editor never tries to read it.
+        case .defaultInstalls: nil
         }
     }
 
@@ -242,6 +253,7 @@ struct ManifestItemListEditor: View {
         case .managedUpdates: item.managedUpdates = normalized
         case .optionalInstalls: item.optionalInstalls = normalized
         case .featuredItems: item.featuredItems = normalized
+        case .defaultInstalls: return // no-op: default_installs is top-level only
         }
         conditionals[index] = item
     }
@@ -257,23 +269,20 @@ private struct ManifestItemRow: View {
     let onMoveTo: (ConditionPath?) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        // `.top` alignment + lineLimit(2) on the menu label lets the row
+        // grow taller when the selected condition is too long for one
+        // line; the picker is capped to ~50% of the row width so it can't
+        // shove the package name off-screen.
+        HStack(alignment: .center, spacing: 6) {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
                 .frame(width: 14)
                 .accessibilityHidden(true)
             Text(entry.name)
                 .lineLimit(1)
-            Spacer()
+            Spacer(minLength: 8)
             if showsConditionalPicker {
-                Picker("Conditional", selection: pickerBinding) {
-                    ForEach(conditionOptions, id: \.id) { option in
-                        Text(option.label).tag(option.path)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(width: 200)
+                conditionalMenu
             }
             Button(role: .destructive, action: onRemove) {
                 Image(systemName: "minus.circle")
@@ -284,11 +293,37 @@ private struct ManifestItemRow: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
-        .background(.regularMaterial.opacity(0.6), in: .rect(cornerRadius: 6))
+        .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 6))
     }
 
-    private var pickerBinding: Binding<ConditionPath?> {
-        Binding(get: { entry.conditionPath }, set: { onMoveTo($0) })
+    private var conditionalMenu: some View {
+        Menu {
+            ForEach(conditionOptions, id: \.id) { option in
+                Button(option.menuLabel) { onMoveTo(option.path) }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(selectedLabel)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+                    .truncationMode(.tail)
+                    .foregroundStyle(selectedLabel.isEmpty ? .tertiary : .primary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 360, alignment: .trailing)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel("Conditional")
+    }
+
+    /// Empty string when no condition is selected — the dropdown stays
+    /// clickable but doesn't display a placeholder word like "Always".
+    private var selectedLabel: String {
+        guard let path = entry.conditionPath else { return "" }
+        return conditionOptions.first { $0.path == path }?.label ?? ""
     }
 }
 
@@ -344,7 +379,16 @@ struct ConditionOption: Identifiable {
         path?.id ?? "top"
     }
 
-    static let top = ConditionOption(path: nil, label: "Always")
+    /// What to show inside the dropdown menu. The "no condition" option
+    /// needs a visible placeholder there so the user can pick it; the
+    /// `label` stays empty so the picker's resting state shows nothing.
+    var menuLabel: String {
+        label.isEmpty ? "—" : label
+    }
+
+    /// "No conditional" — rendered as an empty menu label so the
+    /// dropdown shows nothing when an item lives at the top level.
+    static let top = ConditionOption(path: nil, label: "")
 
     static func condition(index: Int, source: String) -> ConditionOption {
         let trimmed = source.isEmpty ? "(empty)" : source

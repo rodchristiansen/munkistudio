@@ -69,13 +69,26 @@ public struct PkginfoRecord: Sendable, Hashable, Identifiable {
     public var pkginfo: Pkginfo
     public var fileURL: URL
     public var format: RepoFormat
+    /// File-system creation date. `nil` for records not loaded from
+    /// disk (tests, in-memory drafts).
+    public var createdAt: Date?
+    /// File-system modification date. Drives "Recently Modified" sort.
+    public var modifiedAt: Date?
 
     public var id: URL { fileURL }
 
-    public init(pkginfo: Pkginfo, fileURL: URL, format: RepoFormat) {
+    public init(
+        pkginfo: Pkginfo,
+        fileURL: URL,
+        format: RepoFormat,
+        createdAt: Date? = nil,
+        modifiedAt: Date? = nil
+    ) {
         self.pkginfo = pkginfo
         self.fileURL = fileURL
         self.format = format
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
     }
 }
 
@@ -84,12 +97,22 @@ public struct ManifestRecord: Sendable, Hashable, Identifiable {
     public var manifest: Manifest
     public var fileURL: URL
     public var format: RepoFormat
+    public var createdAt: Date?
+    public var modifiedAt: Date?
 
     public var id: URL { fileURL }
 
-    public init(manifest: Manifest, fileURL: URL, format: RepoFormat) {
+    public init(
+        manifest: Manifest,
+        fileURL: URL,
+        format: RepoFormat,
+        createdAt: Date? = nil,
+        modifiedAt: Date? = nil
+    ) {
         self.manifest = manifest
         self.fileURL = fileURL
         self.format = format
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
     }
 }

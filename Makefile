@@ -1,4 +1,4 @@
-# MunkiAdmin app bundle build
+# MunkiStudio app bundle build
 #
 # `swift run` produces an unbundled executable that macOS 26 treats as
 # untrusted — keyboard events silently drop into a sandbox jail. To get
@@ -12,24 +12,24 @@
 #                        (CODE_SIGN_IDENTITY="Developer ID Application: …")
 #   make notarize      — submit to Apple for notarization
 #                        (NOTARY_PROFILE=AC_PASSWORD APPLE_ID, etc.)
-#   make clean         — remove .build and build/MunkiAdmin.app
+#   make clean         — remove .build and build/MunkiStudio.app
 #
 # Variables (override on the command line):
 #   CONFIGURATION       debug | release  (default: debug)
 #   CODE_SIGN_IDENTITY  signing identity passed to codesign (default: "-")
 #   BUNDLE_ID           CFBundleIdentifier in Info.plist
-#                       (default: systems.focused.MunkiAdmin)
+#                       (default: systems.focused.MunkiStudio)
 #   MARKETING_VERSION   CFBundleShortVersionString (default: 0.1.0)
 #   BUILD_VERSION       CFBundleVersion (default: 1)
 
 CONFIGURATION ?= debug
 CODE_SIGN_IDENTITY ?= -
-BUNDLE_ID ?= systems.focused.MunkiAdmin
+BUNDLE_ID ?= systems.focused.MunkiStudio
 MARKETING_VERSION ?= 0.1.0
 BUILD_VERSION ?= 1
 
 APP_PACKAGE := Packages/App
-APP_NAME := MunkiAdmin
+APP_NAME := MunkiStudio
 APP_BUNDLE := build/$(APP_NAME).app
 APP_CONTENTS := $(APP_BUNDLE)/Contents
 APP_MACOS := $(APP_CONTENTS)/MacOS
@@ -40,14 +40,14 @@ BIN_PATH := $(APP_PACKAGE)/.build/$(CONFIGURATION)/$(APP_NAME)
 .PHONY: app release sign-dev notarize clean run
 
 app: CONFIGURATION = debug
-app: build/MunkiAdmin.app
+app: build/MunkiStudio.app
 	@echo
 	@echo "👉  Built $(APP_BUNDLE) — open it with:"
 	@echo "    open $(APP_BUNDLE)"
 	@echo
 
 release: CONFIGURATION = release
-release: build/MunkiAdmin.app
+release: build/MunkiStudio.app
 	@echo "Release build at $(APP_BUNDLE)"
 
 build/$(APP_NAME).app: $(BIN_PATH) $(APP_PACKAGE)/Info.plist | build
@@ -62,7 +62,7 @@ build/$(APP_NAME).app: $(BIN_PATH) $(APP_PACKAGE)/Info.plist | build
 	    "$(BUILD_VERSION)" \
 	    > $(APP_CONTENTS)/Info.plist
 	codesign --force --options runtime \
-	    --entitlements $(APP_PACKAGE)/MunkiAdmin.entitlements \
+	    --entitlements $(APP_PACKAGE)/MunkiStudio.entitlements \
 	    --sign "$(CODE_SIGN_IDENTITY)" \
 	    $(APP_BUNDLE)
 

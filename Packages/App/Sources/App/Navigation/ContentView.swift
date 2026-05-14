@@ -16,7 +16,7 @@ struct ContentView: View {
                 RepositoryWorkspace()
             }
         }
-        .navigationTitle(store.repository?.displayName ?? "MunkiAdmin")
+        .navigationTitle(store.repository?.displayName ?? "MunkiStudio")
         .task { await autoOpenIfAvailable() }
     }
 
@@ -50,22 +50,67 @@ struct RepositoryWorkspace: View {
             } else {
                 NavigationSplitView {
                     SidebarView(selection: $bindableStore.selectedSection)
-                        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
+                        .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
                 } content: {
+                    // No `max:` — when categories or catalog groups
+                    // expand, long folder names like
+                    // `installed_applications_lab` would clip against
+                    // the old 600pt ceiling. Letting the user drag
+                    // arbitrarily wide solves it for every list.
                     ContentColumn(section: store.selectedSection)
-                        .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 600)
+                        .navigationSplitViewColumnWidth(min: 300, ideal: 420, max: .infinity)
                 } detail: {
                     DetailColumn(section: store.selectedSection)
                 }
             }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .principal) {
+            // The chip lives in its own ToolbarItem so the trailing
+            // group can't squeeze it. `.fixedSize()` keeps the branch
+            // icon + text from being elided when the toolbar is tight.
+            ToolbarItem(placement: .primaryAction) {
                 if let info = store.gitInfo {
-                    RepositoryChip(info: info)
+                    RepositoryChip(info: info, dirtyCount: store.gitDirtyCount)
+                        .fixedSize()
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                let dirtyCount = store.dirtyDraftCount
+                Button {
+                    Task { await store.saveSession() }
+                } label: {
+                    if dirtyCount > 0 {
+                        Label("Save (\(dirtyCount))", systemImage: "tray.and.arrow.down.fill")
+                    } else {
+                        Label("Save", systemImage: "tray.and.arrow.down")
+                    }
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(dirtyCount == 0)
+                .help("Flush every unsaved edit in this session to disk")
+                if store.gitInfo != nil {
+                    Button {
+                        Task { await store.runGitFetch() }
+                    } label: {
+                        Label("Fetch", systemImage: "arrow.down.to.line")
+                    }
+                    .disabled(store.gitActionInFlight != nil)
+                    .help("git fetch")
+                    Button {
+                        Task { await store.runGitPull() }
+                    } label: {
+                        Label("Pull", systemImage: "arrow.down")
+                    }
+                    .disabled(store.gitActionInFlight != nil)
+                    .help("git pull --rebase --autostash")
+                    Button {
+                        Task { await store.runGitPush() }
+                    } label: {
+                        Label("Push", systemImage: "arrow.up")
+                    }
+                    .disabled(store.gitActionInFlight != nil)
+                    .help("git push")
+                }
                 Button {
                     makecatalogsPresented = true
                 } label: {
@@ -105,6 +150,8 @@ private struct ContentColumn: View {
 
     var body: some View {
         switch section {
+        case .dashboard: DashboardView()
+        case .search: SearchView()
         case .packages: PackagesListView()
         case .manifests: ManifestsListView()
         case .catalogs: CatalogsListView()
@@ -119,6 +166,8 @@ private struct DetailColumn: View {
 
     var body: some View {
         switch section {
+        case .dashboard: DashboardDetailView()
+        case .search: SearchDetailView()
         case .packages: PackageDetailView()
         case .manifests: ManifestDetailView()
         case .catalogs: CatalogDetailView()
@@ -127,26 +176,50 @@ private struct DetailColumn: View {
     }
 }
 
-/// Top-bar chip showing the current branch + ahead/behind. Stays out of
-/// the way when no git repo is detected.
+/// Compact toolbar chip showing the current branch + ahead/behind +
+/// dirty dot. Sits in the trailing toolbar group beside the action
+/// buttons so it reads as a status indicator, not a header.
 struct RepositoryChip: View {
     let info: GitRepositoryInfo
+    let dirtyCount: Int
 
     var body: some View {
-        HStack(spacing: 6) {
+        // macOS 26's toolbar wraps each item in a capsule; without
+        // explicit horizontal padding the leading glyph clips against
+        // the capsule's inner edge. The padding lives on the HStack so
+        // the capsule sizes around it correctly.
+        HStack(spacing: 5) {
             Image(systemName: "arrow.triangle.branch")
                 .foregroundStyle(.secondary)
+                .imageScale(.small)
             Text(info.currentBranch ?? "(detached)")
-                .font(.callout.monospaced())
+                .font(.callout)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            if dirtyCount > 0 {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 7, height: 7)
+                    .help("\(dirtyCount) uncommitted change\(dirtyCount == 1 ? "" : "s")")
+            }
             if info.aheadCount > 0 {
-                Label("\(info.aheadCount)", systemImage: "arrow.up").labelStyle(.titleAndIcon)
+                Image(systemName: "arrow.up")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                Text("\(info.aheadCount)")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
             if info.behindCount > 0 {
-                Label("\(info.behindCount)", systemImage: "arrow.down").labelStyle(.titleAndIcon)
+                Image(systemName: "arrow.down")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                Text("\(info.behindCount)")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(.regularMaterial, in: .capsule)
+        .padding(.horizontal, 6)
+        .help("Current branch")
     }
 }

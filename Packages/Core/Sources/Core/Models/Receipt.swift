@@ -31,4 +31,15 @@ public struct Receipt: Sendable, Hashable, Codable {
         case optional
         case noUnattendedUninstall = "no_unattended_uninstall"
     }
+
+    /// Tolerant-read: `packageid` and `version` are conventionally
+    /// strings but YAML happily resolves digits-only values as Int.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.packageid = try c.decodeFlexibleStringIfPresent(forKey: .packageid)
+        self.version = try c.decodeFlexibleStringIfPresent(forKey: .version)
+        self.installedSize = try c.decodeIfPresent(Int.self, forKey: .installedSize)
+        self.optional = try c.decodeIfPresent(Bool.self, forKey: .optional)
+        self.noUnattendedUninstall = try c.decodeIfPresent(Bool.self, forKey: .noUnattendedUninstall)
+    }
 }

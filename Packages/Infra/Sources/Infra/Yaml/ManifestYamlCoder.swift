@@ -10,7 +10,7 @@ public enum ManifestYamlCoder {
         guard let any = try Yams.load(yaml: yaml, MunkiYamlResolver.strict) else {
             throw MunkiCodingError.malformedTopLevel
         }
-        guard let dict = any as? [String: Any] else {
+        guard let dict = YamlSanitizer.sanitize(any) as? [String: Any] else {
             throw MunkiCodingError.malformedTopLevel
         }
         let data = try PropertyListSerialization.data(
@@ -30,6 +30,8 @@ public enum ManifestYamlCoder {
             throw MunkiCodingError.malformedTopLevel
         }
         let node = try FoundationToNode.node(from: dict, context: .manifestRoot)
-        return try Yams.serialize(node: node, sortKeys: false)
+        // See `PkginfoYamlCoder.encode` for the rationale on
+        // `allowUnicode: true`.
+        return try Yams.serialize(node: node, allowUnicode: true, sortKeys: false)
     }
 }

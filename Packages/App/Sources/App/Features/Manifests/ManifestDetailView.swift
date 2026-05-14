@@ -27,71 +27,180 @@ struct ManifestDetailView: View {
 
 private struct ManifestEditor: View {
     @Environment(RepositoryStore.self) private var store
-    @State private var draft: Manifest
-    @State private var format: RepoFormat
-    @State private var fileURL: URL
-    @State private var isDirty: Bool = false
-    @State private var saveError: String?
+    let record: ManifestRecord
 
-    init(record: ManifestRecord) {
-        _draft = State(initialValue: record.manifest)
-        _format = State(initialValue: record.format)
-        _fileURL = State(initialValue: record.fileURL)
+    private var draft: Binding<Manifest> {
+        Binding(
+            get: { store.draftManifest(for: record) },
+            set: { store.setDraftManifest($0, for: record) }
+        )
     }
 
+    private var format: Binding<RepoFormat> {
+        Binding(
+            get: { store.draftFormat(for: record.fileURL, default: record.format) },
+            set: { store.setDraftFormat($0, for: record.fileURL, savedFormat: record.format) }
+        )
+    }
+
+    private var fileURL: URL { record.fileURL }
+    private var createdAt: Date? { record.createdAt }
+    private var modifiedAt: Date? { record.modifiedAt }
+
     var body: some View {
-        Form {
-            Section("Identity") {
-                LabeledContent("Name", value: draft.manifestName)
-                TextField("Display name", text: optional($draft.displayName))
-                TextField("User", text: optional($draft.user))
-                TextEditor(text: optional($draft.notes)).frame(minHeight: 60)
+        // Card-based layout matching PackageDetailView. SwiftUI's
+        // grouped `Form` pushed every value to the trailing edge,
+        // leaving a huge gap between "Name" and "Bootstrap" — the
+        // hand-rolled LabelledField keeps the value next to the label.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                identityCard
+                catalogsCard
+                includedManifestsCard
+                ManifestItemListEditor(title: "Managed installs", kind: .managedInstalls, manifest: draft, availableNames: availablePackageNames)
+                ManifestItemListEditor(title: "Managed updates", kind: .managedUpdates, manifest: draft, availableNames: availablePackageNames)
+                ManifestItemListEditor(title: "Managed uninstalls", kind: .managedUninstalls, manifest: draft, availableNames: availablePackageNames)
+                ManifestItemListEditor(title: "Optional installs", kind: .optionalInstalls, manifest: draft, availableNames: availablePackageNames)
+                ManifestItemListEditor(title: "Featured items", kind: .featuredItems, manifest: draft, availableNames: availablePackageNames)
+                ManifestItemListEditor(title: "Default installs", kind: .defaultInstalls, manifest: draft, availableNames: availablePackageNames)
+                conditionsCard
+                fileCard
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(16)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
 
-            Section("Catalogs") {
-                CatalogChecklist(selected: bindArray(\.catalogs))
+    // MARK: Cards
+
+    private var identityCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Identity")
+            VStack(alignment: .leading, spacing: 10) {
+                LabelledField("Name") {
+                    Text(draft.wrappedValue.manifestName)
+                        .font(.system(.callout, design: .monospaced))
+                }
+                LabelledField("Display name") {
+                    TextField("", text: optional(draft.displayName))
+                        .textFieldStyle(.roundedBorder)
+                }
+                LabelledField("User") {
+                    TextField("", text: optional(draft.user))
+                        .textFieldStyle(.roundedBorder)
+                }
+                LabelledField("Notes", alignment: .top) {
+                    TextEditor(text: optional(draft.notes))
+                        .frame(minHeight: 70)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
+                        )
+                }
             }
+            .cardStyle()
+        }
+    }
 
-            Section("Included manifests") {
-                IncludedManifestsEditor(values: bindArray(\.includedManifests))
-            }
+    private var catalogsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Catalogs")
+            CatalogChecklist(selected: bindArray(\.catalogs))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
+        }
+    }
 
-            ManifestItemListEditor(title: "Managed installs", kind: .managedInstalls, manifest: $draft)
-            ManifestItemListEditor(title: "Managed updates", kind: .managedUpdates, manifest: $draft)
-            ManifestItemListEditor(title: "Managed uninstalls", kind: .managedUninstalls, manifest: $draft)
-            ManifestItemListEditor(title: "Optional installs", kind: .optionalInstalls, manifest: $draft)
-            ManifestItemListEditor(title: "Featured items", kind: .featuredItems, manifest: $draft)
+    private var includedManifestsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Included manifests")
+            IncludedManifestsEditor(
+                values: bindArray(\.includedManifests),
+                availableNames: availableManifestNames
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardStyle()
+        }
+    }
 
-            Section("Conditions") {
-                ConditionalItemsEditor(items: Binding(
-                    get: { draft.conditionalItems ?? [] },
-                    set: { draft.conditionalItems = $0.isEmpty ? nil : $0 }
-                ))
-            }
+    private var conditionsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Conditions")
+            ConditionalItemsEditor(items: Binding(
+                get: { draft.wrappedValue.conditionalItems ?? [] },
+                set: { draft.wrappedValue.conditionalItems = $0.isEmpty ? nil : $0 }
+            ))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardStyle()
+        }
+    }
 
-            Section("File") {
-                LabeledContent("Path", value: fileURL.path)
-                Picker("Format", selection: $format) {
-                    ForEach(RepoFormat.allCases, id: \.self) { format in
-                        Text(format.preferredExtension.uppercased()).tag(format)
+    private var fileCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("File")
+            VStack(alignment: .leading, spacing: 10) {
+                LabelledField("Path") {
+                    Text(fileURL.path)
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
+                LabelledField("Format") {
+                    Picker("", selection: format) {
+                        ForEach(RepoFormat.allCases, id: \.self) { format in
+                            Text(format.preferredExtension.uppercased()).tag(format)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                if let createdAt {
+                    LabelledField("Created") {
+                        Text(Self.timestampFormatter.string(from: createdAt))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let modifiedAt {
+                    LabelledField("Modified") {
+                        Text(Self.timestampFormatter.string(from: modifiedAt))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
+            .cardStyle()
+        }
+    }
 
-            if let saveError {
-                Section { Text(saveError).foregroundStyle(.red) }
-            }
-        }
-        .formStyle(.grouped)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button("Save") { Task { await save() } }
-                    .keyboardShortcut("s", modifiers: .command)
-                    .disabled(!isDirty)
-            }
-        }
-        .onChange(of: draft) { isDirty = true }
-        .onChange(of: format) { isDirty = true }
+    private static let timestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    /// Sorted, de-duplicated package names from the open repo. Used to
+    /// populate the install-list add menus so users can't enter package
+    /// names that don't exist in this repo.
+    private var availablePackageNames: [String] {
+        Array(Set(store.snapshot.pkginfos.map(\.pkginfo.name))).sorted()
+    }
+
+    /// Sorted manifest paths (the slash-delimited tree path used in
+    /// `included_manifests`). Excludes the manifest currently being
+    /// edited so it can't include itself.
+    private var availableManifestNames: [String] {
+        let selfName = draft.wrappedValue.manifestName
+        return store.snapshot.manifests
+            .map(\.manifest.manifestName)
+            .filter { $0 != selfName }
+            .sorted()
     }
 
     private func optional(_ binding: Binding<String?>) -> Binding<String> {
@@ -100,28 +209,8 @@ private struct ManifestEditor: View {
 
     private func bindArray(_ keyPath: WritableKeyPath<Manifest, [String]?>) -> Binding<[String]> {
         Binding(
-            get: { draft[keyPath: keyPath] ?? [] },
-            set: { draft[keyPath: keyPath] = $0.isEmpty ? nil : $0 }
+            get: { draft.wrappedValue[keyPath: keyPath] ?? [] },
+            set: { draft.wrappedValue[keyPath: keyPath] = $0.isEmpty ? nil : $0 }
         )
-    }
-
-    private func save() async {
-        var url = fileURL
-        if url.pathExtension != format.preferredExtension {
-            url = url.deletingPathExtension().appendingPathExtension(format.preferredExtension)
-        }
-        let record = ManifestRecord(manifest: draft, fileURL: url, format: format)
-        do {
-            try await store.services.manifests.save(record)
-            if url != fileURL {
-                try? FileManager.default.removeItem(at: fileURL)
-                fileURL = url
-            }
-            store.upsert(record)
-            isDirty = false
-            saveError = nil
-        } catch {
-            saveError = error.localizedDescription
-        }
     }
 }

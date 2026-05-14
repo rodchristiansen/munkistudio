@@ -1,54 +1,82 @@
 import SwiftUI
 import Core
 
-/// Editor for a manifest's `conditional_items[]` array. Each entry is one
-/// NSPredicate string plus four package lists. The PredicateBuilder
-/// component handles structured editing for the common comparison shapes;
-/// the editor here just composes that with the install-list ChipFields.
+/// Editor for a manifest's `conditional_items[]` array.
+///
+/// Each entry has one NSPredicate string plus up to four package lists.
+/// The condition itself is presented as a read-only chip row with Edit /
+/// trash buttons; clicking Edit opens a ``ConditionSheet`` modal that
+/// mirrors CimianAdmin's predicate dialog.
 struct ConditionalItemsEditor: View {
     @Binding var items: [ConditionalItem]
+    @State private var editing: EditingRequest?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, _ in
-                ConditionalItemRow(item: $items[index]) {
-                    items.remove(at: index)
-                }
+                ConditionalItemRow(
+                    item: $items[index],
+                    onEditCondition: { editing = EditingRequest(index: index) },
+                    onRemove: { items.remove(at: index) }
+                )
             }
             Button {
-                items.append(ConditionalItem(condition: ""))
+                let new = ConditionalItem(condition: "")
+                items.append(new)
+                editing = EditingRequest(index: items.count - 1)
             } label: {
-                Label("Add condition", systemImage: "plus")
+                Label("Add condition…", systemImage: "plus")
             }
         }
+        .sheet(item: $editing) { request in
+            ConditionSheet(source: bindingForCondition(at: request.index))
+        }
+    }
+
+    private func bindingForCondition(at index: Int) -> Binding<String> {
+        Binding(
+            get: { items.indices.contains(index) ? items[index].condition : "" },
+            set: { newValue in
+                guard items.indices.contains(index) else { return }
+                items[index].condition = newValue
+            }
+        )
+    }
+
+    private struct EditingRequest: Identifiable {
+        let index: Int
+        var id: Int { index }
     }
 }
 
 private struct ConditionalItemRow: View {
     @Binding var item: ConditionalItem
+    let onEditCondition: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                PredicateBuilder(source: $item.condition)
-                Button(role: .destructive, action: onRemove) {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.plain)
+        HStack(spacing: 8) {
+            Text("condition")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.18), in: .capsule)
+            Text(item.condition.isEmpty ? "(empty)" : item.condition)
+                .font(.system(.body, design: .monospaced))
+                .lineLimit(2)
+                .foregroundStyle(item.condition.isEmpty ? .tertiary : .primary)
+            Spacer()
+            Button("Edit", action: onEditCondition)
+                .controlSize(.small)
+            Button(role: .destructive, action: onRemove) {
+                Image(systemName: "trash")
             }
-            ChipField(values: bindArray(\.managedInstalls), placeholder: "Managed installs")
-            ChipField(values: bindArray(\.managedUninstalls), placeholder: "Managed uninstalls")
-            ChipField(values: bindArray(\.optionalInstalls), placeholder: "Optional installs")
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove condition")
         }
-        .padding(12)
-        .background(.regularMaterial, in: .rect(cornerRadius: 8))
-    }
-
-    private func bindArray(_ keyPath: WritableKeyPath<ConditionalItem, [String]?>) -> Binding<[String]> {
-        Binding(
-            get: { item[keyPath: keyPath] ?? [] },
-            set: { item[keyPath: keyPath] = $0.isEmpty ? nil : $0 }
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 8))
     }
 }

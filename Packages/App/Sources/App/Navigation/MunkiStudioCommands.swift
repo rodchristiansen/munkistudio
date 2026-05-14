@@ -3,7 +3,7 @@ import AppKit
 
 /// Menu-bar commands. Currently just the standard "Open…" and "Reload"
 /// entries; more land as features come online.
-struct MunkiAdminCommands: Commands {
+struct MunkiStudioCommands: Commands {
     let store: RepositoryStore
 
     var body: some Commands {

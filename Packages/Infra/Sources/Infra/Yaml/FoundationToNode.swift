@@ -25,9 +25,12 @@ public enum FoundationToNode {
         case let string as String:
             return stringNode(string, forceLiteralBlock: forceLiteralBlock)
         case let date as Date:
+            // Emit as a plain ISO-8601 string. Our resolver drops
+            // `.timestamp`, so YAML parsers we control re-read these
+            // as `String`. The Munki PR uses the same convention.
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime]
-            return Node.scalar(Node.Scalar(formatter.string(from: date), Tag(.timestamp)))
+            return Node.scalar(Node.Scalar(formatter.string(from: date)))
         case let data as Data:
             return Node.scalar(Node.Scalar(data.base64EncodedString(), Tag(.binary)))
         case let number as NSNumber:
@@ -68,12 +71,12 @@ public enum FoundationToNode {
         if forceLiteralBlock {
             return Node.scalar(Node.Scalar(string, .implicit, .literal))
         }
-        // Force quoting for strings that look numeric so cross-tool readers
-        // (or a future restoration of the float resolver) don't coerce them
-        // into Double / Int and lose data.
-        if looksNumeric(string) {
-            return Node.scalar(Node.Scalar(string, .implicit, .singleQuoted))
-        }
+        // We deliberately leave style at `.any` and let Yams pick. With
+        // both `.float` and `.timestamp` removed from our resolver,
+        // version-like scalars (`5.6`, `10.4.0`, `2.4.0.2561`) and
+        // ISO-8601 dates already parse back as strings, so we don't
+        // need to force single-quote them on emit. Force-quoting was
+        // generating noisy diffs (`5.6` → `'5.6'`) on every save.
         return Node.scalar(Node.Scalar(string))
     }
 
@@ -124,15 +127,6 @@ public enum FoundationToNode {
         }
     }
 
-    // MARK: Helpers
-
-    private static func looksNumeric(_ string: String) -> Bool {
-        guard !string.isEmpty else { return false }
-        // Plain decimals or version-like dotted numerics. Avoid matching
-        // arbitrary strings that happen to contain digits.
-        let pattern = #"^-?\d+(\.\d+)+$|^-?\d+\.\d+$|^-?\d+$"#
-        return string.range(of: pattern, options: .regularExpression) != nil
-    }
 }
 
 public enum MunkiCodingError: Error, Sendable, LocalizedError {

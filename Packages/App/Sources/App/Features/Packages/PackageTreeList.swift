@@ -7,6 +7,8 @@ import Core
 struct PackageTreeList: View {
     @Environment(RepositoryStore.self) private var store
     let records: [PkginfoRecord]
+    let grouping: PackageGrouping
+    let sort: PackageSort
 
     var body: some View {
         @Bindable var bindableStore = store
@@ -52,12 +54,52 @@ struct PackageTreeList: View {
         return result
     }
 
-    private var nodes: [CategoryNode] {
-        Dictionary(grouping: records) { record in
+    /// Group key per record for the current ``grouping`` mode. Strings
+    /// keep the bucket logic uniform even for grouping modes that
+    /// could theoretically use richer types.
+    private func groupKey(for record: PkginfoRecord) -> String {
+        switch grouping {
+        case .categories:
             (record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty) ?? "Uncategorized"
+        case .types:
+            record.pkginfo.installerType.map(typeLabel) ?? "Unspecified"
+        case .developers:
+            (record.pkginfo.developer?.trimmingCharacters(in: .whitespaces).nilIfEmpty) ?? "Unknown developer"
+        case .directories:
+            directoryLabel(for: record)
         }
-        .map { CategoryNode(category: $0.key, records: $0.value.sorted { $0.pkginfo.name < $1.pkginfo.name }) }
-        .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
+    }
+
+    private func typeLabel(_ type: InstallerType) -> String {
+        switch type {
+        case .unknown(let value): value.isEmpty ? "Unspecified" : value
+        default: type.rawValue
+        }
+    }
+
+    private func directoryLabel(for record: PkginfoRecord) -> String {
+        guard let repo = store.repository else { return record.fileURL.deletingLastPathComponent().lastPathComponent }
+        let root = repo.pkgsinfoURL.resolvingSymlinksInPath().path
+        let dir = record.fileURL.deletingLastPathComponent().resolvingSymlinksInPath().path
+        let prefix = root + "/"
+        if dir == root { return "/" }
+        if dir.hasPrefix(prefix) { return String(dir.dropFirst(prefix.count)) }
+        return record.fileURL.deletingLastPathComponent().lastPathComponent
+    }
+
+    private var nodes: [CategoryNode] {
+        Dictionary(grouping: records) { groupKey(for: $0) }
+            .map { CategoryNode(category: $0.key, records: $0.value.sorted(by: sortRecords)) }
+            .sorted { $0.category.localizedCaseInsensitiveCompare($1.category) == .orderedAscending }
+    }
+
+    private func sortRecords(_ a: PkginfoRecord, _ b: PkginfoRecord) -> Bool {
+        switch sort {
+        case .name:
+            return a.pkginfo.name.localizedCaseInsensitiveCompare(b.pkginfo.name) == .orderedAscending
+        case .recentlyModified:
+            return (a.modifiedAt ?? .distantPast) > (b.modifiedAt ?? .distantPast)
+        }
     }
 }
 

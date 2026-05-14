@@ -4,8 +4,8 @@ import Foundation
 /// Apple plist (or, equivalently, the YAML node types Munki uses). We need
 /// this for two reasons:
 ///
-/// 1. `_metadata` is an open dictionary maintained by tools (MunkiAdmin,
-///    AutoPkg, etc.) — we don't want to model every key those tools invent.
+/// 1. `_metadata` is an open dictionary maintained by external tools
+///    (e.g. AutoPkg) — we don't want to model every key those tools invent.
 /// 2. Unknown / third-party pkginfo keys should round-trip without loss.
 ///
 /// `PlistValue` is `Sendable` and value-typed so it composes with the rest

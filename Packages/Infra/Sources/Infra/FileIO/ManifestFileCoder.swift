@@ -23,7 +23,14 @@ public enum ManifestFileCoder {
                 let yaml = String(decoding: data, as: UTF8.self)
                 manifest = try ManifestYamlCoder.decode(from: yaml, name: name)
             }
-            return ManifestRecord(manifest: manifest, fileURL: url, format: format)
+            let (created, modified) = FileTimestamps.read(url)
+            return ManifestRecord(
+                manifest: manifest,
+                fileURL: url,
+                format: format,
+                createdAt: created,
+                modifiedAt: modified
+            )
         } catch {
             throw RepositoryError.parse(file: url, message: String(describing: error))
         }
@@ -48,11 +55,33 @@ public enum ManifestFileCoder {
     private static func readUnextended(from url: URL, repositoryRoot: URL) throws -> ManifestRecord {
         let data = try Data(contentsOf: url)
         let name = manifestName(for: url, repositoryRoot: repositoryRoot)
+        // Try plist first (the historic convention), fall back to YAML
+        // so the occasional extensionless YAML manifest still loads.
         do {
             let manifest = try ManifestPlistCoder.decode(from: data, name: name)
-            return ManifestRecord(manifest: manifest, fileURL: url, format: .plist)
+            let (created, modified) = FileTimestamps.read(url)
+            return ManifestRecord(
+                manifest: manifest,
+                fileURL: url,
+                format: .plist,
+                createdAt: created,
+                modifiedAt: modified
+            )
         } catch {
-            throw RepositoryError.parse(file: url, message: String(describing: error))
+            do {
+                let yaml = String(decoding: data, as: UTF8.self)
+                let manifest = try ManifestYamlCoder.decode(from: yaml, name: name)
+                let (created, modified) = FileTimestamps.read(url)
+                return ManifestRecord(
+                    manifest: manifest,
+                    fileURL: url,
+                    format: .yaml,
+                    createdAt: created,
+                    modifiedAt: modified
+                )
+            } catch {
+                throw RepositoryError.parse(file: url, message: String(describing: error))
+            }
         }
     }
 

@@ -7,7 +7,7 @@ import Infra
 /// scene boundary reaches services through the store rather than touching
 /// global state.
 @main
-struct MunkiAdminApp: SwiftUI.App {
+struct MunkiStudioApp: SwiftUI.App {
     @State private var store: RepositoryStore
 
     init() {
@@ -40,7 +40,7 @@ struct MunkiAdminApp: SwiftUI.App {
                 .frame(minWidth: 1100, minHeight: 700)
         }
         .commands {
-            MunkiAdminCommands(store: store)
+            MunkiStudioCommands(store: store)
         }
     }
 }

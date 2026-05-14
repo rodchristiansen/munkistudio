@@ -30,10 +30,17 @@ final class GitPaneState {
     var commitSubject: String = ""
     var commitBody: String = ""
     var runHooks: Bool = true
+    var amend: Bool = false
+    var skipHooks: Bool = false
 
     var statusMessage: String?
     var statusKind: StatusKind = .info
     var processOutput: String = ""
+
+    /// Set whenever a remote-touching action (refresh, fetch, pull,
+    /// push) completes successfully. Used by the composer to render a
+    /// "Last refreshed Xm ago" indicator.
+    var lastRefreshedAt: Date?
 
     var helpVisible: Bool = false
     var filterVisible: Bool = false

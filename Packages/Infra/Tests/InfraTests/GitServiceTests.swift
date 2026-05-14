@@ -63,7 +63,8 @@ struct GitServiceTests {
             in: info,
             subject: "add track-me",
             body: nil,
-            runHooks: false
+            runHooks: false,
+            amend: false
         ) {
             if case .finished(let result) = event { outcome = result }
         }

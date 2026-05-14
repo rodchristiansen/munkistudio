@@ -11,7 +11,7 @@ public enum PkginfoYamlCoder {
         guard let any = try Yams.load(yaml: yaml, MunkiYamlResolver.strict) else {
             throw MunkiCodingError.malformedTopLevel
         }
-        guard let dict = any as? [String: Any] else {
+        guard let dict = YamlSanitizer.sanitize(any) as? [String: Any] else {
             throw MunkiCodingError.malformedTopLevel
         }
         let data = try PropertyListSerialization.data(
@@ -29,6 +29,11 @@ public enum PkginfoYamlCoder {
             throw MunkiCodingError.malformedTopLevel
         }
         let node = try FoundationToNode.node(from: dict, context: .pkginfoRoot)
-        return try Yams.serialize(node: node, sortKeys: false)
+        // `allowUnicode: true` keeps non-ASCII characters as themselves
+        // in the output (`Ω`, `é`, `日本語`) instead of escaping them
+        // to `\uXXXX` sequences. Round-trip diffs on files that
+        // legitimately contain unicode (e.g. manifest names with
+        // greek-letter prefixes) were unreadable without this.
+        return try Yams.serialize(node: node, allowUnicode: true, sortKeys: false)
     }
 }

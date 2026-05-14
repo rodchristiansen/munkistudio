@@ -57,4 +57,24 @@ public struct InstallsItem: Sendable, Hashable, Codable {
         case versionComparisonKey = "version_comparison_key"
         case minimumUpdateVersion = "minimum_update_version"
     }
+
+    /// Tolerant-read decoder: version-like keys are conventionally
+    /// strings but countless real Munki repos commit them as bare
+    /// integers (`CFBundleVersion: 1234`, `minosversion: 12`). We
+    /// accept both forms — see `decodeFlexibleStringIfPresent` for the
+    /// coercion rules.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.type = try c.decodeFlexibleStringIfPresent(forKey: .type)
+        self.path = try c.decode(String.self, forKey: .path)
+        self.md5checksum = try c.decodeIfPresent(String.self, forKey: .md5checksum)
+        self.sha256checksum = try c.decodeIfPresent(String.self, forKey: .sha256checksum)
+        self.cfBundleIdentifier = try c.decodeFlexibleStringIfPresent(forKey: .cfBundleIdentifier)
+        self.cfBundleName = try c.decodeFlexibleStringIfPresent(forKey: .cfBundleName)
+        self.cfBundleShortVersionString = try c.decodeFlexibleStringIfPresent(forKey: .cfBundleShortVersionString)
+        self.cfBundleVersion = try c.decodeFlexibleStringIfPresent(forKey: .cfBundleVersion)
+        self.minosversion = try c.decodeFlexibleStringIfPresent(forKey: .minosversion)
+        self.versionComparisonKey = try c.decodeFlexibleStringIfPresent(forKey: .versionComparisonKey)
+        self.minimumUpdateVersion = try c.decodeFlexibleStringIfPresent(forKey: .minimumUpdateVersion)
+    }
 }

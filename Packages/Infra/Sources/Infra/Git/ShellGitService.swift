@@ -201,9 +201,14 @@ public final class ShellGitService: GitService {
         in info: GitRepositoryInfo,
         subject: String,
         body: String?,
-        runHooks: Bool
+        runHooks: Bool,
+        amend: Bool
     ) -> AsyncThrowingStream<GitProcessEvent, any Error> {
-        var args: [String] = ["commit", "-m", subject]
+        var args: [String] = ["commit"]
+        if amend {
+            args.append("--amend")
+        }
+        args.append(contentsOf: ["-m", subject])
         if let body, !body.isEmpty {
             args.append("-m")
             args.append(body)

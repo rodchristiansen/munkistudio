@@ -16,7 +16,7 @@ struct RepositoryPickerView: View {
                     .font(.system(size: iconSize))
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
-                Text("MunkiAdmin")
+                Text("MunkiStudio")
                     .font(.largeTitle.bold())
                 Text("Open a Munki repository directory to get started.")
                     .foregroundStyle(.secondary)

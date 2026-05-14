@@ -20,7 +20,14 @@ public enum PkginfoFileCoder {
                 let yaml = String(decoding: data, as: UTF8.self)
                 pkginfo = try PkginfoYamlCoder.decode(from: yaml)
             }
-            return PkginfoRecord(pkginfo: pkginfo, fileURL: url, format: format)
+            let (created, modified) = FileTimestamps.read(url)
+            return PkginfoRecord(
+                pkginfo: pkginfo,
+                fileURL: url,
+                format: format,
+                createdAt: created,
+                modifiedAt: modified
+            )
         } catch {
             throw RepositoryError.parse(file: url, message: String(describing: error))
         }

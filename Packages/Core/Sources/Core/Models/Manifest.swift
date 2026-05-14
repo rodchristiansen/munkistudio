@@ -17,6 +17,9 @@ public struct Manifest: Sendable, Hashable, Codable, Identifiable {
     public var managedUpdates: [String]?
     public var optionalInstalls: [String]?
     public var featuredItems: [String]?
+    /// Names of `optional_installs` items that should be pre-checked
+    /// in Managed Software Center on first run. Munki 6.1+ feature.
+    public var defaultInstalls: [String]?
 
     public var conditionalItems: [ConditionalItem]?
 
@@ -42,6 +45,7 @@ public struct Manifest: Sendable, Hashable, Codable, Identifiable {
         case managedUpdates = "managed_updates"
         case optionalInstalls = "optional_installs"
         case featuredItems = "featured_items"
+        case defaultInstalls = "default_installs"
         case conditionalItems = "conditional_items"
         case displayName = "display_name"
         case user
@@ -62,6 +66,7 @@ public struct Manifest: Sendable, Hashable, Codable, Identifiable {
         self.managedUpdates = try container.decodeIfPresent([String].self, forKey: .managedUpdates)
         self.optionalInstalls = try container.decodeIfPresent([String].self, forKey: .optionalInstalls)
         self.featuredItems = try container.decodeIfPresent([String].self, forKey: .featuredItems)
+        self.defaultInstalls = try container.decodeIfPresent([String].self, forKey: .defaultInstalls)
         self.conditionalItems = try container.decodeIfPresent([ConditionalItem].self, forKey: .conditionalItems)
         self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
         self.user = try container.decodeIfPresent(String.self, forKey: .user)
@@ -76,8 +81,9 @@ public struct Manifest: Sendable, Hashable, Codable, Identifiable {
         let known: Set<String> = [
             "catalogs", "included_manifests", "managed_installs",
             "managed_uninstalls", "managed_updates", "optional_installs",
-            "featured_items", "conditional_items", "display_name", "user",
-            "notes", "default_installer_choices_xml", "_metadata",
+            "featured_items", "default_installs", "conditional_items",
+            "display_name", "user", "notes",
+            "default_installer_choices_xml", "_metadata",
         ]
         var leftovers: [String: PlistValue] = [:]
         for key in dynamic.allKeys where !known.contains(key.stringValue) {
@@ -95,6 +101,7 @@ public struct Manifest: Sendable, Hashable, Codable, Identifiable {
         try container.encodeIfPresent(managedUpdates, forKey: .managedUpdates)
         try container.encodeIfPresent(optionalInstalls, forKey: .optionalInstalls)
         try container.encodeIfPresent(featuredItems, forKey: .featuredItems)
+        try container.encodeIfPresent(defaultInstalls, forKey: .defaultInstalls)
         try container.encodeIfPresent(conditionalItems, forKey: .conditionalItems)
         try container.encodeIfPresent(displayName, forKey: .displayName)
         try container.encodeIfPresent(user, forKey: .user)

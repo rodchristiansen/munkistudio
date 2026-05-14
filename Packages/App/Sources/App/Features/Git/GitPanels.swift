@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Core
 
 /// Three focused-panel views for the Git pane. Each renders a list whose
@@ -94,6 +95,12 @@ struct GitCommitsPanel: View {
             ContentUnavailableView("No commits", systemImage: "clock")
                 .padding()
         } else {
+            // `.contextMenu(forSelectionType:)` is the macOS-correct
+            // way to attach a right-click menu to a `List(selection:)`:
+            // SwiftUI hands us the SHAs the user actually clicked
+            // (which may or may not match the current selection) and
+            // makes sure the menu actually appears. The per-row
+            // `.contextMenu` modifier was being suppressed on macOS 26.
             List(state.filteredCommits, id: \.sha, selection: $state.commitSelection) { commit in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(commit.subject).lineLimit(1)
@@ -110,6 +117,48 @@ struct GitCommitsPanel: View {
                 }
                 .tag(commit.sha)
             }
+            .contextMenu(forSelectionType: String.self) { shas in
+                let targets = shas.isEmpty ? [state.commitSelection].compactMap { $0 } : Array(shas)
+                if let sha = targets.first {
+                    Button("Copy SHA") { copyToPasteboard(sha) }
+                    if let subject = state.commits.first(where: { $0.sha == sha })?.subject {
+                        Button("Copy Subject") { copyToPasteboard(subject) }
+                    }
+                    Button("Copy .patch") { Task { await copyPatch(for: sha) } }
+                }
+            }
+        }
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Run `git format-patch -1 --stdout <sha>` and put the result on
+    /// the clipboard. Matches the `.patch` output you'd get from a
+    /// GitHub commit page so it can be applied with `git am`.
+    private func copyPatch(for sha: String) async {
+        guard let info = state.info else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["format-patch", "-1", "--stdout", sha]
+        process.currentDirectoryURL = info.workTreeRoot
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+            let patch = String(decoding: data, as: UTF8.self)
+            if !patch.isEmpty {
+                copyToPasteboard(patch)
+            }
+        } catch {
+            // Surfaced silently — the user will notice nothing on the
+            // clipboard. Logging here would be useful when wiring up
+            // os.Logger in a later pass.
         }
     }
 }

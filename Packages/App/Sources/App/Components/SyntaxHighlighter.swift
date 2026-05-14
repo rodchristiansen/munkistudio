@@ -4,8 +4,8 @@ import AppKit
 
 /// Apply colour to a script body. Returns an `AttributedString` with
 /// foregroundColor runs for comments, strings, and keywords. Deliberately
-/// lightweight — a real grammar isn't worth the complexity for what
-/// MunkiAdmin scripts look like.
+/// lightweight — a real grammar isn't worth the complexity for the short
+/// install/uninstall scripts that live inside pkginfos.
 enum SyntaxHighlighter {
     /// `monospace` is honoured by callers if they want a code-style render.
     static func attributed(

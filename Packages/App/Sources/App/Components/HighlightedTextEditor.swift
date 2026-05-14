@@ -25,7 +25,12 @@ struct HighlightedTextEditor: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
-        scrollView.drawsBackground = false
+        // Solid background. When this was transparent, the NSScrollView's
+        // content-clip and the line-number ruler boundary painted vertical
+        // hair lines that bled out through the parent SwiftUI background
+        // (the "vertical lines through the whole window" bug).
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .textBackgroundColor
 
         guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
         textView.delegate = context.coordinator
@@ -42,7 +47,8 @@ struct HighlightedTextEditor: NSViewRepresentable {
         textView.smartInsertDeleteEnabled = false
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.drawsBackground = false
+        textView.drawsBackground = true
+        textView.backgroundColor = .textBackgroundColor
         textView.textContainerInset = NSSize(width: 6, height: 6)
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.lineFragmentPadding = 0
@@ -218,6 +224,11 @@ final class LineNumberRulerView: NSRulerView {
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
+        // Paint the ruler with the same background as the text view so
+        // there's no visible seam between gutter and document.
+        NSColor.textBackgroundColor.setFill()
+        rect.fill()
+
         guard let textView = ownerTextView,
               let layoutManager = textView.layoutManager,
               let container = textView.textContainer else { return }

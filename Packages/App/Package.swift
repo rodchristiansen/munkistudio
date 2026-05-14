@@ -5,7 +5,7 @@ let package = Package(
     name: "App",
     platforms: [.macOS(.v26)],
     products: [
-        .executable(name: "MunkiAdmin", targets: ["App"]),
+        .executable(name: "MunkiStudio", targets: ["App"]),
     ],
     dependencies: [
         .package(path: "../Core"),

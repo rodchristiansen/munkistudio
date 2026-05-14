@@ -8,18 +8,46 @@ import Core
 struct PackagesListView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var search: String = ""
+    @State private var grouping: PackageGrouping = .categories
+    @State private var sort: PackageSort = .name
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var bindableStore = store
         VStack(spacing: 0) {
+            // Mail.app-style scope strip: switch how the list is
+            // grouped without leaving the view. Sort sits inline as a
+            // popover menu so the strip stays a single line.
+            HStack(spacing: 8) {
+                Picker("", selection: $grouping) {
+                    ForEach(PackageGrouping.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Spacer()
+                Menu {
+                    Picker("Sort", selection: $sort) {
+                        ForEach(PackageSort.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                } label: {
+                    Label("Sort: \(sort.title)", systemImage: "arrow.up.arrow.down")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
             FilterField(text: $search, prompt: "Filter packages", focused: $searchFocused)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
             if store.snapshot.pkginfos.isEmpty {
                 EmptyPackagesView()
             } else {
-                PackageTreeList(records: filtered)
+                PackageTreeList(records: filtered, grouping: grouping, sort: sort)
             }
         }
         .navigationTitle("Packages (\(store.snapshot.pkginfos.count))")
@@ -78,6 +106,30 @@ struct EmptyPackagesView: View {
             }
         }
         .padding(.bottom, 16)
+    }
+}
+
+enum PackageGrouping: String, CaseIterable, Identifiable, Hashable {
+    case types, categories, developers, directories
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .types: "Types"
+        case .categories: "Categories"
+        case .developers: "Developers"
+        case .directories: "Directories"
+        }
+    }
+}
+
+enum PackageSort: String, CaseIterable, Identifiable, Hashable {
+    case name, recentlyModified
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .name: "Name"
+        case .recentlyModified: "Recently Modified"
+        }
     }
 }
 
