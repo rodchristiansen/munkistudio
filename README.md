@@ -1,5 +1,7 @@
 # MunkiStudio
 
+**MunkiStudio — package, import, edit, lint, commit, deploy.**
+
 A modern macOS admin app for [Munki](https://github.com/munki/munki) software-distribution
 repositories. Swift 6.2+ / SwiftUI / macOS 26 (Tahoe), with first-class YAML and
 git support — including built-in Git, linting, and a growing set of GitOps and

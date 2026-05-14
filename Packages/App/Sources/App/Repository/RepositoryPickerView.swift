@@ -1,65 +1,127 @@
 import SwiftUI
 import AppKit
 
-/// Empty-state landing view. Lists recent repositories and offers an
-/// "Open Repository…" affordance backed by a system file picker.
 struct RepositoryPickerView: View {
     @Environment(RepositoryStore.self) private var store
-    // Decorative app icon scales with the user's Dynamic Type setting
-    // so the splash screen stays balanced at every size.
-    @ScaledMetric(relativeTo: .largeTitle) private var iconSize: CGFloat = 56
+    @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 96
 
     var body: some View {
-        VStack(spacing: 28) {
-            VStack(spacing: 8) {
+        ZStack(alignment: .bottomTrailing) {
+            backdrop
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: 36) {
+                    Spacer(minLength: 60)
+                    hero
+                    primaryActions
+                    if !store.recentRepositories.isEmpty {
+                        recentsSection
+                    }
+                    Spacer(minLength: 40)
+                }
+                .padding(.horizontal, 48)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
+            }
+
+            versionBadge
+                .padding(16)
+        }
+    }
+
+    private var backdrop: some View {
+        LinearGradient(
+            colors: [
+                Color.munkiStudioBrand.opacity(colorScheme == .dark ? 0.18 : 0.10),
+                Color.munkiStudioBrand.opacity(0.0)
+            ],
+            startPoint: .top,
+            endPoint: .center
+        )
+        .background(.background)
+    }
+
+    private var hero: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .frame(width: heroSize * 1.6, height: heroSize * 1.6)
+                    .overlay(
+                        Circle()
+                            .stroke(.tertiary.opacity(0.4), lineWidth: 0.5)
+                    )
+                    .shadow(color: .accentColor.opacity(0.18), radius: 24, y: 6)
                 Image(systemName: "shippingbox.fill")
-                    .font(.system(size: iconSize))
+                    .font(.system(size: heroSize, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.tint)
-                    .accessibilityHidden(true)
-                Text("MunkiStudio")
-                    .font(.largeTitle.bold())
-                Text("Open a Munki repository directory to get started.")
+            }
+            .accessibilityHidden(true)
+            .padding(.bottom, 6)
+
+            Text("MunkiStudio")
+                .font(.system(size: 38, weight: .bold, design: .rounded))
+                .tracking(-0.5)
+
+            Text("The Munki repository studio.")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+
+            Text("Package · Import · Edit · Lint · Commit · Deploy")
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+        }
+    }
+
+    private var primaryActions: some View {
+        Button(action: openRepository) {
+            Label("Open Repository…", systemImage: "folder")
+                .frame(minWidth: 220)
+                .padding(.vertical, 4)
+        }
+        .keyboardShortcut("o", modifiers: .command)
+        .controlSize(.extraLarge)
+        .buttonStyle(.borderedProminent)
+    }
+
+    private var recentsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recent")
+                    .font(.headline)
+                Spacer()
+                Text("\(store.recentRepositories.count)")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(.quinary, in: .capsule)
             }
 
-            Button(action: openRepository) {
-                Label("Open Repository…", systemImage: "folder")
-                    .frame(minWidth: 180)
-            }
-            .keyboardShortcut("o", modifiers: .command)
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
-
-            if !store.recentRepositories.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Recent")
-                        .font(.headline)
-                    ForEach(store.recentRepositories, id: \.self) { url in
-                        Button {
-                            Task { await store.open(rootURL: url) }
-                        } label: {
-                            HStack {
-                                Image(systemName: "folder")
-                                VStack(alignment: .leading) {
-                                    Text(url.lastPathComponent)
-                                    Text(url.path)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                            }
-                            .padding(8)
-                            .background(.regularMaterial, in: .rect(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
+            VStack(spacing: 6) {
+                ForEach(store.recentRepositories, id: \.self) { url in
+                    RecentRepoRow(url: url) {
+                        Task { await store.open(rootURL: url) }
                     }
                 }
-                .frame(maxWidth: 480)
             }
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
+        .frame(maxWidth: 520)
+    }
+
+    private var versionBadge: some View {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        return Group {
+            if let version {
+                Text("v\(version)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     private func openRepository() {
@@ -72,5 +134,45 @@ struct RepositoryPickerView: View {
         if panel.runModal() == .OK, let url = panel.url {
             Task { await store.open(rootURL: url) }
         }
+    }
+}
+
+private struct RecentRepoRow: View {
+    let url: URL
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(.tint)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(url.lastPathComponent)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(url.path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .opacity(hovering ? 1 : 0.5)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: .rect(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(.tint.opacity(hovering ? 0.35 : 0), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }

@@ -26,4 +26,13 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     }
 
     var title: String { rawValue }
+
+    /// Sections that own the whole detail area — no separate list / detail
+    /// columns. These get a single full-width pane next to the sidebar.
+    var prefersFullWidth: Bool {
+        switch self {
+        case .dashboard, .search, .git: true
+        case .packages, .manifests, .catalogs: false
+        }
+    }
 }

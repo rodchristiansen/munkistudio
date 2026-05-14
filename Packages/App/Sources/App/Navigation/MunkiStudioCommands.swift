@@ -19,7 +19,21 @@ struct MunkiStudioCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: .command)
             .disabled(store.repository == nil)
+            Divider()
+            Button("Close Repository") {
+                store.repository = nil
+            }
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+            .disabled(store.repository == nil)
         }
+        #if DEBUG
+        CommandMenu("Developer") {
+            Button("Show Splash Screen") {
+                store.repository = nil
+            }
+            .keyboardShortcut("0", modifiers: [.command, .shift])
+        }
+        #endif
     }
 
     @MainActor

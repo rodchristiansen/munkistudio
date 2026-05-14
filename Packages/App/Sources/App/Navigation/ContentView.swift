@@ -40,12 +40,12 @@ struct RepositoryWorkspace: View {
     var body: some View {
         @Bindable var bindableStore = store
         Group {
-            if store.selectedSection == .git {
+            if store.selectedSection.prefersFullWidth {
                 NavigationSplitView {
                     SidebarView(selection: $bindableStore.selectedSection)
                         .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
                 } detail: {
-                    GitView()
+                    FullWidthColumn(section: store.selectedSection)
                 }
             } else {
                 NavigationSplitView {
@@ -172,6 +172,19 @@ private struct DetailColumn: View {
         case .manifests: ManifestDetailView()
         case .catalogs: CatalogDetailView()
         case .git: GitDetailView()
+        }
+    }
+}
+
+private struct FullWidthColumn: View {
+    let section: SidebarSection
+
+    var body: some View {
+        switch section {
+        case .dashboard: DashboardView()
+        case .search: SearchView()
+        case .git: GitView()
+        default: EmptyView()
         }
     }
 }

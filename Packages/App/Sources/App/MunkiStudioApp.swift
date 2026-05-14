@@ -37,6 +37,7 @@ struct MunkiStudioApp: SwiftUI.App {
         WindowGroup {
             ContentView()
                 .environment(store)
+                .tint(.munkiStudioBrand)
                 .frame(minWidth: 1100, minHeight: 700)
         }
         .commands {
