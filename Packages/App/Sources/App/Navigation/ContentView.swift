@@ -62,13 +62,20 @@ struct RepositoryWorkspace: View {
         // right. `.searchSuggestions` couldn't escape the field's
         // width, so we draw our own panel. It only appears when the
         // user has an active query with hits; clicking a row routes
-        // to the file and clears the query.
+        // to the file and clears the query. A transparent backdrop
+        // catches clicks outside the panel and dismisses by clearing
+        // the query, matching popover behaviour.
         .overlay(alignment: .topTrailing) {
             if store.searchQuery.count >= 2 && !store.searchResults.isEmpty {
-                SearchResultsFloatingPanel()
-                    .padding(.trailing, 16)
-                    .padding(.top, 6)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                ZStack(alignment: .topTrailing) {
+                    Color.clear
+                        .contentShape(.rect)
+                        .onTapGesture { store.searchQuery = "" }
+                    SearchResultsFloatingPanel()
+                        .padding(.trailing, 16)
+                        .padding(.top, 6)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
         .animation(.easeInOut(duration: 0.12), value: store.searchResults.count)
