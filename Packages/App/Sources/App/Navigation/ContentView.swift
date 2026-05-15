@@ -111,10 +111,9 @@ struct RepositoryWorkspace: View {
             store.searchResults = results
         }
         .toolbar {
-            // `.labelStyle(.titleAndIcon)` on Save forces both the count
-            // and the glyph to render — without it the toolbar auto-
-            // collapses to icon-only on tight widths and the dirty-count
-            // badge disappears.
+            // `.labelStyle(.titleAndIcon)` on Save keeps the dirty-count
+            // badge visible at tight widths — otherwise the toolbar
+            // collapses to icon-only and the count disappears.
             ToolbarItem(placement: .primaryAction) {
                 let dirtyCount = store.dirtyDraftCount
                 Button {
@@ -130,20 +129,6 @@ struct RepositoryWorkspace: View {
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(dirtyCount == 0)
                 .help("Flush every unsaved edit in this session to disk")
-            }
-            // Without an explicit ToolbarSpacer between them, macOS 26
-            // groups consecutive `.primaryAction` items into a single
-            // pill — Save and Refresh fuse with no visual seam.
-            // `.fixed` keeps them adjacent but rendered as separate
-            // capsules.
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await store.reload() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .help("Re-read the repository from disk")
             }
         }
     }

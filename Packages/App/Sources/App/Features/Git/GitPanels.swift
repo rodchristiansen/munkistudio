@@ -7,6 +7,7 @@ import Core
 /// key handler can drive nav without forwarding bindings.
 struct GitFilesPanel: View {
     @Bindable var state: GitPaneState
+    @Environment(RepositoryStore.self) private var store
 
     var body: some View {
         if state.files.isEmpty {
@@ -31,9 +32,186 @@ struct GitFilesPanel: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                .contentShape(.rect)
+                // Single click still falls through to the List's
+                // selection binding; the double-click handler only
+                // fires when the user really double-clicks. If the
+                // file is a known pkginfo or manifest in the loaded
+                // snapshot, route to its editor — otherwise the click
+                // is a no-op (deleted files, ignored files, anything
+                // outside pkgsinfo/ or manifests/).
+                .onTapGesture(count: 2) {
+                    openInEditor(relativePath: entry.relativePath)
+                }
                 .tag(entry.relativePath)
             }
+            // `.contextMenu(forSelectionType:)` is the macOS-correct
+            // way to attach a right-click menu to `List(selection:)`:
+            // SwiftUI hands us the path(s) the user clicked even if the
+            // selection binding hasn't caught up yet, so the actions
+            // always operate on the visually-targeted row.
+            .contextMenu(forSelectionType: String.self) { selections in
+                let targets = selections.isEmpty
+                    ? [state.fileSelection].compactMap { $0 }
+                    : Array(selections)
+                if let path = targets.first {
+                    fileContextMenu(relativePath: path)
+                }
+            }
         }
+    }
+
+    // MARK: Context menu
+
+    @ViewBuilder
+    private func fileContextMenu(relativePath: String) -> some View {
+        let fileURL = state.info?.workTreeRoot.appending(path: relativePath)
+        let isPkginfo = fileURL.flatMap { url in
+            store.snapshot.pkginfos.first { $0.fileURL == url }
+        } != nil
+        let isManifest = fileURL.flatMap { url in
+            store.snapshot.manifests.first { $0.fileURL == url }
+        } != nil
+        let isKnown = isPkginfo || isManifest
+        let entry = state.files.first { $0.relativePath == relativePath }
+
+        Button("Open") { openInEditor(relativePath: relativePath) }
+            .disabled(!isKnown)
+        Button("Open in External Editor") { openExternally(relativePath: relativePath) }
+        if let url = fileURL {
+            let apps = NSWorkspace.shared.urlsForApplications(toOpen: url)
+            if !apps.isEmpty {
+                Menu("Open With") {
+                    ForEach(apps, id: \.self) { appURL in
+                        Button(displayName(for: appURL)) {
+                            open(relativePath: relativePath, withApp: appURL)
+                        }
+                    }
+                }
+            }
+        }
+        Button("Show in Finder") { revealInFinder(relativePath: relativePath) }
+
+        Divider()
+
+        Button("Copy Path") { copyAbsolutePath(relativePath: relativePath) }
+        Button("Copy Relative Path") { copyToPasteboard(relativePath) }
+        Button("Copy Filename") {
+            copyToPasteboard((relativePath as NSString).lastPathComponent)
+        }
+
+        Divider()
+
+        if let entry {
+            if entry.staged {
+                Button("Unstage") { Task { await unstage(relativePath: relativePath) } }
+            } else {
+                Button("Stage") { Task { await stage(relativePath: relativePath) } }
+            }
+        }
+        Button("Discard Changes…", role: .destructive) {
+            Task { await discard(relativePath: relativePath) }
+        }
+        .disabled(entry?.kind == .untracked)
+    }
+
+    // MARK: Actions
+
+    /// Open the working-copy file at `relativePath` in the matching
+    /// detail editor. Routes to Packages or Manifests based on whichever
+    /// snapshot list contains a record at that absolute URL.
+    private func openInEditor(relativePath: String) {
+        guard let info = state.info else { return }
+        let fileURL = info.workTreeRoot.appending(path: relativePath)
+        if let record = store.snapshot.pkginfos.first(where: { $0.fileURL == fileURL }) {
+            store.selectedSection = .packages
+            store.selectedItemID = AnyHashable(record.id)
+            let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "Uncategorized"
+            store.expandedCategories.insert(category)
+        } else if let record = store.snapshot.manifests.first(where: { $0.fileURL == fileURL }) {
+            store.selectedSection = .manifests
+            store.selectedItemID = AnyHashable(record.id)
+        }
+    }
+
+    private func openExternally(relativePath: String) {
+        guard let url = state.info?.workTreeRoot.appending(path: relativePath) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func open(relativePath: String, withApp appURL: URL) {
+        guard let url = state.info?.workTreeRoot.appending(path: relativePath) else { return }
+        NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    private func revealInFinder(relativePath: String) {
+        guard let url = state.info?.workTreeRoot.appending(path: relativePath) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func copyAbsolutePath(relativePath: String) {
+        guard let url = state.info?.workTreeRoot.appending(path: relativePath) else { return }
+        copyToPasteboard(url.path(percentEncoded: false))
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func stage(relativePath: String) async {
+        guard let info = state.info else { return }
+        try? await store.services.git.stage(in: info, relativePaths: [relativePath])
+        await refresh()
+    }
+
+    private func unstage(relativePath: String) async {
+        guard let info = state.info else { return }
+        try? await store.services.git.unstage(in: info, relativePaths: [relativePath])
+        await refresh()
+    }
+
+    private func discard(relativePath: String) async {
+        let alert = NSAlert()
+        alert.messageText = "Discard changes to \(relativePath)?"
+        alert.informativeText = "This is irreversible."
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard let info = state.info else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["checkout", "--", relativePath]
+        process.currentDirectoryURL = info.workTreeRoot
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try? process.run()
+        process.waitUntilExit()
+        await refresh()
+    }
+
+    /// Refresh the panel's view of the working copy after a mutation.
+    /// Mirrors the partial-refresh `GitView.refresh()` does: pull the
+    /// status list, recompute selection, and re-publish the dirty count
+    /// so the toolbar's badge stays consistent.
+    private func refresh() async {
+        guard let info = state.info else { return }
+        if let files = try? await store.services.git.status(in: info) {
+            state.files = files
+            store.gitDirtyCount = files.count
+        }
+    }
+
+    /// `urlsForApplications(toOpen:)` returns `.app` bundle URLs. The
+    /// display name is the bundle's name (CFBundleName / localized) when
+    /// available, falling back to the filename without extension.
+    private func displayName(for appURL: URL) -> String {
+        if let bundle = Bundle(url: appURL),
+           let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String {
+            return name
+        }
+        return appURL.deletingPathExtension().lastPathComponent
     }
 
     private func letter(for kind: GitStatusEntry.Kind) -> String {

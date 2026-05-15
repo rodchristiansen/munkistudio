@@ -58,18 +58,14 @@ struct GitView: View {
     // MARK: Header
 
     private var header: some View {
-        // Branch picker (with inline dirty / ahead / behind indicators)
-        // plus the remote-sync controls (Fetch / Pull / Push) — all
-        // Git-specific actions live here so the window toolbar can
-        // stay focused on Save and Refresh.
+        // Branch picker on the leading edge with the git-action cluster
+        // (Fetch / Pull / Push / Refresh / Help) immediately to its
+        // right. Grouping branch + actions together keeps the eye on a
+        // single control band; the trailing space is intentionally
+        // empty so status text from the commit composer reads cleanly.
         HStack(spacing: 8) {
             if store.gitInfo != nil {
                 branchPicker
-            } else {
-                Text("Not a git repository").foregroundStyle(.secondary)
-            }
-            Spacer()
-            if store.gitInfo != nil {
                 Button { Task { await runFetch() } } label: {
                     Label("Fetch", systemImage: "arrow.down.to.line")
                 }
@@ -83,15 +79,18 @@ struct GitView: View {
                 }
                 .help("git push (P)")
                 Divider().frame(height: 16)
+                Button { Task { await refresh() } } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .help("Refresh (r)")
+                Button { state.helpVisible.toggle() } label: {
+                    Label("Help", systemImage: "questionmark.circle")
+                }
+                .help("Show shortcuts (?)")
+            } else {
+                Text("Not a git repository").foregroundStyle(.secondary)
             }
-            Button { Task { await refresh() } } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .help("Refresh (r)")
-            Button { state.helpVisible.toggle() } label: {
-                Label("Help", systemImage: "questionmark.circle")
-            }
-            .help("Show shortcuts (?)")
+            Spacer()
         }
         .labelStyle(.titleAndIcon)
         .fontWeight(.semibold)
