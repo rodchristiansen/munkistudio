@@ -185,12 +185,15 @@ private struct FullWidthColumn: View {
     let section: SidebarSection
 
     var body: some View {
-        switch section {
-        case .dashboard: DashboardView()
-        case .git: GitView()
-        case .importer: ImportView()
-        default: EmptyView()
+        Group {
+            switch section {
+            case .dashboard: DashboardView()
+            case .git: GitView()
+            case .importer: ImportView()
+            default: EmptyView()
+            }
         }
+        .navigationTitle(section.title)
     }
 }
 

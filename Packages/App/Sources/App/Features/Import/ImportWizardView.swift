@@ -25,47 +25,47 @@ struct ImportWizardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(16)
             .background(.background.secondary, in: .rect(cornerRadius: 10))
-
-            footer
         }
         .task(id: installerURL) {
-            let match = repoStore.snapshot.pkginfos.first { record in
+            // Auto-adopt a matching pkginfo as the template. The user can
+            // still click "Start fresh" in Step 1 to discard it.
+            guard let match = repoStore.snapshot.pkginfos.first(where: { record in
                 !importStore.edited.name.isEmpty &&
                 record.pkginfo.name.caseInsensitiveCompare(importStore.edited.name) == .orderedSame
+            }) else { return }
+            if let repo = repoStore.repository {
+                importStore.applyTemplate(match, in: repo)
+            } else {
+                importStore.templateMatch = match
             }
-            importStore.templateMatch = match
         }
     }
 
     @ViewBuilder
     private var wizardHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(importStore.step.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
+        HStack(spacing: 8) {
             Text(installerURL.lastPathComponent)
                 .font(.body.bold())
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer()
-            Button("Pick a different file…") { importStore.resetToIdle() }
-        }
-    }
+                .layoutPriority(-1)
 
-    @ViewBuilder
-    private var footer: some View {
-        HStack {
+            Button("Cancel", role: .cancel) { importStore.resetToIdle() }
             if importStore.step != .review {
                 Button("Back") { goBack() }
             }
-            Spacer()
-            Button("Cancel", role: .cancel) { importStore.resetToIdle() }
             Button(importStore.step.advanceLabel) {
                 Task { await advance() }
             }
             .buttonStyle(.borderedProminent)
             .disabled(!canAdvance)
+
+            Text(importStore.step.label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+            Button("Pick a different file…") { importStore.resetToIdle() }
         }
     }
 
@@ -338,27 +338,31 @@ private struct ScriptsStep: View {
     @State private var selectedSlot: ImportStore.ScriptSlot = .preinstall
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Scripts").font(.headline)
-            Text("Optional scripts run by Munki around install / uninstall. Empty slots are omitted. Exit-code semantics for the *_check scripts match Munki: 0 means the action is needed.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Scripts").font(.headline)
+                Text("Optional scripts run by Munki around install / uninstall. Empty slots are omitted. Exit-code semantics for the *_check scripts match Munki: 0 means the action is needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Picker("", selection: $selectedSlot) {
-                ForEach(ImportStore.ScriptSlot.allCases) { slot in
-                    Text(slot.tabLabel).tag(slot)
+                Picker("", selection: $selectedSlot) {
+                    ForEach(ImportStore.ScriptSlot.allCases) { slot in
+                        Text(slot.tabLabel).tag(slot)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+                .pickerStyle(.segmented)
+                .labelsHidden()
 
-            ScriptEditor(
-                label: selectedSlot.rawValue + "_script",
-                text: scriptBinding(selectedSlot),
-                editorHeight: 260
-            )
-            .id(selectedSlot)
+                Text(selectedSlot.rawValue + "_script")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                TextEditor(text: scriptBinding(selectedSlot))
+                    .font(.system(.callout, design: .monospaced))
+                    .frame(minHeight: 260)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator, lineWidth: 1))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
