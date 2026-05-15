@@ -28,7 +28,7 @@ public enum PkginfoYamlCoder {
         guard let dict = any as? [String: Any] else {
             throw MunkiCodingError.malformedTopLevel
         }
-        let node = try FoundationToNode.node(from: dict, context: .pkginfoRoot)
+        let node = try FoundationToNode.node(from: dict)
         // `allowUnicode: true` keeps non-ASCII characters as themselves
         // in the output (`Ω`, `é`, `日本語`) instead of escaping them
         // to `\uXXXX` sequences. Round-trip diffs on files that

@@ -3,36 +3,45 @@ import Yams
 
 /// Convert a Foundation-typed property-list graph (the kind
 /// `PropertyListSerialization.propertyList(from:options:format:)` returns)
-/// into a Yams `Node`, applying the Munki key-ordering and script
-/// literal-block rules along the way.
+/// into a Yams `Node`, applying the Munki key-ordering and scalar-style
+/// rules from ``MunkiYamlRules``.
 ///
 /// We go through Foundation rather than emitting Node directly from the
 /// Swift model so the encoder doesn't have to know about every CodingKey
 /// in `Pkginfo` / `Manifest`. The Codable conformance keeps that mapping;
 /// this file is only about emitting the resulting dictionary in Munki's
 /// canonical YAML form.
+///
+/// Detection is content-based (per dict shape) to match yamlutils.swift's
+/// `toNode` — no caller-supplied context. See ``MunkiYamlRules/sortKeysForDict(_:)``.
 public enum FoundationToNode {
-    public static func node(
-        from value: Any,
-        context: KeyOrderingContext = .other,
-        forceLiteralBlock: Bool = false
-    ) throws -> Node {
+    /// Emit a Yams `Node` for the given Foundation graph.
+    public static func node(from value: Any) throws -> Node {
+        try toNode(value, forKey: nil)
+    }
+
+    /// Recursive emitter. `forKey` is the parent dict key — used by
+    /// ``MunkiYamlRules/scalarStyle(forKey:value:)`` to pick a block style for
+    /// script/prose fields. Array elements pass `nil`.
+    private static func toNode(_ value: Any, forKey key: String?) throws -> Node {
         switch value {
-        case let dict as [String: Any]:
-            return try mappingNode(from: dict, context: context)
-        case let array as [Any]:
-            return try sequenceNode(from: array, context: context)
+        case is NSNull:
+            return Node("")
         case let string as String:
-            return stringNode(string, forceLiteralBlock: forceLiteralBlock)
+            return stringNode(string, forKey: key)
+        case let dict as [String: Any]:
+            return try mappingNode(from: dict)
+        case let array as [Any]:
+            return try sequenceNode(from: array)
         case let date as Date:
-            // Emit as a plain ISO-8601 string. Our resolver drops
-            // `.timestamp`, so YAML parsers we control re-read these
-            // as `String`. The Munki PR uses the same convention.
+            // Plain ISO-8601 string. Our resolver drops `.timestamp`, so this
+            // round-trips back as a String — keeps git diffs clean against
+            // hand-authored quoted dates.
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime]
-            return Node.scalar(Node.Scalar(formatter.string(from: date)))
+            return Node(formatter.string(from: date))
         case let data as Data:
-            return Node.scalar(Node.Scalar(data.base64EncodedString(), Tag(.binary)))
+            return Node(data.base64EncodedString(), Tag(.binary))
         case let number as NSNumber:
             return numberNode(number)
         default:
@@ -42,91 +51,56 @@ public enum FoundationToNode {
 
     // MARK: Mapping
 
-    private static func mappingNode(
-        from dict: [String: Any],
-        context: KeyOrderingContext
-    ) throws -> Node {
-        let orderedKeys = orderKeys(dict.keys, in: context)
-        let pairs: [(Node, Node)] = try orderedKeys.map { key in
-            let value = dict[key]!
-            let childContext = childContext(of: context, forKey: key)
-            let forceLiteral = CanonicalKeyOrder.scriptKeys.contains(key)
-            let valueNode = try node(from: value, context: childContext, forceLiteralBlock: forceLiteral)
-            return (Node.scalar(Node.Scalar(key)), valueNode)
+    private static func mappingNode(from dict: [String: Any]) throws -> Node {
+        let sortedKeys = MunkiYamlRules.sortKeysForDict(dict)
+        var pairs: [(Node, Node)] = []
+        pairs.reserveCapacity(sortedKeys.count)
+        for key in sortedKeys {
+            guard let value = dict[key] else { continue }
+            pairs.append((Node(key), try toNode(value, forKey: key)))
         }
-        return Node.mapping(Node.Mapping(pairs))
+        return Node(pairs, .implicit, .block)
     }
 
-    private static func sequenceNode(
-        from array: [Any],
-        context: KeyOrderingContext
-    ) throws -> Node {
-        let nodes = try array.map { try node(from: $0, context: context) }
-        return Node.sequence(Node.Sequence(nodes))
+    // MARK: Sequence
+
+    private static func sequenceNode(from array: [Any]) throws -> Node {
+        // Array elements don't carry a key context — they're indexed.
+        let nodes = try array.map { try toNode($0, forKey: nil) }
+        return Node(nodes, .implicit, .block)
     }
 
     // MARK: Scalars
 
-    private static func stringNode(_ string: String, forceLiteralBlock: Bool) -> Node {
-        if forceLiteralBlock {
-            return Node.scalar(Node.Scalar(string, .implicit, .literal))
+    private static func stringNode(_ string: String, forKey key: String?) -> Node {
+        // Empty strings must be emitted explicitly as quoted scalars so they
+        // survive a write+read round-trip. An unquoted empty scalar resolves
+        // to null under Yams' core resolver, which would either drop the key
+        // entirely or fail a downstream non-optional decode. Matches
+        // yamlutils.swift's `Node("", Tag(.str), .singleQuoted)`.
+        if string.isEmpty {
+            return Node("", Tag(.str), .singleQuoted)
         }
-        // We deliberately leave style at `.any` and let Yams pick. With
-        // both `.float` and `.timestamp` removed from our resolver,
-        // version-like scalars (`5.6`, `10.4.0`, `2.4.0.2561`) and
-        // ISO-8601 dates already parse back as strings, so we don't
-        // need to force single-quote them on emit. Force-quoting was
-        // generating noisy diffs (`5.6` → `'5.6'`) on every save.
-        return Node.scalar(Node.Scalar(string))
+        let style = MunkiYamlRules.scalarStyle(forKey: key ?? "", value: string)
+        return Node(string, .implicit, style)
     }
 
     private static func numberNode(_ number: NSNumber) -> Node {
         if CFGetTypeID(number) == CFBooleanGetTypeID() {
-            return Node.scalar(Node.Scalar(number.boolValue ? "true" : "false", Tag(.bool)))
+            return Node(number.boolValue ? "true" : "false", Tag(.bool))
         }
+        // yamlutils.swift emits ints and doubles as plain untagged scalars.
+        // For ints we keep the `.int` tag so size-like keys round-trip as
+        // numeric (`installer_item_size: 1024`). For doubles we emit
+        // untagged — combined with our resolver's `.float` removal, that
+        // makes `26.2` re-read as a String, which is what we want for
+        // version-like values that survive a round-trip.
         let objcType = String(cString: number.objCType)
-        // Per Apple's docs, integer NSNumbers encode their type as one of
-        // c, i, s, l, q (signed) or C, I, S, L, Q (unsigned); floating
-        // values use f or d.
         if objcType == "f" || objcType == "d" {
-            return Node.scalar(Node.Scalar(number.stringValue, Tag(.float)))
+            return Node(number.stringValue)
         }
-        return Node.scalar(Node.Scalar(number.stringValue, Tag(.int)))
+        return Node(number.stringValue, Tag(.int))
     }
-
-    // MARK: Context plumbing
-
-    private static func orderKeys(_ keys: some Sequence<String>, in context: KeyOrderingContext) -> [String] {
-        switch context {
-        case .pkginfoRoot:
-            CanonicalKeyOrder.order(keys, priority: CanonicalKeyOrder.pkginfoPriority, trailing: CanonicalKeyOrder.pkginfoTrailing)
-        case .manifestRoot:
-            CanonicalKeyOrder.order(keys, priority: CanonicalKeyOrder.manifestPriority, trailing: CanonicalKeyOrder.manifestTrailing)
-        case .installsItem:
-            CanonicalKeyOrder.order(keys, priority: CanonicalKeyOrder.installsItemPriority, trailing: [])
-        case .receipt:
-            CanonicalKeyOrder.order(keys, priority: CanonicalKeyOrder.receiptPriority, trailing: [])
-        case .conditionalItem:
-            CanonicalKeyOrder.order(keys, priority: CanonicalKeyOrder.conditionalItemPriority, trailing: [])
-        case .itemToCopy:
-            CanonicalKeyOrder.order(keys, priority: CanonicalKeyOrder.itemsToCopyPriority, trailing: [])
-        case .other:
-            CanonicalKeyOrder.order(keys, priority: [], trailing: [])
-        }
-    }
-
-    private static func childContext(of parent: KeyOrderingContext, forKey key: String) -> KeyOrderingContext {
-        switch (parent, key) {
-        case (.pkginfoRoot, "installs"): .installsItem
-        case (.pkginfoRoot, "receipts"): .receipt
-        case (.pkginfoRoot, "items_to_copy"): .itemToCopy
-        case (.pkginfoRoot, "conditional_items"): .conditionalItem
-        case (.manifestRoot, "conditional_items"): .conditionalItem
-        case (.conditionalItem, "conditional_items"): .conditionalItem
-        default: .other
-        }
-    }
-
 }
 
 public enum MunkiCodingError: Error, Sendable, LocalizedError {

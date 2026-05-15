@@ -29,7 +29,7 @@ public enum ManifestYamlCoder {
         guard let dict = any as? [String: Any] else {
             throw MunkiCodingError.malformedTopLevel
         }
-        let node = try FoundationToNode.node(from: dict, context: .manifestRoot)
+        let node = try FoundationToNode.node(from: dict)
         // See `PkginfoYamlCoder.encode` for the rationale on
         // `allowUnicode: true`.
         return try Yams.serialize(node: node, allowUnicode: true, sortKeys: false)

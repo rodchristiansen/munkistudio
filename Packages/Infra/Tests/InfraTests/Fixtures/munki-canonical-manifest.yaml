@@ -1,0 +1,21 @@
+display_name: Lab iMacs
+catalogs:
+- production
+conditional_items:
+- condition: arch == "arm64"
+  managed_installs:
+  - AppleSiliconOnlyTool
+  managed_uninstalls:
+  - LegacyIntelTool
+  optional_installs:
+  - SiliconExtras
+included_manifests:
+- site_default
+managed_installs:
+- Firefox
+- Slack
+managed_uninstalls:
+- OldApp
+notes: Internal lab fleet.
+_metadata:
+  created_by: rod

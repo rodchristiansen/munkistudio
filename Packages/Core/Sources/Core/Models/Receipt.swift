@@ -4,6 +4,13 @@ import Foundation
 /// `installs[]` isn't present and the installer is a `.pkg`.
 public struct Receipt: Sendable, Hashable, Codable {
     public var packageid: String?
+    /// Human-readable name. Appears in `receipts[]` per Munki's schema and
+    /// in the CLI's `receiptKeyOrder`; preserving it round-trips diff-clean
+    /// against `pkginfos` authored by `makepkginfo`.
+    public var name: String?
+    /// Original installer filename (e.g. `ExampleApp.pkg`). Part of Munki's
+    /// receipt schema alongside `packageid` / `version`.
+    public var filename: String?
     public var version: String?
     public var installedSize: Int?
 
@@ -12,12 +19,16 @@ public struct Receipt: Sendable, Hashable, Codable {
 
     public init(
         packageid: String? = nil,
+        name: String? = nil,
+        filename: String? = nil,
         version: String? = nil,
         installedSize: Int? = nil,
         optional: Bool? = nil,
         noUnattendedUninstall: Bool? = nil
     ) {
         self.packageid = packageid
+        self.name = name
+        self.filename = filename
         self.version = version
         self.installedSize = installedSize
         self.optional = optional
@@ -26,6 +37,8 @@ public struct Receipt: Sendable, Hashable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case packageid
+        case name
+        case filename
         case version
         case installedSize = "installed_size"
         case optional
@@ -37,6 +50,8 @@ public struct Receipt: Sendable, Hashable, Codable {
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.packageid = try c.decodeFlexibleStringIfPresent(forKey: .packageid)
+        self.name = try c.decodeIfPresent(String.self, forKey: .name)
+        self.filename = try c.decodeIfPresent(String.self, forKey: .filename)
         self.version = try c.decodeFlexibleStringIfPresent(forKey: .version)
         self.installedSize = try c.decodeIfPresent(Int.self, forKey: .installedSize)
         self.optional = try c.decodeIfPresent(Bool.self, forKey: .optional)

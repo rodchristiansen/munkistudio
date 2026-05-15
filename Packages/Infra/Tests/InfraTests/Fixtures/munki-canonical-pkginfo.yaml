@@ -1,0 +1,44 @@
+name: ExampleApp
+display_name: Example App
+version: 1.5
+PayloadIdentifier: com.example.payload
+RestartAction: RequireRestart
+autoremove: false
+catalogs:
+- production
+- testing
+category: Utilities
+description: A single-line description that should stay plain.
+developer: Acme Corp.
+installer_item_hash: abcdef0123456789
+installer_item_location: apps/Example/ExampleApp-1.5.dmg
+installer_item_size: 12345
+installer_type: copy_from_dmg
+installs:
+- path: /Applications/ExampleApp.app
+  type: bundle
+  CFBundleIdentifier: com.example.app
+  CFBundleShortVersionString: 1.5
+items_to_copy:
+- destination_path: /Applications
+  source_item: ExampleApp.app
+minimum_os_version: 12.0
+postinstall_script: |
+  #!/bin/sh
+  /usr/bin/touch /var/db/example.installed
+  exit 0
+receipts:
+- packageid: com.example.app
+  name: ExampleApp
+  filename: ExampleApp.pkg
+  installed_size: 12345
+  version: 1.5
+  optional: false
+supported_architectures:
+- arm64
+- x86_64
+unattended_install: true
+uninstall_method: ''
+uninstallable: true
+_metadata:
+  created_by: rod
