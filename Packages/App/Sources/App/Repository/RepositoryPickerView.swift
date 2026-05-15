@@ -63,7 +63,7 @@ struct RepositoryPickerView: View {
             .padding(.bottom, 6)
 
             Text("MunkiStudio")
-                .font(.system(size: 38, weight: .bold, design: .rounded))
+                .font(.system(.largeTitle, design: .rounded).weight(.bold))
                 .tracking(-0.5)
 
             Text("The Munki repository studio.")

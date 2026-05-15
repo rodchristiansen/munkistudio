@@ -7,6 +7,7 @@ import Core
 struct DashboardView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var recentCommits: [GitCommit] = []
+    @ScaledMetric(relativeTo: .caption) private var shaColumnWidth: CGFloat = 70
 
     var body: some View {
         ScrollView {
@@ -251,7 +252,7 @@ struct DashboardView: View {
                             Text(String(commit.sha.prefix(8)))
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.tertiary)
-                                .frame(width: 70, alignment: .leading)
+                                .frame(width: shaColumnWidth, alignment: .leading)
                             Text(commit.subject)
                                 .font(.callout)
                                 .lineLimit(1)

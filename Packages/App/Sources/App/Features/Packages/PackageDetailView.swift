@@ -691,11 +691,13 @@ struct LabelledField<Value: View>: View {
         self.value = value()
     }
 
+    @ScaledMetric(relativeTo: .body) private var labelColumnWidth: CGFloat = 140
+
     var body: some View {
         HStack(alignment: alignment) {
             Text(label)
                 .foregroundStyle(.secondary)
-                .frame(width: 140, alignment: .leading)
+                .frame(width: labelColumnWidth, alignment: .leading)
             value
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

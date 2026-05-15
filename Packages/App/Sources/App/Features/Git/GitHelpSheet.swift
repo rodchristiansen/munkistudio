@@ -47,6 +47,8 @@ struct GitHelpSheet: View {
         .frame(minWidth: 720, minHeight: 420)
     }
 
+    @ScaledMetric(relativeTo: .callout) private var keyColumnWidth: CGFloat = 100
+
     private func column(_ title: String, entries: [(String, String)]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.headline)
@@ -55,7 +57,7 @@ struct GitHelpSheet: View {
                     Text(key)
                         .font(.system(.callout, design: .monospaced))
                         .foregroundStyle(.tint)
-                        .frame(width: 100, alignment: .leading)
+                        .frame(width: keyColumnWidth, alignment: .leading)
                     Text(description)
                         .foregroundStyle(.secondary)
                 }

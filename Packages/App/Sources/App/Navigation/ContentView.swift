@@ -35,6 +35,7 @@ struct ContentView: View {
 /// other sections use the standard sidebar / list / detail split.
 struct RepositoryWorkspace: View {
     @Environment(RepositoryStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var bindableStore = store
@@ -74,11 +75,15 @@ struct RepositoryWorkspace: View {
                     SearchResultsFloatingPanel()
                         .padding(.trailing, 16)
                         .padding(.top, 6)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        // Honour Reduce Motion: the slide-from-top
+                        // transition becomes a no-op crossfade, and the
+                        // implicit animation is suppressed entirely so
+                        // the panel snaps in instead of sliding.
+                        .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.12), value: store.searchResults.count)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: store.searchResults.count)
         // Native `.searchable` so macOS 26 draws the chrome and the
         // field collapses / expands consistently with Finder and Mail.
         .searchable(

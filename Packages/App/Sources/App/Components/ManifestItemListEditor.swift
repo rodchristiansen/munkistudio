@@ -23,6 +23,7 @@ struct ManifestItemListEditor: View {
     /// lists these — free-text entry is intentionally not supported so
     /// users can't introduce typos that resolve to nothing at runtime.
     let availableNames: [String]
+    @ScaledMetric(relativeTo: .caption) private var conditionalColumnWidth: CGFloat = 200
 
     enum Kind {
         case managedInstalls, managedUninstalls, managedUpdates
@@ -79,7 +80,7 @@ struct ManifestItemListEditor: View {
                 Text("Conditional")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 200, alignment: .leading)
+                    .frame(width: conditionalColumnWidth, alignment: .leading)
             }
             // spacer column to align with delete button
             Color.clear.frame(width: 24)
