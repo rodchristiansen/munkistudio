@@ -28,7 +28,8 @@ struct MunkiStudioApp: SwiftUI.App {
             catalogs: catalogs,
             icons: icons,
             git: ShellGitService(),
-            makecatalogs: MakecatalogsRunner()
+            makecatalogs: MakecatalogsRunner(),
+            munkiimport: MunkiimportRunner()
         )
         _store = State(wrappedValue: RepositoryStore(services: services))
     }
@@ -56,4 +57,5 @@ struct AppServices: Sendable {
     let icons: any IconService
     let git: any GitService
     let makecatalogs: any MakecatalogsService
+    let munkiimport: any MunkiimportService
 }
