@@ -76,6 +76,12 @@ public protocol GitService: Sendable {
     func rebase(in info: GitRepositoryInfo, onto sha: String) async throws
     /// Reset the current branch to `sha` with the given mode.
     func reset(in info: GitRepositoryInfo, to sha: String, mode: GitResetMode) async throws
+
+    /// The full commit message (subject + body) for `sha`.
+    func commitMessage(in info: GitRepositoryInfo, sha: String) async throws -> String
+    /// Rewrite the message of `sha`. Works for any commit on the current
+    /// branch — not just HEAD — by replaying its descendants.
+    func editCommitMessage(in info: GitRepositoryInfo, sha: String, message: String) async throws
 }
 
 /// Reset modes mirroring `git reset --soft/--mixed/--hard`.

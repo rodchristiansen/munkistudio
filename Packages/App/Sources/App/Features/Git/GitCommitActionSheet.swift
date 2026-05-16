@@ -11,12 +11,17 @@ enum CommitAction: Identifiable {
     case merge(GitCommit)
     case rebase(GitCommit)
     case reset(GitCommit)
+    /// Carries the commit's current full message so the sheet can
+    /// pre-fill the editor without an async fetch of its own.
+    case editMessage(GitCommit, current: String)
 
     var commit: GitCommit {
         switch self {
         case .addTag(let c), .createBranch(let c), .checkout(let c),
              .cherryPick(let c), .revert(let c), .merge(let c),
              .rebase(let c), .reset(let c):
+            return c
+        case .editMessage(let c, _):
             return c
         }
     }
@@ -31,6 +36,7 @@ enum CommitAction: Identifiable {
         case .merge: "merge-\(commit.sha)"
         case .rebase: "rebase-\(commit.sha)"
         case .reset: "reset-\(commit.sha)"
+        case .editMessage: "editmsg-\(commit.sha)"
         }
     }
 }
@@ -45,6 +51,7 @@ enum CommitActionRequest {
     case merge(GitCommit)
     case rebase(GitCommit)
     case reset(commit: GitCommit, mode: GitResetMode)
+    case editMessage(commit: GitCommit, message: String)
 }
 
 /// Confirmation / input sheet for a commit context-menu action.
@@ -58,6 +65,7 @@ struct GitCommitActionSheet: View {
     @State private var tagMessage = ""
     @State private var branchName = ""
     @State private var resetMode: GitResetMode = .soft
+    @State private var commitMessage = ""
     @State private var running = false
 
     private var branch: String { currentBranch ?? "the current branch" }
@@ -88,6 +96,9 @@ struct GitCommitActionSheet: View {
         }
         .padding(20)
         .frame(width: 460)
+        .onAppear {
+            if case .editMessage(_, let current) = action { commitMessage = current }
+        }
     }
 
     @ViewBuilder
@@ -128,6 +139,17 @@ struct GitCommitActionSheet: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+        case .editMessage:
+            Text("Edit the message for commit \(shortSHA). This rewrites this commit and every commit after it, so their hashes change.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextEditor(text: $commitMessage)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 132)
+                .padding(4)
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
         }
     }
 
@@ -148,6 +170,7 @@ struct GitCommitActionSheet: View {
         case .merge: "Merge into \(branch)"
         case .rebase: "Rebase \(branch)"
         case .reset: "Reset \(branch)"
+        case .editMessage: "Edit Commit Message"
         }
     }
 
@@ -161,6 +184,7 @@ struct GitCommitActionSheet: View {
         case .merge: "Merge"
         case .rebase: "Rebase"
         case .reset: "Reset"
+        case .editMessage: "Save Message"
         }
     }
 
@@ -175,6 +199,7 @@ struct GitCommitActionSheet: View {
         switch action {
         case .addTag: !tagName.trimmingCharacters(in: .whitespaces).isEmpty
         case .createBranch: !branchName.trimmingCharacters(in: .whitespaces).isEmpty
+        case .editMessage: !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         default: true
         }
     }
@@ -193,6 +218,9 @@ struct GitCommitActionSheet: View {
         case .merge(let c): .merge(c)
         case .rebase(let c): .rebase(c)
         case .reset(let c): .reset(commit: c, mode: resetMode)
+        case .editMessage(let c, _):
+            .editMessage(commit: c,
+                         message: commitMessage.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
 }

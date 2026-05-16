@@ -373,6 +373,10 @@ struct GitCommitsPanel: View {
     @ViewBuilder
     private func commitContextMenu(_ commit: GitCommit) -> some View {
         let branch = state.info?.currentBranch ?? "current branch"
+        Button("Edit Commit Message…") {
+            Task { pendingAction = .editMessage(commit, current: await loadCommitMessage(commit)) }
+        }
+        Divider()
         Button("Add Tag…") { pendingAction = .addTag(commit) }
         Button("Create Branch…") { pendingAction = .createBranch(commit) }
         Divider()
@@ -387,6 +391,13 @@ struct GitCommitsPanel: View {
         Button("Copy Commit Hash") { copyToPasteboard(commit.sha) }
         Button("Copy Commit Subject") { copyToPasteboard(commit.subject) }
         Button("Copy .patch") { Task { await copyPatch(for: commit.sha) } }
+    }
+
+    /// Fetch a commit's full message to pre-fill the edit sheet; falls
+    /// back to the subject line if the lookup fails.
+    private func loadCommitMessage(_ commit: GitCommit) async -> String {
+        guard let info = state.info else { return commit.subject }
+        return (try? await store.services.git.commitMessage(in: info, sha: commit.sha)) ?? commit.subject
     }
 
     private func run(_ request: CommitActionRequest) async {
@@ -410,6 +421,8 @@ struct GitCommitsPanel: View {
                 try await git.rebase(in: info, onto: c.sha)
             case .reset(let c, let mode):
                 try await git.reset(in: info, to: c.sha, mode: mode)
+            case .editMessage(let c, let message):
+                try await git.editCommitMessage(in: info, sha: c.sha, message: message)
             }
             state.statusMessage = nil
             await refreshAll()

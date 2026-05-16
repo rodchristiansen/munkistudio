@@ -527,6 +527,82 @@ public final class ShellGitService: GitService {
         try await runGitChecked(["reset", "--\(mode.rawValue)", sha], name: "git reset", in: info)
     }
 
+    public func commitMessage(in info: GitRepositoryInfo, sha: String) async throws -> String {
+        let result = try await ProcessRunner.run(
+            gitURL, arguments: ["log", "-1", "--pretty=format:%B", sha], in: info.workTreeRoot
+        )
+        guard result.exitCode == 0 else {
+            throw RepositoryError.process(name: "git log", exitCode: result.exitCode, output: result.stderr)
+        }
+        return result.stdout.trimmingCharacters(in: .newlines)
+    }
+
+    /// Reword an arbitrary commit. Rewriting a non-HEAD message means
+    /// replaying every commit after it, so this runs a fully scripted
+    /// (no human input) interactive rebase: `git rebase -i <sha>^` lists
+    /// the target as the first todo entry, `GIT_SEQUENCE_EDITOR` flips
+    /// that line from `pick` to `reword`, and `GIT_EDITOR` copies the new
+    /// message in. The same path handles HEAD and the root commit.
+    public func editCommitMessage(in info: GitRepositoryInfo, sha: String, message: String) async throws {
+        let work = info.workTreeRoot
+
+        // The commit must be on the current branch — rebasing only
+        // rewrites HEAD's ancestry.
+        let ancestor = try await ProcessRunner.run(
+            gitURL, arguments: ["merge-base", "--is-ancestor", sha, "HEAD"], in: work
+        )
+        guard ancestor.exitCode == 0 else {
+            throw RepositoryError.process(
+                name: "git", exitCode: ancestor.exitCode,
+                output: "This commit isn't on the current branch, so its message can't be edited from here."
+            )
+        }
+
+        // A plain rebase flattens merges — refuse rather than silently
+        // rewriting them.
+        let merges = try await ProcessRunner.run(
+            gitURL, arguments: ["rev-list", "--merges", "--count", "\(sha)..HEAD"], in: work
+        )
+        if merges.exitCode == 0,
+           let count = Int(merges.stdout.trimmingCharacters(in: .whitespacesAndNewlines)), count > 0 {
+            throw RepositoryError.process(
+                name: "git", exitCode: 1,
+                output: "There are merge commits between this commit and HEAD — editing its message would rewrite the merges."
+            )
+        }
+
+        // The new message goes in a temp file the scripted editor copies
+        // over git's commit-message file.
+        let messageFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("munkistudio-reword-\(UUID().uuidString).txt")
+        try message.write(to: messageFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: messageFile) }
+
+        // `<sha>^` fails for the root commit — fall back to `--root`.
+        let parentCheck = try await ProcessRunner.run(
+            gitURL, arguments: ["rev-parse", "--verify", "--quiet", "\(sha)^"], in: work
+        )
+        let base = parentCheck.exitCode == 0 ? "\(sha)^" : "--root"
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_SEQUENCE_EDITOR"] = "sed -i '' -e '1s/^pick /reword /' -e '1s/^p /reword /'"
+        environment["GIT_EDITOR"] = "cp \(messageFile.path)"
+
+        let result = try await ProcessRunner.run(
+            gitURL,
+            arguments: ["rebase", "-i", "--autostash", base],
+            in: work,
+            environment: environment
+        )
+        guard result.exitCode == 0 else {
+            // A reword never conflicts, but abort defensively so a
+            // half-applied rebase can't strand the repo.
+            _ = try? await ProcessRunner.run(gitURL, arguments: ["rebase", "--abort"], in: work)
+            let output = result.stderr.isEmpty ? result.stdout : result.stderr
+            throw RepositoryError.process(name: "git rebase", exitCode: result.exitCode, output: output)
+        }
+    }
+
     private func runGitChecked(_ args: [String], name: String, in info: GitRepositoryInfo) async throws {
         let result = try await ProcessRunner.run(gitURL, arguments: args, in: info.workTreeRoot)
         guard result.exitCode == 0 else {
