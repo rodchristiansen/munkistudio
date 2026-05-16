@@ -63,8 +63,14 @@ struct DependenciesView: View {
         .onChange(of: store.snapshot.pkginfos.count) { selectDefaultClusterIfNeeded() }
     }
 
+    /// Seed or correct the cluster selection. `selectedCluster` masks a
+    /// nil / stale id behind a `filteredClusters.first` fallback, so the
+    /// check has to look at the stored id directly — otherwise the id
+    /// never gets initialized and the list shows no selected row.
     private func selectDefaultClusterIfNeeded() {
-        if selectedCluster == nil { store.dependenciesClusterID = clusters.first?.id }
+        let id = store.dependenciesClusterID
+        let isValid = id != nil && clusters.contains { $0.id == id }
+        if !isValid { store.dependenciesClusterID = clusters.first?.id }
     }
 
     // MARK: - Header
@@ -171,25 +177,31 @@ struct DependenciesView: View {
 
     private func nodeView(_ node: DependencyGraph.Node) -> some View {
         let tint: Color = node.exists ? .accentColor : .secondary
-        return HStack(spacing: 6) {
-            Image(systemName: node.exists ? "shippingbox.fill" : "questionmark.diamond")
-                .imageScale(.small)
-                .foregroundStyle(tint)
-            Text(node.name)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
+        // A `Button` (not a tap gesture) so the node is keyboard-
+        // activatable and exposed to assistive tech as a control.
+        return Button {
+            navigate(to: node)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: node.exists ? "shippingbox.fill" : "questionmark.diamond")
+                    .imageScale(.small)
+                    .foregroundStyle(tint)
+                Text(node.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 10)
+            .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
+            .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
+                            style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
+            )
+            .contentShape(.rect)
         }
-        .padding(.horizontal, 10)
-        .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
-        .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
-                        style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
-        )
-        .contentShape(.rect)
-        .onTapGesture { navigate(to: node) }
+        .buttonStyle(.plain)
         .help(node.exists ? "Open \(node.name) in Packages" : "\(node.name) — referenced but not present in this repo")
     }
 
