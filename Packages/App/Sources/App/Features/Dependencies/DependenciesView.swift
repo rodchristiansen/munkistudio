@@ -11,19 +11,18 @@ struct DependenciesView: View {
     @State private var filter = ""
     @FocusState private var filterFocused: Bool
 
+    /// Graph + clusters derived from the snapshot, cached so zoom /
+    /// filter / selection changes don't rebuild the whole-repo graph on
+    /// every body pass. `rebuildGraph()` refreshes them when the pkginfo
+    /// set actually changes.
+    @State private var graph = DependencyGraph(nodes: [], edges: [])
+    @State private var clusters: [DependencyCluster] = []
+
     /// Cluster selection lives on the store so it survives navigating
     /// away and back (deep-link state, not view-local).
     private var clusterSelection: Binding<String?> {
         Binding(get: { store.dependenciesClusterID },
                 set: { store.dependenciesClusterID = $0 })
-    }
-
-    private var graph: DependencyGraph {
-        DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
-    }
-
-    private var clusters: [DependencyCluster] {
-        DependencyClusterizer.clusters(from: graph)
     }
 
     private var filteredClusters: [DependencyCluster] {
@@ -39,7 +38,6 @@ struct DependenciesView: View {
     }
 
     var body: some View {
-        let clusters = clusters
         VStack(spacing: 0) {
             header(clusterCount: clusters.count, packageCount: graph.nodes.count)
             Divider()
@@ -59,8 +57,15 @@ struct DependenciesView: View {
                 }
             }
         }
-        .onAppear { selectDefaultClusterIfNeeded() }
-        .onChange(of: store.snapshot.pkginfos.count) { selectDefaultClusterIfNeeded() }
+        .onAppear { rebuildGraph() }
+        .onChange(of: store.snapshot.pkginfos) { rebuildGraph() }
+    }
+
+    /// Rebuild the cached graph + clusters from the current snapshot.
+    private func rebuildGraph() {
+        graph = DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
+        clusters = DependencyClusterizer.clusters(from: graph)
+        selectDefaultClusterIfNeeded()
     }
 
     /// Seed or correct the cluster selection. `selectedCluster` masks a
