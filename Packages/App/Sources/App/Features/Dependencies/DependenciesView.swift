@@ -8,16 +8,21 @@ import Core
 struct DependenciesView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var zoom: CGFloat = 1
-    @State private var selectedClusterID: String?
     @State private var filter = ""
     @FocusState private var filterFocused: Bool
 
-    private var graph: DependencyGraph {
-        DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
-    }
+    /// Graph + clusters derived from the snapshot, cached so zoom /
+    /// filter / selection changes don't rebuild the whole-repo graph on
+    /// every body pass. `rebuildGraph()` refreshes them when the pkginfo
+    /// set actually changes.
+    @State private var graph = DependencyGraph(nodes: [], edges: [])
+    @State private var clusters: [DependencyCluster] = []
 
-    private var clusters: [DependencyCluster] {
-        DependencyClusterizer.clusters(from: graph)
+    /// Cluster selection lives on the store so it survives navigating
+    /// away and back (deep-link state, not view-local).
+    private var clusterSelection: Binding<String?> {
+        Binding(get: { store.dependenciesClusterID },
+                set: { store.dependenciesClusterID = $0 })
     }
 
     private var filteredClusters: [DependencyCluster] {
@@ -29,11 +34,10 @@ struct DependenciesView: View {
     }
 
     private var selectedCluster: DependencyCluster? {
-        clusters.first { $0.id == selectedClusterID } ?? filteredClusters.first
+        clusters.first { $0.id == store.dependenciesClusterID } ?? filteredClusters.first
     }
 
     var body: some View {
-        let clusters = clusters
         VStack(spacing: 0) {
             header(clusterCount: clusters.count, packageCount: graph.nodes.count)
             Divider()
@@ -53,12 +57,25 @@ struct DependenciesView: View {
                 }
             }
         }
-        .onAppear { selectDefaultClusterIfNeeded() }
-        .onChange(of: store.snapshot.pkginfos.count) { selectDefaultClusterIfNeeded() }
+        .onAppear { rebuildGraph() }
+        .onChange(of: store.snapshot.pkginfos) { rebuildGraph() }
     }
 
+    /// Rebuild the cached graph + clusters from the current snapshot.
+    private func rebuildGraph() {
+        graph = DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
+        clusters = DependencyClusterizer.clusters(from: graph)
+        selectDefaultClusterIfNeeded()
+    }
+
+    /// Seed or correct the cluster selection. `selectedCluster` masks a
+    /// nil / stale id behind a `filteredClusters.first` fallback, so the
+    /// check has to look at the stored id directly — otherwise the id
+    /// never gets initialized and the list shows no selected row.
     private func selectDefaultClusterIfNeeded() {
-        if selectedCluster == nil { selectedClusterID = clusters.first?.id }
+        let id = store.dependenciesClusterID
+        let isValid = id != nil && clusters.contains { $0.id == id }
+        if !isValid { store.dependenciesClusterID = clusters.first?.id }
     }
 
     // MARK: - Header
@@ -107,7 +124,7 @@ struct DependenciesView: View {
             FilterField(text: $filter, prompt: "Filter clusters", focused: $filterFocused)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-            List(selection: $selectedClusterID) {
+            List(selection: clusterSelection) {
                 ForEach(filteredClusters) { cluster in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(cluster.title)
@@ -165,25 +182,31 @@ struct DependenciesView: View {
 
     private func nodeView(_ node: DependencyGraph.Node) -> some View {
         let tint: Color = node.exists ? .accentColor : .secondary
-        return HStack(spacing: 6) {
-            Image(systemName: node.exists ? "shippingbox.fill" : "questionmark.diamond")
-                .imageScale(.small)
-                .foregroundStyle(tint)
-            Text(node.name)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
+        // A `Button` (not a tap gesture) so the node is keyboard-
+        // activatable and exposed to assistive tech as a control.
+        return Button {
+            navigate(to: node)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: node.exists ? "shippingbox.fill" : "questionmark.diamond")
+                    .imageScale(.small)
+                    .foregroundStyle(tint)
+                Text(node.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 10)
+            .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
+            .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
+                            style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
+            )
+            .contentShape(.rect)
         }
-        .padding(.horizontal, 10)
-        .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
-        .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
-                        style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
-        )
-        .contentShape(.rect)
-        .onTapGesture { navigate(to: node) }
+        .buttonStyle(.plain)
         .help(node.exists ? "Open \(node.name) in Packages" : "\(node.name) — referenced but not present in this repo")
     }
 

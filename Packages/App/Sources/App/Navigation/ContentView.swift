@@ -113,6 +113,25 @@ struct RepositoryWorkspace: View {
             store.searchResults = results
         }
         .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button {
+                    store.goBack()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(!store.canGoBack)
+                .help("Back")
+
+                Button {
+                    store.goForward()
+                } label: {
+                    Label("Forward", systemImage: "chevron.right")
+                }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(!store.canGoForward)
+                .help("Forward")
+            }
             // `.labelStyle(.titleAndIcon)` on Save keeps the dirty-count
             // badge visible at tight widths — otherwise the toolbar
             // collapses to icon-only and the count disappears.

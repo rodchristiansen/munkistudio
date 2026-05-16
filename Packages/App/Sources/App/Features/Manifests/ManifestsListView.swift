@@ -6,8 +6,6 @@ import Core
 struct ManifestsListView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var search: String = ""
-    @State private var grouping: ManifestGrouping = .directories
-    @State private var sort: PackageSort = .name
     @State private var criteriaGroup = ManifestCriteriaGroup()
     @State private var filterPopoverShown = false
     @FocusState private var searchFocused: Bool
@@ -16,7 +14,7 @@ struct ManifestsListView: View {
         @Bindable var bindableStore = store
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Picker("", selection: $grouping) {
+                Picker("", selection: $bindableStore.manifestsGrouping) {
                     ForEach(ManifestGrouping.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
@@ -25,7 +23,7 @@ struct ManifestsListView: View {
                 .labelsHidden()
                 Spacer()
                 filterButton
-                SortMenu(sort: $sort)
+                SortMenu(sort: $bindableStore.manifestsSort)
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)
@@ -45,8 +43,8 @@ struct ManifestsListView: View {
             } else {
                 ManifestTreeList(
                     records: filtered,
-                    grouping: grouping,
-                    sort: sort,
+                    grouping: store.manifestsGrouping,
+                    sort: store.manifestsSort,
                     forceExpandAll: !search.isEmpty || !criteriaGroup.criteria.isEmpty
                 )
             }
