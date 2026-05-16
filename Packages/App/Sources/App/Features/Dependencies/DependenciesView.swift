@@ -17,6 +17,8 @@ struct DependenciesView: View {
     /// set actually changes.
     @State private var graph = DependencyGraph(nodes: [], edges: [])
     @State private var clusters: [DependencyCluster] = []
+    @State private var findings: [DependencyFinding] = []
+    @State private var showingIssues = false
 
     /// Cluster selection lives on the store so it survives navigating
     /// away and back (deep-link state, not view-local).
@@ -65,6 +67,7 @@ struct DependenciesView: View {
     private func rebuildGraph() {
         graph = DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
         clusters = DependencyClusterizer.clusters(from: graph)
+        findings = DependencyLinter.analyze(graph)
         selectDefaultClusterIfNeeded()
     }
 
@@ -87,6 +90,7 @@ struct DependenciesView: View {
                 Text("\(packageCount) connected package\(packageCount == 1 ? "" : "s") in \(clusterCount) cluster\(clusterCount == 1 ? "" : "s")")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            issuesButton
             Spacer()
             legendItem(color: .blue, dashed: false, label: "requires")
             legendItem(color: .orange, dashed: true, label: "update_for")
@@ -117,6 +121,89 @@ struct DependenciesView: View {
         zoom = min(2, max(0.4, (value * 10).rounded() / 10))
     }
 
+    // MARK: - Issues
+
+    @ViewBuilder
+    private var issuesButton: some View {
+        if !findings.isEmpty {
+            let hasError = findings.contains { $0.severity == .error }
+            let tint: Color = hasError ? .red : .orange
+            Button { showingIssues.toggle() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("\(findings.count) issue\(findings.count == 1 ? "" : "s")")
+                }
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(tint)
+            }
+            .buttonStyle(.plain)
+            .help("Dependency problems found in this repo")
+            .popover(isPresented: $showingIssues, arrowEdge: .bottom) {
+                issuesList
+            }
+        }
+    }
+
+    private var issuesList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(findings) { finding in
+                    Button { jump(to: finding) } label: { findingRow(finding) }
+                        .buttonStyle(.plain)
+                    Divider()
+                }
+            }
+        }
+        .frame(width: 440, height: min(CGFloat(findings.count) * 92, 420))
+    }
+
+    private func findingRow(_ finding: DependencyFinding) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: finding.severity == .error
+                  ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(finding.severity == .error ? .red : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(finding.title).font(.callout.weight(.semibold))
+                Text(.init(finding.detail))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+    }
+
+    private func jump(to finding: DependencyFinding) {
+        showingIssues = false
+        guard let name = finding.nodes.first,
+              let cluster = clusters.first(where: { cluster in
+                  cluster.graph.nodes.contains { $0.name == name }
+              })
+        else { return }
+        store.dependenciesClusterID = cluster.id
+    }
+
+    /// Highest severity among findings touching `cluster`, if any.
+    private func severity(of cluster: DependencyCluster) -> DependencyFinding.Severity? {
+        let names = Set(cluster.graph.nodes.map(\.name))
+        let relevant = findings.filter { $0.nodes.contains { names.contains($0) } }
+        guard !relevant.isEmpty else { return nil }
+        return relevant.contains { $0.severity == .error } ? .error : .warning
+    }
+
+    /// Edges of the selected cluster implicated by a finding.
+    private var problemEdges: Set<DependencyGraph.Edge> {
+        guard let cluster = selectedCluster else { return [] }
+        let names = Set(cluster.graph.nodes.map(\.name))
+        var result: Set<DependencyGraph.Edge> = []
+        for finding in findings where finding.nodes.contains(where: { names.contains($0) }) {
+            result.formUnion(finding.edges)
+        }
+        return result
+    }
+
     // MARK: - Cluster list
 
     private var clusterList: some View {
@@ -126,12 +213,21 @@ struct DependenciesView: View {
                 .padding(.vertical, 8)
             List(selection: clusterSelection) {
                 ForEach(filteredClusters) { cluster in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(cluster.title)
-                            .font(.callout.weight(.medium))
-                            .lineLimit(1).truncationMode(.middle)
-                        Text("\(cluster.nodeCount) package\(cluster.nodeCount == 1 ? "" : "s") · \(cluster.edgeCount) link\(cluster.edgeCount == 1 ? "" : "s")")
-                            .font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(cluster.title)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1).truncationMode(.middle)
+                            Text("\(cluster.nodeCount) package\(cluster.nodeCount == 1 ? "" : "s") · \(cluster.edgeCount) link\(cluster.edgeCount == 1 ? "" : "s")")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if let severity = severity(of: cluster) {
+                            Image(systemName: severity == .error
+                                  ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(severity == .error ? .red : .orange)
+                                .imageScale(.small)
+                        }
                     }
                     .tag(cluster.id)
                 }
@@ -160,12 +256,14 @@ struct DependenciesView: View {
     }
 
     private func graphContent(_ layout: DependencyLayout) -> some View {
-        ZStack(alignment: .topLeading) {
+        let problems = problemEdges
+        return ZStack(alignment: .topLeading) {
             Canvas { context, _ in
                 for edge in layout.edges {
                     guard let a = layout.point(for: edge.from),
                           let b = layout.point(for: edge.to) else { continue }
-                    drawEdge(context: context, from: a, to: b, kind: edge.kind)
+                    drawEdge(context: context, from: a, to: b, kind: edge.kind,
+                             isProblem: problems.contains(edge))
                 }
             }
             .frame(width: layout.size.width, height: layout.size.height)
@@ -210,9 +308,17 @@ struct DependenciesView: View {
         .help(node.exists ? "Open \(node.name) in Packages" : "\(node.name) — referenced but not present in this repo")
     }
 
-    private func drawEdge(context: GraphicsContext, from: CGPoint, to: CGPoint, kind: DependencyGraph.Edge.Kind) {
-        let color: Color = kind == .requires ? .blue : .orange
+    private func drawEdge(
+        context: GraphicsContext,
+        from: CGPoint,
+        to: CGPoint,
+        kind: DependencyGraph.Edge.Kind,
+        isProblem: Bool
+    ) {
+        let color: Color = isProblem ? .red : (kind == .requires ? .blue : .orange)
         let dash: [CGFloat] = kind == .requires ? [] : [5, 4]
+        let opacity: Double = isProblem ? 0.95 : 0.7
+        let lineWidth: CGFloat = isProblem ? 2.5 : 1.5
 
         // Trim the segment to each node's vertical border so the line
         // meets the box edge rather than diving under it.
@@ -223,8 +329,8 @@ struct DependenciesView: View {
         var path = Path()
         path.move(to: start)
         path.addLine(to: end)
-        context.stroke(path, with: .color(color.opacity(0.7)),
-                       style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: dash))
+        context.stroke(path, with: .color(color.opacity(opacity)),
+                       style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, dash: dash))
 
         let angle = atan2(end.y - start.y, end.x - start.x)
         let size: CGFloat = 7
@@ -235,7 +341,7 @@ struct DependenciesView: View {
         head.addLine(to: CGPoint(x: end.x - size * cos(angle + .pi / 7),
                                  y: end.y - size * sin(angle + .pi / 7)))
         head.closeSubpath()
-        context.fill(head, with: .color(color.opacity(0.7)))
+        context.fill(head, with: .color(color.opacity(opacity)))
     }
 
     private func navigate(to node: DependencyGraph.Node) {
