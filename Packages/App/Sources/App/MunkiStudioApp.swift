@@ -9,6 +9,7 @@ import Infra
 @main
 struct MunkiStudioApp: SwiftUI.App {
     @State private var store: RepositoryStore
+    @State private var settings = AppSettings()
 
     init() {
         let packages = FilePackageService()
@@ -38,10 +39,16 @@ struct MunkiStudioApp: SwiftUI.App {
         WindowGroup {
             ContentView()
                 .environment(store)
+                .environment(settings)
                 .frame(minWidth: 1100, minHeight: 700)
         }
         .commands {
             MunkiStudioCommands(store: store)
+        }
+
+        Settings {
+            SettingsView()
+                .environment(settings)
         }
     }
 }

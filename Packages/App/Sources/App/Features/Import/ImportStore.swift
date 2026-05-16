@@ -47,11 +47,23 @@ final class ImportStore {
     final class QueueItem: Identifiable {
         let id = UUID()
         let installerURL: URL
+        /// Metadata extracted from the installer at enqueue time. Drives
+        /// the template match.
+        let metadata: InstallerMetadata
         var status: Status
         var statusText: String
+        /// Existing pkginfo with the same name, once `ImportView` has
+        /// checked the snapshot. `nil` means no match (or unresolved).
+        var templateMatch: PkginfoRecord?
+        /// Whether to inherit the matched template's settings on import.
+        var useTemplate: Bool = false
+        /// Set once the snapshot has been checked, so the match isn't
+        /// recomputed — which would clobber the user's choice.
+        var templateResolved: Bool = false
 
         init(installerURL: URL) {
             self.installerURL = installerURL
+            self.metadata = InstallerMetadataExtractor.extract(from: installerURL)
             self.status = .pending
             self.statusText = "Queued"
         }
@@ -360,16 +372,73 @@ final class ImportStore {
         )
     }
 
-    /// Per-row option set for the batch queue. Uses the queue defaults
-    /// instead of the per-file edits the wizard collects.
-    func buildBatchOptions(installerURL: URL, emitYAML: Bool) -> MunkiimportOptions {
-        MunkiimportOptions(
-            installerPath: installerURL,
+    /// Per-row option set for the batch queue. When the row kept its
+    /// template match, inherit the existing pkginfo's settings; otherwise
+    /// fall back to the queue-wide catalog / subdirectory defaults.
+    func buildBatchOptions(
+        for item: QueueItem,
+        in repository: MunkiRepository,
+        scriptPaths: [ScriptSlot: URL],
+        emitYAML: Bool
+    ) -> MunkiimportOptions {
+        if item.useTemplate, let record = item.templateMatch {
+            let pkginfo = record.pkginfo
+            return MunkiimportOptions(
+                installerPath: item.installerURL,
+                subdirectory: Self.templateSubdirectory(for: record, in: repository),
+                catalogs: pkginfo.catalogs ?? [],
+                name: pkginfo.name,
+                displayName: pkginfo.displayName,
+                developer: pkginfo.developer,
+                category: pkginfo.category,
+                description: pkginfo.description,
+                unattendedInstall: pkginfo.unattendedInstall ?? false,
+                unattendedUninstall: pkginfo.unattendedUninstall ?? false,
+                blockingApplications: (pkginfo.blockingApplications ?? []).map(\.rawValue),
+                minimumOSVersion: pkginfo.minimumOSVersion,
+                maximumOSVersion: pkginfo.maximumOSVersion,
+                minimumMunkiVersion: pkginfo.minimumMunkiVersion,
+                preinstallScriptPath: scriptPaths[.preinstall],
+                postinstallScriptPath: scriptPaths[.postinstall],
+                preuninstallScriptPath: scriptPaths[.preuninstall],
+                postuninstallScriptPath: scriptPaths[.postuninstall],
+                installCheckScriptPath: scriptPaths[.installCheck],
+                uninstallCheckScriptPath: scriptPaths[.uninstallCheck],
+                versionScriptPath: scriptPaths[.versionScript],
+                emitYAML: emitYAML
+            )
+        }
+        return MunkiimportOptions(
+            installerPath: item.installerURL,
             subdirectory: batchSubdirectory.trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             catalogs: batchCatalog.isEmpty ? [] : [batchCatalog],
             emitYAML: emitYAML
         )
+    }
+
+    /// The repo-relative subdirectory an existing pkginfo lives in, so a
+    /// re-import lands next to its predecessor.
+    static func templateSubdirectory(for record: PkginfoRecord, in repository: MunkiRepository) -> String {
+        let pkgsInfo = repository.pkgsinfoURL.path
+        let dir = record.fileURL.deletingLastPathComponent().path
+        guard dir.hasPrefix(pkgsInfo) else { return "" }
+        return String(dir.dropFirst(pkgsInfo.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    /// Pull script bodies out of an existing pkginfo so a batch import
+    /// can inherit them from a matched template.
+    static func templateScripts(from pkginfo: Pkginfo) -> [ScriptSlot: String] {
+        var result: [ScriptSlot: String] = [:]
+        result[.preinstall] = pkginfo.preinstallScript
+        result[.postinstall] = pkginfo.postinstallScript
+        result[.preuninstall] = pkginfo.preuninstallScript
+        result[.postuninstall] = pkginfo.postuninstallScript
+        result[.installCheck] = pkginfo.installcheckScript
+        result[.uninstallCheck] = pkginfo.uninstallcheckScript
+        result[.versionScript] = pkginfo.versionScript
+        return result
     }
 
     // MARK: Script file staging
@@ -379,6 +448,12 @@ final class ImportStore {
     /// the mapping plus a clean-up closure the caller invokes after the
     /// run finishes.
     func stageScriptFiles() throws -> (paths: [ScriptSlot: URL], cleanup: @Sendable () -> Void) {
+        try Self.stageScripts(scripts)
+    }
+
+    /// Write a set of script bodies to a unique temp directory, one file
+    /// per non-empty slot. Returns the path map plus a clean-up closure.
+    static func stageScripts(_ scripts: [ScriptSlot: String]) throws -> (paths: [ScriptSlot: URL], cleanup: @Sendable () -> Void) {
         let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appending(path: "MunkiStudioImport-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)

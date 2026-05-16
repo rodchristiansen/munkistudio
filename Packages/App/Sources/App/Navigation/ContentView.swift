@@ -7,6 +7,7 @@ import AppKit
 /// switch on the selected ``SidebarSection``.
 struct ContentView: View {
     @Environment(RepositoryStore.self) private var store
+    @Environment(AppSettings.self) private var settings
 
     var body: some View {
         Group {
@@ -24,7 +25,8 @@ struct ContentView: View {
     /// launch because `store.repository` is non-nil after the first
     /// successful open.
     private func autoOpenIfAvailable() async {
-        guard store.repository == nil,
+        guard settings.reopenLastRepositoryOnLaunch,
+              store.repository == nil,
               let recent = store.recentRepositories.first,
               FileManager.default.fileExists(atPath: recent.path) else { return }
         await store.open(rootURL: recent)
