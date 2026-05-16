@@ -7,6 +7,8 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            GitSettingsView()
+                .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -24,6 +26,31 @@ private struct GeneralSettingsView: View {
         Form {
             Toggle("Reopen last repository on launch", isOn: $settings.reopenLastRepositoryOnLaunch)
             LabeledContent("Version", value: AppInfo.version)
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: 160)
+    }
+}
+
+// MARK: - Git
+
+private struct GitSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+                TextField("Hooks directory", text: $settings.gitHooksPathOverride,
+                          prompt: Text("Auto-detect"))
+            } header: {
+                Text("Git Hooks")
+            } footer: {
+                Text("Leave blank to auto-detect — core.hooksPath, then a version-controlled .githooks folder, then the default .git/hooks. Set an absolute or repo-relative path to override.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scenePadding()

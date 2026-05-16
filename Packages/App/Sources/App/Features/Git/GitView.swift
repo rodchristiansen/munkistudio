@@ -23,6 +23,7 @@ import Core
 /// already shows branch + ahead/behind.
 struct GitView: View {
     @Environment(RepositoryStore.self) private var store
+    @Environment(AppSettings.self) private var settings
     @State private var state = GitPaneState()
     @FocusState private var paneFocused: Bool
     @FocusState private var commitSubjectFocused: Bool
@@ -48,6 +49,9 @@ struct GitView: View {
             Task { await syncDiff() }
         }
         .onChange(of: state.commitSelection) { _, _ in
+            Task { await syncDiff() }
+        }
+        .onChange(of: state.hookSelection) { _, _ in
             Task { await syncDiff() }
         }
         .onChange(of: state.focusedPanel) { _, _ in
@@ -195,8 +199,14 @@ struct GitView: View {
                 }
                 .frame(minWidth: 320, idealWidth: leftWidth, maxWidth: 640)
 
-                DiffPane(text: state.diffText)
-                    .frame(minWidth: 320)
+                Group {
+                    if state.focusedPanel == .hooks {
+                        GitHookDetailPane(state: state)
+                    } else {
+                        DiffPane(text: state.diffText)
+                    }
+                }
+                .frame(minWidth: 320)
             }
         }
     }
@@ -230,6 +240,7 @@ struct GitView: View {
         switch panel {
         case .files: "1"
         case .history: "2"
+        case .hooks: "3"
         }
     }
 
@@ -237,6 +248,7 @@ struct GitView: View {
         switch panel {
         case .files: "Files"
         case .history: "History"
+        case .hooks: "Hooks"
         }
     }
 
@@ -245,6 +257,7 @@ struct GitView: View {
         switch state.focusedPanel {
         case .files: GitFilesPanel(state: state)
         case .history: GitCommitsPanel(state: state)
+        case .hooks: GitHooksPanel(state: state)
         }
     }
 
@@ -386,6 +399,7 @@ private extension GitView {
         switch characters {
         case "1": state.focusedPanel = .files; Task { await syncDiff() }; return .handled
         case "2": state.focusedPanel = .history; Task { await syncDiff() }; return .handled
+        case "3": state.focusedPanel = .hooks; Task { await syncDiff() }; return .handled
         case "j": state.moveSelectionDown(); Task { await syncDiff() }; return .handled
         case "k": state.moveSelectionUp(); Task { await syncDiff() }; return .handled
         case " ":
@@ -465,12 +479,15 @@ private extension GitView {
         do {
             async let files = store.services.git.status(in: info)
             async let branches = store.services.git.branches(in: info)
-            async let commits = store.services.git.log(in: info, max: 50)
+            async let commits = store.services.git.log(in: info, max: 200)
             state.files = try await files
             state.branches = try await branches
             state.commits = try await commits
+            let hooksOverride = settings.gitHooksPathOverride.isEmpty ? nil : settings.gitHooksPathOverride
+            state.hooksInfo = try? await store.services.git.hooks(in: info, overridePath: hooksOverride)
             if state.fileSelection == nil { state.fileSelection = state.files.first?.relativePath }
             if state.commitSelection == nil { state.commitSelection = state.commits.first?.sha }
+            if state.hookSelection == nil { state.hookSelection = state.hooksInfo?.hooks.first?.id }
             await syncDiff()
             state.lastRefreshedAt = Date()
             // Clear the transient status message so the
@@ -494,7 +511,20 @@ private extension GitView {
         case .history:
             guard let sha = state.commitSelection else { state.diffText = ""; return }
             state.diffText = await commitDiff(sha: sha)
+        case .hooks:
+            await loadSelectedHook()
         }
+    }
+
+    func loadSelectedHook() async {
+        guard let hook = state.selectedHook else {
+            state.hookDraft = ""
+            state.hookOriginal = ""
+            return
+        }
+        let content = (try? await store.services.git.readHook(hook)) ?? ""
+        state.hookDraft = content
+        state.hookOriginal = content
     }
 
     func commitDiff(sha: String) async -> String {

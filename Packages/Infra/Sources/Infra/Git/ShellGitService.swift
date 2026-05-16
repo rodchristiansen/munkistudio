@@ -150,10 +150,16 @@ public final class ShellGitService: GitService {
     // MARK: Log
 
     public func log(in info: GitRepositoryInfo, max: Int) async throws -> [GitCommit] {
-        let format = "--pretty=format:%H%x09%an%x09%aI%x09%s"
+        // Unit-separator (\u{1f}) between fields, record-separator (\u{1e})
+        // between commits — robust against tabs / newlines in subjects.
+        // `%P` = parent SHAs, `%D` = ref decorations.
+        let format = "--pretty=format:%H%x1f%an%x1f%aI%x1f%P%x1f%D%x1f%s%x1e"
+        // `--all` so commits on every branch / remote appear (matching
+        // VS Code's Git Graph "Show All"); `--topo-order` keeps parents
+        // after their children so the lane graph renders cleanly.
         let result = try await ProcessRunner.run(
             gitURL,
-            arguments: ["log", "--max-count=\(max)", format],
+            arguments: ["log", "--all", "--topo-order", "--decorate=full", "--max-count=\(max)", format],
             in: info.workTreeRoot
         )
         guard result.exitCode == 0 else {
@@ -161,12 +167,60 @@ public final class ShellGitService: GitService {
         }
         let formatter = ISO8601DateFormatter()
         return result.stdout
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .compactMap { line in
-                let parts = line.split(separator: "\t", maxSplits: 3).map(String.init)
-                guard parts.count == 4, let date = formatter.date(from: parts[2]) else { return nil }
-                return GitCommit(sha: parts[0], subject: parts[3], author: parts[1], date: date)
+            .components(separatedBy: "\u{1e}")
+            .compactMap { rawRecord -> GitCommit? in
+                let record = rawRecord.drop { $0 == "\n" || $0 == "\r" }
+                guard !record.isEmpty else { return nil }
+                let parts = record.components(separatedBy: "\u{1f}")
+                guard parts.count == 6, let date = formatter.date(from: parts[2]) else { return nil }
+                let parents = parts[3]
+                    .split(separator: " ", omittingEmptySubsequences: true)
+                    .map(String.init)
+                return GitCommit(
+                    sha: parts[0],
+                    subject: parts[5],
+                    author: parts[1],
+                    date: date,
+                    parents: parents,
+                    refs: Self.parseRefs(parts[4])
+                )
             }
+    }
+
+    /// Parse a `%D` decoration string (with `--decorate=full`) into refs.
+    /// Tokens look like `HEAD -> refs/heads/main`, `refs/remotes/origin/main`,
+    /// `tag: refs/tags/v1.0`.
+    static func parseRefs(_ raw: String) -> [GitRef] {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+        var refs: [GitRef] = []
+        for token in trimmed.components(separatedBy: ", ") {
+            var value = token.trimmingCharacters(in: .whitespaces)
+            var isHead = false
+            if value == "HEAD" {
+                refs.append(GitRef(name: "HEAD", kind: .head, isHead: true))
+                continue
+            }
+            if value.hasPrefix("HEAD -> ") {
+                isHead = true
+                value = String(value.dropFirst("HEAD -> ".count))
+            }
+            if value.hasPrefix("tag: ") {
+                var name = String(value.dropFirst("tag: ".count))
+                if name.hasPrefix("refs/tags/") { name = String(name.dropFirst("refs/tags/".count)) }
+                refs.append(GitRef(name: name, kind: .tag, isHead: false))
+            } else if value.hasPrefix("refs/heads/") {
+                refs.append(GitRef(name: String(value.dropFirst("refs/heads/".count)), kind: .localBranch, isHead: isHead))
+            } else if value.hasPrefix("refs/remotes/") {
+                refs.append(GitRef(name: String(value.dropFirst("refs/remotes/".count)), kind: .remoteBranch, isHead: isHead))
+            } else if value.hasPrefix("refs/tags/") {
+                refs.append(GitRef(name: String(value.dropFirst("refs/tags/".count)), kind: .tag, isHead: false))
+            } else if !value.isEmpty {
+                let kind: GitRef.Kind = value.contains("/") ? .remoteBranch : .localBranch
+                refs.append(GitRef(name: value, kind: kind, isHead: isHead))
+            }
+        }
+        return refs
     }
 
     // MARK: Stage / unstage
@@ -341,6 +395,143 @@ public final class ShellGitService: GitService {
         )
         guard emailResult.exitCode == 0 else {
             throw RepositoryError.process(name: "git config user.email", exitCode: emailResult.exitCode, output: emailResult.stderr)
+        }
+    }
+
+    // MARK: Hooks
+
+    public func hooks(in info: GitRepositoryInfo, overridePath: String?) async throws -> GitHooksInfo {
+        let (directory, source) = try await resolveHooksDirectory(in: info, overridePath: overridePath)
+        let fm = FileManager.default
+        var hooks: [GitHook] = []
+        if let entries = try? fm.contentsOfDirectory(atPath: directory.path) {
+            for entry in entries where !entry.hasPrefix(".") {
+                let fileURL = directory.appending(path: entry)
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: fileURL.path, isDirectory: &isDir), !isDir.boolValue else { continue }
+                let isSample = entry.hasSuffix(".sample")
+                let name = isSample ? String(entry.dropLast(7)) : entry
+                hooks.append(GitHook(
+                    name: name,
+                    fileURL: fileURL,
+                    isExecutable: fm.isExecutableFile(atPath: fileURL.path),
+                    isSample: isSample
+                ))
+            }
+        }
+        hooks.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return GitHooksInfo(directory: directory, source: source, hooks: hooks)
+    }
+
+    /// Resolve which directory holds the hooks: an explicit Settings
+    /// override first, then `core.hooksPath`, then a version-controlled
+    /// top-level `.githooks`, then git's default hooks directory.
+    private func resolveHooksDirectory(
+        in info: GitRepositoryInfo,
+        overridePath: String?
+    ) async throws -> (URL, GitHooksInfo.Source) {
+        let root = info.workTreeRoot
+        if let overridePath, !overridePath.trimmingCharacters(in: .whitespaces).isEmpty {
+            return (resolvePath(overridePath, relativeTo: root), .override)
+        }
+        if let configured = try? await configValue("core.hooksPath", in: root), !configured.isEmpty {
+            return (resolvePath(configured, relativeTo: root), .coreHooksPath)
+        }
+        let versioned = root.appending(path: ".githooks")
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: versioned.path, isDirectory: &isDir), isDir.boolValue {
+            return (versioned, .versioned)
+        }
+        let result = try await ProcessRunner.run(
+            gitURL, arguments: ["rev-parse", "--git-path", "hooks"], in: root
+        )
+        let raw = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dir = raw.isEmpty ? root.appending(path: ".git/hooks") : resolvePath(raw, relativeTo: root)
+        return (dir, .standard)
+    }
+
+    private func configValue(_ key: String, in workTree: URL) async throws -> String? {
+        let result = try await ProcessRunner.run(
+            gitURL, arguments: ["config", "--get", key], in: workTree
+        )
+        guard result.exitCode == 0 else { return nil }
+        let value = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private func resolvePath(_ path: String, relativeTo root: URL) -> URL {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("/") {
+            return URL(fileURLWithPath: trimmed)
+        }
+        if trimmed.hasPrefix("~") {
+            return URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath)
+        }
+        return root.appending(path: trimmed)
+    }
+
+    public func readHook(_ hook: GitHook) async throws -> String {
+        let data = try Data(contentsOf: hook.fileURL)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    public func writeHook(_ hook: GitHook, contents: String) async throws {
+        try contents.write(to: hook.fileURL, atomically: true, encoding: .utf8)
+    }
+
+    public func setHookActive(_ hook: GitHook, active: Bool) async throws {
+        let fm = FileManager.default
+        let attrs = try fm.attributesOfItem(atPath: hook.fileURL.path)
+        let current = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0o644
+        let updated = active ? (current | 0o111) : (current & ~0o111)
+        try fm.setAttributes([.posixPermissions: NSNumber(value: updated)], ofItemAtPath: hook.fileURL.path)
+    }
+
+    // MARK: Commit operations
+
+    public func tag(in info: GitRepositoryInfo, name: String, at sha: String, message: String?) async throws {
+        var args = ["tag"]
+        if let message, !message.isEmpty {
+            args += ["-a", name, "-m", message, sha]
+        } else {
+            args += [name, sha]
+        }
+        try await runGitChecked(args, name: "git tag", in: info)
+    }
+
+    public func createBranch(in info: GitRepositoryInfo, name: String, at sha: String) async throws {
+        try await runGitChecked(["branch", name, sha], name: "git branch", in: info)
+    }
+
+    public func checkoutCommit(in info: GitRepositoryInfo, sha: String) async throws {
+        try await runGitChecked(["checkout", sha], name: "git checkout", in: info)
+    }
+
+    public func cherryPick(in info: GitRepositoryInfo, sha: String) async throws {
+        try await runGitChecked(["cherry-pick", sha], name: "git cherry-pick", in: info)
+    }
+
+    public func revert(in info: GitRepositoryInfo, sha: String) async throws {
+        try await runGitChecked(["revert", "--no-edit", sha], name: "git revert", in: info)
+    }
+
+    public func merge(in info: GitRepositoryInfo, ref: String) async throws {
+        try await runGitChecked(["merge", "--no-edit", ref], name: "git merge", in: info)
+    }
+
+    public func rebase(in info: GitRepositoryInfo, onto sha: String) async throws {
+        try await runGitChecked(["rebase", sha], name: "git rebase", in: info)
+    }
+
+    public func reset(in info: GitRepositoryInfo, to sha: String, mode: GitResetMode) async throws {
+        try await runGitChecked(["reset", "--\(mode.rawValue)", sha], name: "git reset", in: info)
+    }
+
+    private func runGitChecked(_ args: [String], name: String, in info: GitRepositoryInfo) async throws {
+        let result = try await ProcessRunner.run(gitURL, arguments: args, in: info.workTreeRoot)
+        guard result.exitCode == 0 else {
+            let output = result.stderr.isEmpty ? result.stdout : result.stderr
+            throw RepositoryError.process(name: name, exitCode: result.exitCode, output: output)
         }
     }
 

@@ -45,6 +45,42 @@ public protocol GitService: Sendable {
     func branches(in info: GitRepositoryInfo) async throws -> [GitBranch]
     func identity(in info: GitRepositoryInfo) async throws -> GitIdentity?
     func setIdentity(in info: GitRepositoryInfo, _ identity: GitIdentity, scope: GitIdentityScope) async throws
+
+    /// Resolve the hooks directory and list the hooks in it. When
+    /// `overridePath` is non-nil it wins; otherwise resolution order is
+    /// `core.hooksPath`, a top-level `.githooks`, then `.git/hooks`.
+    func hooks(in info: GitRepositoryInfo, overridePath: String?) async throws -> GitHooksInfo
+
+    /// Read a hook file's contents.
+    func readHook(_ hook: GitHook) async throws -> String
+
+    /// Write a hook file's contents.
+    func writeHook(_ hook: GitHook, contents: String) async throws
+
+    /// Toggle whether git runs the hook — flips its executable bit.
+    func setHookActive(_ hook: GitHook, active: Bool) async throws
+
+    /// Create a tag at `sha`. A non-empty `message` makes an annotated tag.
+    func tag(in info: GitRepositoryInfo, name: String, at sha: String, message: String?) async throws
+    /// Create a branch `name` pointing at `sha`. Does not switch to it.
+    func createBranch(in info: GitRepositoryInfo, name: String, at sha: String) async throws
+    /// Check out a commit directly — detaches HEAD.
+    func checkoutCommit(in info: GitRepositoryInfo, sha: String) async throws
+    /// Cherry-pick `sha` onto the current branch.
+    func cherryPick(in info: GitRepositoryInfo, sha: String) async throws
+    /// Revert `sha` with a new commit on the current branch.
+    func revert(in info: GitRepositoryInfo, sha: String) async throws
+    /// Merge `ref` into the current branch.
+    func merge(in info: GitRepositoryInfo, ref: String) async throws
+    /// Rebase the current branch onto `sha`.
+    func rebase(in info: GitRepositoryInfo, onto sha: String) async throws
+    /// Reset the current branch to `sha` with the given mode.
+    func reset(in info: GitRepositoryInfo, to sha: String, mode: GitResetMode) async throws
+}
+
+/// Reset modes mirroring `git reset --soft/--mixed/--hard`.
+public enum GitResetMode: String, Sendable, CaseIterable {
+    case soft, mixed, hard
 }
 
 public struct GitRepositoryInfo: Sendable, Hashable {
@@ -105,14 +141,45 @@ public struct GitCommit: Sendable, Hashable, Identifiable {
     public var subject: String
     public var author: String
     public var date: Date
+    /// Parent SHAs. Empty for the root commit; two or more for a merge.
+    public var parents: [String]
+    /// Branch / tag / HEAD decorations pointing at this commit.
+    public var refs: [GitRef]
 
     public var id: String { sha }
 
-    public init(sha: String, subject: String, author: String, date: Date) {
+    public init(
+        sha: String,
+        subject: String,
+        author: String,
+        date: Date,
+        parents: [String] = [],
+        refs: [GitRef] = []
+    ) {
         self.sha = sha
         self.subject = subject
         self.author = author
         self.date = date
+        self.parents = parents
+        self.refs = refs
+    }
+}
+
+/// A branch / tag / HEAD decoration on a commit.
+public struct GitRef: Sendable, Hashable {
+    public enum Kind: Sendable, Hashable {
+        case head, localBranch, remoteBranch, tag
+    }
+
+    public var name: String
+    public var kind: Kind
+    /// `true` when HEAD currently points here.
+    public var isHead: Bool
+
+    public init(name: String, kind: Kind, isHead: Bool = false) {
+        self.name = name
+        self.kind = kind
+        self.isHead = isHead
     }
 }
 
@@ -143,6 +210,51 @@ public struct GitIdentity: Sendable, Hashable {
 public enum GitIdentityScope: Sendable {
     case local
     case global
+}
+
+/// A single hook file in the resolved hooks directory.
+public struct GitHook: Sendable, Hashable, Identifiable {
+    /// Hook name without any `.sample` suffix, e.g. `pre-commit`.
+    public var name: String
+    public var fileURL: URL
+    /// `true` when the executable bit is set — git only runs executable
+    /// hook files.
+    public var isExecutable: Bool
+    /// `true` for the inert `*.sample` files git ships by default.
+    public var isSample: Bool
+
+    public var id: String { fileURL.path }
+    /// Whether git will actually run this hook.
+    public var isActive: Bool { isExecutable && !isSample }
+
+    public init(name: String, fileURL: URL, isExecutable: Bool, isSample: Bool) {
+        self.name = name
+        self.fileURL = fileURL
+        self.isExecutable = isExecutable
+        self.isSample = isSample
+    }
+}
+
+/// The resolved git hooks directory plus the hooks found in it.
+public struct GitHooksInfo: Sendable, Hashable {
+    /// How the directory was resolved — surfaced in the UI so the user
+    /// knows which location is in effect.
+    public enum Source: String, Sendable, Hashable {
+        case override = "Settings override"
+        case coreHooksPath = "core.hooksPath"
+        case versioned = "Version-controlled (.githooks)"
+        case standard = "Default (.git/hooks)"
+    }
+
+    public var directory: URL
+    public var source: Source
+    public var hooks: [GitHook]
+
+    public init(directory: URL, source: Source, hooks: [GitHook]) {
+        self.directory = directory
+        self.source = source
+        self.hooks = hooks
+    }
 }
 
 /// Streamed events from a long-running git operation.

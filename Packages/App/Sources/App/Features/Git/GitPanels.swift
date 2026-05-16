@@ -267,44 +267,174 @@ struct GitBranchesPanel: View {
 
 struct GitCommitsPanel: View {
     @Bindable var state: GitPaneState
+    @Environment(RepositoryStore.self) private var store
+    @State private var pendingAction: CommitAction?
+
+    private static let rowHeight: CGFloat = 46
 
     var body: some View {
-        if state.commits.isEmpty {
-            ContentUnavailableView("No commits", systemImage: "clock")
-                .padding()
-        } else {
-            // `.contextMenu(forSelectionType:)` is the macOS-correct
-            // way to attach a right-click menu to a `List(selection:)`:
-            // SwiftUI hands us the SHAs the user actually clicked
-            // (which may or may not match the current selection) and
-            // makes sure the menu actually appears. The per-row
-            // `.contextMenu` modifier was being suppressed on macOS 26.
-            List(state.filteredCommits, id: \.sha, selection: $state.commitSelection) { commit in
-                VStack(alignment: .leading, spacing: 2) {
+        let commits = state.filteredCommits
+        let graph = CommitGraphBuilder.build(commits)
+        Group {
+            if commits.isEmpty {
+                ContentUnavailableView("No commits", systemImage: "clock").padding()
+            } else {
+                List(selection: $state.commitSelection) {
+                    ForEach(Array(commits.enumerated()), id: \.element.sha) { index, commit in
+                        commitRow(
+                            commit,
+                            graphRow: index < graph.rows.count ? graph.rows[index] : nil,
+                            laneCount: graph.laneCount
+                        )
+                        .tag(commit.sha)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 8))
+                        .listRowSeparator(.hidden)
+                    }
+                }
+                .contextMenu(forSelectionType: String.self) { shas in
+                    let targets = shas.isEmpty ? [state.commitSelection].compactMap { $0 } : Array(shas)
+                    if let sha = targets.first,
+                       let commit = state.commits.first(where: { $0.sha == sha }) {
+                        commitContextMenu(commit)
+                    }
+                }
+            }
+        }
+        .popover(item: $pendingAction, arrowEdge: .trailing) { action in
+            GitCommitActionSheet(
+                action: action,
+                currentBranch: state.info?.currentBranch,
+                perform: { request in await run(request) }
+            )
+        }
+    }
+
+    private func commitRow(_ commit: GitCommit, graphRow: GraphRow?, laneCount: Int) -> some View {
+        HStack(spacing: 8) {
+            if let graphRow {
+                GraphCell(row: graphRow, laneCount: laneCount, rowHeight: Self.rowHeight)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    ForEach(commit.refs, id: \.self) { ref in
+                        refBadge(ref)
+                    }
                     Text(commit.subject).lineLimit(1)
-                    HStack {
-                        Text(commit.sha.prefix(8))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.tertiary)
-                        Text(commit.author).font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(commit.date.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
                 }
-                .tag(commit.sha)
-            }
-            .contextMenu(forSelectionType: String.self) { shas in
-                let targets = shas.isEmpty ? [state.commitSelection].compactMap { $0 } : Array(shas)
-                if let sha = targets.first {
-                    Button("Copy SHA") { copyToPasteboard(sha) }
-                    if let subject = state.commits.first(where: { $0.sha == sha })?.subject {
-                        Button("Copy Subject") { copyToPasteboard(subject) }
-                    }
-                    Button("Copy .patch") { Task { await copyPatch(for: sha) } }
+                HStack(spacing: 6) {
+                    Text(commit.sha.prefix(8))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                    Text(commit.author).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(commit.date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
+        }
+        .frame(height: Self.rowHeight)
+        .contentShape(.rect)
+    }
+
+    private func refBadge(_ ref: GitRef) -> some View {
+        let tint = badgeColor(ref)
+        return HStack(spacing: 3) {
+            Image(systemName: icon(for: ref.kind)).imageScale(.small)
+            Text(ref.name).lineLimit(1)
+        }
+        .font(.caption2.weight(.semibold))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1.5)
+        .background(tint.opacity(0.18), in: .capsule)
+        .foregroundStyle(tint)
+        .overlay(
+            Capsule().strokeBorder(ref.isHead ? tint : Color.clear, lineWidth: 1)
+        )
+    }
+
+    private func icon(for kind: GitRef.Kind) -> String {
+        switch kind {
+        case .head: "circle.fill"
+        case .localBranch: "arrow.triangle.branch"
+        case .remoteBranch: "cloud"
+        case .tag: "tag"
+        }
+    }
+
+    private func badgeColor(_ ref: GitRef) -> Color {
+        switch ref.kind {
+        case .head, .localBranch: .blue
+        case .remoteBranch: .purple
+        case .tag: .orange
+        }
+    }
+
+    @ViewBuilder
+    private func commitContextMenu(_ commit: GitCommit) -> some View {
+        let branch = state.info?.currentBranch ?? "current branch"
+        Button("Add Tag…") { pendingAction = .addTag(commit) }
+        Button("Create Branch…") { pendingAction = .createBranch(commit) }
+        Divider()
+        Button("Checkout…") { pendingAction = .checkout(commit) }
+        Button("Cherry-Pick…") { pendingAction = .cherryPick(commit) }
+        Button("Revert…") { pendingAction = .revert(commit) }
+        Divider()
+        Button("Merge into \(branch)…") { pendingAction = .merge(commit) }
+        Button("Rebase \(branch) on this Commit…") { pendingAction = .rebase(commit) }
+        Button("Reset \(branch) to this Commit…") { pendingAction = .reset(commit) }
+        Divider()
+        Button("Copy Commit Hash") { copyToPasteboard(commit.sha) }
+        Button("Copy Commit Subject") { copyToPasteboard(commit.subject) }
+        Button("Copy .patch") { Task { await copyPatch(for: commit.sha) } }
+    }
+
+    private func run(_ request: CommitActionRequest) async {
+        guard let info = state.info else { return }
+        let git = store.services.git
+        do {
+            switch request {
+            case .addTag(let c, let name, let message):
+                try await git.tag(in: info, name: name, at: c.sha, message: message.isEmpty ? nil : message)
+            case .createBranch(let c, let name):
+                try await git.createBranch(in: info, name: name, at: c.sha)
+            case .checkout(let c):
+                try await git.checkoutCommit(in: info, sha: c.sha)
+            case .cherryPick(let c):
+                try await git.cherryPick(in: info, sha: c.sha)
+            case .revert(let c):
+                try await git.revert(in: info, sha: c.sha)
+            case .merge(let c):
+                try await git.merge(in: info, ref: c.sha)
+            case .rebase(let c):
+                try await git.rebase(in: info, onto: c.sha)
+            case .reset(let c, let mode):
+                try await git.reset(in: info, to: c.sha, mode: mode)
+            }
+            state.statusMessage = nil
+            await refreshAll()
+        } catch {
+            state.statusMessage = error.localizedDescription
+            state.statusKind = .error
+        }
+    }
+
+    /// Re-pull the working tree, branches, and log after a mutation so
+    /// the History panel and toolbar reflect the new state.
+    private func refreshAll() async {
+        guard let info = state.info else { return }
+        if let updated = await store.services.git.discover(at: info.workTreeRoot) {
+            state.info = updated
+        }
+        if let files = try? await store.services.git.status(in: info) {
+            state.files = files
+            store.gitDirtyCount = files.count
+        }
+        if let branches = try? await store.services.git.branches(in: info) {
+            state.branches = branches
+        }
+        if let commits = try? await store.services.git.log(in: info, max: 200) {
+            state.commits = commits
         }
     }
 
@@ -313,9 +443,8 @@ struct GitCommitsPanel: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    /// Run `git format-patch -1 --stdout <sha>` and put the result on
-    /// the clipboard. Matches the `.patch` output you'd get from a
-    /// GitHub commit page so it can be applied with `git am`.
+    /// Run `git format-patch -1 --stdout <sha>` and put the result on the
+    /// clipboard — the `.patch` form that can be applied with `git am`.
     private func copyPatch(for sha: String) async {
         guard let info = state.info else { return }
         let process = Process()
@@ -330,13 +459,9 @@ struct GitCommitsPanel: View {
             process.waitUntilExit()
             let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
             let patch = String(decoding: data, as: UTF8.self)
-            if !patch.isEmpty {
-                copyToPasteboard(patch)
-            }
+            if !patch.isEmpty { copyToPasteboard(patch) }
         } catch {
-            // Surfaced silently — the user will notice nothing on the
-            // clipboard. Logging here would be useful when wiring up
-            // os.Logger in a later pass.
+            // Clipboard silently unchanged on failure.
         }
     }
 }

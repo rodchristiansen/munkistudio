@@ -10,7 +10,7 @@ import Core
 @MainActor
 final class GitPaneState {
     enum Panel: Hashable, CaseIterable {
-        case files, history
+        case files, history, hooks
     }
 
     var info: GitRepositoryInfo?
@@ -26,6 +26,22 @@ final class GitPaneState {
     var focusedPanel: Panel = .files
 
     var diffText: String = ""
+
+    // MARK: Hooks
+
+    var hooksInfo: GitHooksInfo?
+    /// `GitHook.id` (its file path) of the selected hook.
+    var hookSelection: String?
+    /// Editor buffer for the selected hook and its on-disk baseline.
+    var hookDraft: String = ""
+    var hookOriginal: String = ""
+
+    var hookDraftDirty: Bool { hookDraft != hookOriginal }
+
+    var selectedHook: GitHook? {
+        guard let id = hookSelection else { return nil }
+        return hooksInfo?.hooks.first { $0.id == id }
+    }
 
     var commitSubject: String = ""
     var commitBody: String = ""
@@ -68,6 +84,13 @@ final class GitPaneState {
         return commits.filter { $0.subject.lowercased().contains(q) || $0.sha.lowercased().contains(q) }
     }
 
+    var filteredHooks: [GitHook] {
+        let all = hooksInfo?.hooks ?? []
+        guard !filter.isEmpty else { return all }
+        let q = filter.lowercased()
+        return all.filter { $0.name.lowercased().contains(q) }
+    }
+
     // MARK: Nav helpers (used by `j`/`k`)
 
     func moveSelectionDown() {
@@ -76,6 +99,8 @@ final class GitPaneState {
             fileSelection = nextID(in: filteredFiles.map(\.relativePath), after: fileSelection)
         case .history:
             commitSelection = nextID(in: filteredCommits.map(\.sha), after: commitSelection)
+        case .hooks:
+            hookSelection = nextID(in: filteredHooks.map(\.id), after: hookSelection)
         }
     }
 
@@ -85,6 +110,8 @@ final class GitPaneState {
             fileSelection = previousID(in: filteredFiles.map(\.relativePath), before: fileSelection)
         case .history:
             commitSelection = previousID(in: filteredCommits.map(\.sha), before: commitSelection)
+        case .hooks:
+            hookSelection = previousID(in: filteredHooks.map(\.id), before: hookSelection)
         }
     }
 

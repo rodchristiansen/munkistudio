@@ -12,15 +12,23 @@ final class AppSettings {
         didSet { defaults.set(reopenLastRepositoryOnLaunch, forKey: Key.reopenLastRepository) }
     }
 
+    /// Overrides the auto-detected git hooks directory. Empty = auto.
+    var gitHooksPathOverride: String {
+        didSet { defaults.set(gitHooksPathOverride, forKey: Key.gitHooksPathOverride) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.reopenLastRepositoryOnLaunch =
             defaults.object(forKey: Key.reopenLastRepository) as? Bool ?? true
+        self.gitHooksPathOverride =
+            defaults.string(forKey: Key.gitHooksPathOverride) ?? ""
     }
 
     private enum Key {
         static let reopenLastRepository = "MunkiStudio.settings.reopenLastRepositoryOnLaunch"
+        static let gitHooksPathOverride = "MunkiStudio.settings.gitHooksPathOverride"
     }
 }
