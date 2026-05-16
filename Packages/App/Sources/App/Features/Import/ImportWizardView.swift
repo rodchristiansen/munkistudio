@@ -1,5 +1,7 @@
 import SwiftUI
 import Core
+import AppKit
+import UniformTypeIdentifiers
 
 /// Single-file 4-step wizard. Structure mirrors CimianStudio's import
 /// page: Review → Edit metadata → Scripts → Location & review.
@@ -51,14 +53,16 @@ struct ImportWizardView: View {
                 .layoutPriority(-1)
 
             Button("Cancel", role: .cancel) { importStore.resetToIdle() }
-            if importStore.step != .review {
-                Button("Back") { goBack() }
-            }
+            // Back is always present (disabled on Step 1) so Cancel /
+            // Back / advance never shift position between steps.
+            Button("Back") { goBack() }
+                .disabled(importStore.step == .review)
             Button(importStore.step.advanceLabel) {
                 Task { await advance() }
             }
             .buttonStyle(.borderedProminent)
             .disabled(!canAdvance)
+            .frame(minWidth: 90)
 
             Text(importStore.step.label)
                 .font(.caption)
@@ -294,6 +298,22 @@ private struct EditMetadataStep: View {
                             .labelsHidden()
                         }
                     }
+                    GridRow {
+                        labeled("Min macOS") {
+                            TextField("e.g. 12.0", text: $importStore.minimumOSVersion)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        labeled("Max macOS") {
+                            TextField("Optional", text: $importStore.maximumOSVersion)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                    GridRow {
+                        labeled("Min Munki version") {
+                            TextField("Optional", text: $importStore.minimumMunkiVersion)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
                 }
 
                 labeled("Description") {
@@ -306,7 +326,22 @@ private struct EditMetadataStep: View {
                 HStack(spacing: 14) {
                     Toggle("Unattended install", isOn: $importStore.unattendedInstall)
                     Toggle("Unattended uninstall", isOn: $importStore.unattendedUninstall)
+                    Toggle("Extract icon from installer", isOn: $importStore.extractIcon)
                     Spacer()
+                }
+
+                labeled("Custom icon") {
+                    HStack(spacing: 8) {
+                        Text(importStore.iconPath?.lastPathComponent ?? "None")
+                            .foregroundStyle(importStore.iconPath == nil ? .secondary : .primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Button("Choose…") { pickIcon() }
+                        if importStore.iconPath != nil {
+                            Button("Clear") { importStore.iconPath = nil }
+                        }
+                        Spacer()
+                    }
                 }
 
                 Divider()
@@ -328,6 +363,17 @@ private struct EditMetadataStep: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
             content()
         }
+    }
+
+    private func pickIcon() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = ["icns", "png"].compactMap { UTType(filenameExtension: $0) }
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importStore.iconPath = url
     }
 }
 
@@ -354,13 +400,11 @@ private struct ScriptsStep: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
-                Text(selectedSlot.rawValue + "_script")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                TextEditor(text: scriptBinding(selectedSlot))
-                    .font(.system(.callout, design: .monospaced))
-                    .frame(minHeight: 260)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator, lineWidth: 1))
+                ScriptEditor(
+                    label: selectedSlot.rawValue + "_script",
+                    text: scriptBinding(selectedSlot),
+                    editorHeight: 260
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -493,7 +537,12 @@ enum MunkiimportPreview {
         if options.unattendedInstall { parts.append("--unattended-install") }
         if options.unattendedUninstall { parts.append("--unattended-uninstall") }
         for app in options.blockingApplications { parts.append(contentsOf: ["--blocking-application", quoted(app)]) }
+        if let value = options.minimumOSVersion, !value.isEmpty { parts.append(contentsOf: ["--minimum-os-version", value]) }
+        if let value = options.maximumOSVersion, !value.isEmpty { parts.append(contentsOf: ["--maximum-os-version", value]) }
+        if let value = options.minimumMunkiVersion, !value.isEmpty { parts.append(contentsOf: ["--minimum-munki-version", value]) }
         if options.emitYAML { parts.append("--yaml") }
+        if options.extractIcon { parts.append("--extract-icon") }
+        if let icon = options.iconPath { parts.append(contentsOf: ["--icon-path", quoted(icon.path)]) }
         parts.append(quoted(options.installerPath.path))
         return parts.joined(separator: " ")
     }

@@ -48,6 +48,8 @@ public struct MunkiimportOptions: Sendable {
     public var postuninstallScriptPath: URL?
     public var installCheckScriptPath: URL?
     public var uninstallCheckScriptPath: URL?
+    /// Path to a script munkiimport runs to determine the item's version.
+    public var versionScriptPath: URL?
     /// Emit YAML pkginfos. When `nil`, munkiimport's per-repo default
     /// (plist) wins.
     public var emitYAML: Bool
@@ -79,6 +81,7 @@ public struct MunkiimportOptions: Sendable {
         postuninstallScriptPath: URL? = nil,
         installCheckScriptPath: URL? = nil,
         uninstallCheckScriptPath: URL? = nil,
+        versionScriptPath: URL? = nil,
         emitYAML: Bool = false,
         extractIcon: Bool = false,
         iconPath: URL? = nil
@@ -105,6 +108,7 @@ public struct MunkiimportOptions: Sendable {
         self.postuninstallScriptPath = postuninstallScriptPath
         self.installCheckScriptPath = installCheckScriptPath
         self.uninstallCheckScriptPath = uninstallCheckScriptPath
+        self.versionScriptPath = versionScriptPath
         self.emitYAML = emitYAML
         self.extractIcon = extractIcon
         self.iconPath = iconPath

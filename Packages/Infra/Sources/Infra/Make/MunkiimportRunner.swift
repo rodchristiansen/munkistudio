@@ -181,6 +181,10 @@ public final class MunkiimportRunner: MunkiimportService {
             args.append("--uninstallcheck-script")
             args.append(uc.path)
         }
+        if let vs = options.versionScriptPath {
+            args.append("--version-script")
+            args.append(vs.path)
+        }
         if options.emitYAML {
             args.append("--yaml")
         }

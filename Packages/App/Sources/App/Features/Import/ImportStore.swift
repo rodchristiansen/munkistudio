@@ -96,6 +96,15 @@ final class ImportStore {
     var architectureSelection: ArchitectureSelection = .unspecified
     var unattendedInstall: Bool = false
     var unattendedUninstall: Bool = false
+    /// Minimum / maximum macOS version and minimum Munki version. Empty
+    /// strings mean "don't pass the flag."
+    var minimumOSVersion: String = ""
+    var maximumOSVersion: String = ""
+    var minimumMunkiVersion: String = ""
+    /// Ask munkiimport to extract an icon out of the installer.
+    var extractIcon: Bool = false
+    /// Explicit icon override (.icns / .png). `nil` means none.
+    var iconPath: URL?
     /// Six script slots — `nil` means "omit this slot." When the user
     /// types into an editor we hold the body here; on Save we write each
     /// non-empty slot to a temp file and hand the path to munkiimport.
@@ -140,6 +149,7 @@ final class ImportStore {
         case preinstall, postinstall, preuninstall, postuninstall
         case installCheck = "installcheck"
         case uninstallCheck = "uninstallcheck"
+        case versionScript = "version"
 
         var id: String { rawValue }
         var tabLabel: String {
@@ -150,6 +160,7 @@ final class ImportStore {
             case .postuninstall: "Post-uninstall"
             case .installCheck: "Install check"
             case .uninstallCheck: "Uninstall check"
+            case .versionScript: "Version"
             }
         }
     }
@@ -220,6 +231,11 @@ final class ImportStore {
         self.blockingApplications = []
         self.unattendedInstall = false
         self.unattendedUninstall = false
+        self.minimumOSVersion = ""
+        self.maximumOSVersion = ""
+        self.minimumMunkiVersion = ""
+        self.extractIcon = false
+        self.iconPath = nil
         self.statusBanner = nil
         self.output = ""
         self.lastOutcome = nil
@@ -236,6 +252,9 @@ final class ImportStore {
         blockingApplications = (record.pkginfo.blockingApplications ?? []).map(\.rawValue)
         unattendedInstall = record.pkginfo.unattendedInstall ?? false
         unattendedUninstall = record.pkginfo.unattendedUninstall ?? false
+        minimumOSVersion = record.pkginfo.minimumOSVersion ?? ""
+        maximumOSVersion = record.pkginfo.maximumOSVersion ?? ""
+        minimumMunkiVersion = record.pkginfo.minimumMunkiVersion ?? ""
         if edited.developer.isEmpty, let dev = record.pkginfo.developer { edited.developer = dev }
         if edited.category.isEmpty, let cat = record.pkginfo.category { edited.category = cat }
         if edited.description.isEmpty, let desc = record.pkginfo.description { edited.description = desc }
@@ -265,6 +284,9 @@ final class ImportStore {
         subdirectory = ""
         unattendedInstall = false
         unattendedUninstall = false
+        minimumOSVersion = ""
+        maximumOSVersion = ""
+        minimumMunkiVersion = ""
     }
 
     func resetToIdle() {
@@ -280,6 +302,11 @@ final class ImportStore {
         architectureSelection = .unspecified
         unattendedInstall = false
         unattendedUninstall = false
+        minimumOSVersion = ""
+        maximumOSVersion = ""
+        minimumMunkiVersion = ""
+        extractIcon = false
+        iconPath = nil
         scripts = [:]
         output = ""
         lastOutcome = nil
@@ -317,13 +344,19 @@ final class ImportStore {
             unattendedInstall: unattendedInstall,
             unattendedUninstall: unattendedUninstall,
             blockingApplications: blockingApplications,
+            minimumOSVersion: minimumOSVersion.isEmpty ? nil : minimumOSVersion,
+            maximumOSVersion: maximumOSVersion.isEmpty ? nil : maximumOSVersion,
+            minimumMunkiVersion: minimumMunkiVersion.isEmpty ? nil : minimumMunkiVersion,
             preinstallScriptPath: scriptPaths[.preinstall],
             postinstallScriptPath: scriptPaths[.postinstall],
             preuninstallScriptPath: scriptPaths[.preuninstall],
             postuninstallScriptPath: scriptPaths[.postuninstall],
             installCheckScriptPath: scriptPaths[.installCheck],
             uninstallCheckScriptPath: scriptPaths[.uninstallCheck],
-            emitYAML: emitYAML
+            versionScriptPath: scriptPaths[.versionScript],
+            emitYAML: emitYAML,
+            extractIcon: extractIcon,
+            iconPath: iconPath
         )
     }
 
