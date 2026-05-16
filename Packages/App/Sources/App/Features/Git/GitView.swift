@@ -24,7 +24,9 @@ import Core
 struct GitView: View {
     @Environment(RepositoryStore.self) private var store
     @Environment(AppSettings.self) private var settings
-    @State private var state = GitPaneState()
+    /// Owned by the store so the panel + selection survive leaving the
+    /// Git tab and coming back.
+    private var state: GitPaneState { store.gitPaneState }
     @FocusState private var paneFocused: Bool
     @FocusState private var commitSubjectFocused: Bool
 

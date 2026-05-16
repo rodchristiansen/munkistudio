@@ -60,6 +60,20 @@ final class RepositoryStore {
         didSet { scheduleNavigationRecord() }
     }
 
+    /// Packages-list view mode. Persisted here — not view-local `@State`
+    /// — so the grouping tab and sort survive navigating away and back.
+    var packagesGrouping: PackageGrouping = .categories
+    var packagesSort: PackageSort = .name
+
+    /// Manifests-list view mode, same rationale.
+    var manifestsGrouping: ManifestGrouping = .directories
+    var manifestsSort: PackageSort = .name
+
+    /// Git pane state — focused panel plus commit / hook / file
+    /// selection. Held on the store so leaving the Git tab and coming
+    /// back restores the panel and selection instead of resetting.
+    let gitPaneState = GitPaneState()
+
     var loadState: LoadState = .idle
 
     /// Free-text query backing the global search pane.

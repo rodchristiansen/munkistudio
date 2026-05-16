@@ -8,8 +8,6 @@ import Core
 struct PackagesListView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var search: String = ""
-    @State private var grouping: PackageGrouping = .categories
-    @State private var sort: PackageSort = .name
     @State private var criteriaGroup = PackageCriteriaGroup()
     @State private var filterPopoverShown = false
     @FocusState private var searchFocused: Bool
@@ -18,7 +16,7 @@ struct PackagesListView: View {
         @Bindable var bindableStore = store
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Picker("", selection: $grouping) {
+                Picker("", selection: $bindableStore.packagesGrouping) {
                     ForEach(PackageGrouping.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
@@ -27,7 +25,7 @@ struct PackagesListView: View {
                 .labelsHidden()
                 Spacer()
                 filterButton
-                SortMenu(sort: $sort)
+                SortMenu(sort: $bindableStore.packagesSort)
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)
@@ -39,8 +37,8 @@ struct PackagesListView: View {
             } else {
                 PackageTreeList(
                     records: filtered,
-                    grouping: grouping,
-                    sort: sort,
+                    grouping: store.packagesGrouping,
+                    sort: store.packagesSort,
                     forceExpandAll: !search.isEmpty || !criteriaGroup.criteria.isEmpty
                 )
             }
