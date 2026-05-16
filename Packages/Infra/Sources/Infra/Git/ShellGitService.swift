@@ -419,7 +419,26 @@ public final class ShellGitService: GitService {
                 ))
             }
         }
-        hooks.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // Surface every standard hook that has no file yet as an
+        // inactive entry, so the panel shows the full set, not just
+        // what's already set up.
+        let present = Set(hooks.map(\.name))
+        for name in GitHookCatalog.standardNames where !present.contains(name) {
+            hooks.append(GitHook(
+                name: name,
+                fileURL: directory.appending(path: name),
+                isExecutable: false,
+                isSample: false,
+                exists: false
+            ))
+        }
+        // Active hooks first, then alphabetical — the ones git actually
+        // runs stay at the top.
+        hooks.sort {
+            $0.isActive != $1.isActive
+                ? $0.isActive
+                : $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
         return GitHooksInfo(directory: directory, source: source, hooks: hooks)
     }
 

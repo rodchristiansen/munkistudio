@@ -218,7 +218,8 @@ public enum GitIdentityScope: Sendable {
     case global
 }
 
-/// A single hook file in the resolved hooks directory.
+/// A single git hook — a file in the resolved hooks directory, or a
+/// standard hook name that simply isn't set up yet (`exists == false`).
 public struct GitHook: Sendable, Hashable, Identifiable {
     /// Hook name without any `.sample` suffix, e.g. `pre-commit`.
     public var name: String
@@ -228,16 +229,71 @@ public struct GitHook: Sendable, Hashable, Identifiable {
     public var isExecutable: Bool
     /// `true` for the inert `*.sample` files git ships by default.
     public var isSample: Bool
+    /// `false` when no file exists at `fileURL` — a standard git hook
+    /// name surfaced so the user can see it and set it up.
+    public var exists: Bool
 
     public var id: String { fileURL.path }
     /// Whether git will actually run this hook.
-    public var isActive: Bool { isExecutable && !isSample }
+    public var isActive: Bool { exists && isExecutable && !isSample }
 
-    public init(name: String, fileURL: URL, isExecutable: Bool, isSample: Bool) {
+    public init(name: String, fileURL: URL, isExecutable: Bool, isSample: Bool, exists: Bool = true) {
         self.name = name
         self.fileURL = fileURL
         self.isExecutable = isExecutable
         self.isSample = isSample
+        self.exists = exists
+    }
+}
+
+/// The standard set of git hook names plus a one-line summary of when
+/// each runs. Used to list hooks that aren't set up yet and to annotate
+/// the hook editor.
+public enum GitHookCatalog {
+    /// Standard hook names, in roughly the order git documents them.
+    public static let standardNames: [String] = [
+        "applypatch-msg", "pre-applypatch", "post-applypatch",
+        "pre-commit", "pre-merge-commit", "prepare-commit-msg", "commit-msg",
+        "post-commit", "pre-rebase", "post-checkout", "post-merge", "pre-push",
+        "pre-receive", "update", "post-receive", "post-update",
+        "push-to-checkout", "pre-auto-gc", "post-rewrite", "sendemail-validate",
+    ]
+
+    /// Server-side hooks — they run on the receiving repository, not the
+    /// developer's clone.
+    public static let serverSideNames: Set<String> = [
+        "pre-receive", "update", "post-receive", "post-update", "push-to-checkout",
+    ]
+
+    public static func isServerSide(_ name: String) -> Bool {
+        serverSideNames.contains(name)
+    }
+
+    /// A short description of when the hook runs.
+    public static func summary(for name: String) -> String? {
+        switch name {
+        case "applypatch-msg": "Runs when `git am` applies a patch — can edit or reject its commit message."
+        case "pre-applypatch": "Runs after `git am` applies a patch but before the commit is made."
+        case "post-applypatch": "Runs after `git am` applies and commits a patch."
+        case "pre-commit": "Runs before a commit is created — the usual place for linting and validation."
+        case "pre-merge-commit": "Runs before a merge commit is created."
+        case "prepare-commit-msg": "Runs before the commit message editor opens — can pre-fill the message."
+        case "commit-msg": "Runs after the commit message is entered — can validate or reject it."
+        case "post-commit": "Runs after a commit is created — for notifications and bookkeeping."
+        case "pre-rebase": "Runs before a rebase starts — can refuse rebasing certain branches."
+        case "post-checkout": "Runs after `git checkout` / `git switch` updates the working tree."
+        case "post-merge": "Runs after a successful merge updates the working tree."
+        case "pre-push": "Runs before refs are pushed — a good place for final checks."
+        case "pre-receive": "Server-side — runs before any refs are updated by a push."
+        case "update": "Server-side — runs once per ref being updated by a push."
+        case "post-receive": "Server-side — runs after a push has updated all refs."
+        case "post-update": "Server-side — runs after a push, e.g. to refresh dumb-HTTP info."
+        case "push-to-checkout": "Server-side — runs when a push updates the checked-out branch."
+        case "pre-auto-gc": "Runs before an automatic `git gc` — can defer housekeeping."
+        case "post-rewrite": "Runs after commits are rewritten by `rebase` or `commit --amend`."
+        case "sendemail-validate": "Runs before `git send-email` sends a patch."
+        default: nil
+        }
     }
 }
 
