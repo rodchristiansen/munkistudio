@@ -44,10 +44,21 @@ final class RepositoryStore {
     var gitActionMessage: String?
 
     /// Sidebar destination the user has selected.
-    var selectedSection: SidebarSection = .dashboard
+    var selectedSection: SidebarSection = .dashboard {
+        didSet { scheduleNavigationRecord() }
+    }
 
     /// Item selection within the middle column (pkginfo / manifest / etc.).
-    var selectedItemID: AnyHashable?
+    var selectedItemID: AnyHashable? {
+        didSet { scheduleNavigationRecord() }
+    }
+
+    /// Cluster selected in the Dependencies section. Lives on the store
+    /// (not view-local `@State`) so it survives the view being torn down
+    /// when the user navigates away and back.
+    var dependenciesClusterID: String? {
+        didSet { scheduleNavigationRecord() }
+    }
 
     var loadState: LoadState = .idle
 
@@ -109,9 +120,78 @@ final class RepositoryStore {
             await refreshGitStatus()
             Self.appendRecent(rootURL, into: &recentRepositories)
             loadState = .ready
+            navHistory.removeAll()
+            navIndex = -1
+            recordNavigation()
         } catch {
             loadState = .failed(message: error.localizedDescription)
         }
+    }
+
+    // MARK: Navigation history
+
+    /// A point in back/forward history — everything needed to restore
+    /// where the user was: the section, the middle-column selection, and
+    /// any section-specific deep-link state.
+    struct NavLocation: Equatable {
+        var section: SidebarSection
+        var itemID: AnyHashable?
+        var dependenciesClusterID: String?
+    }
+
+    private var navHistory: [NavLocation] = []
+    private var navIndex: Int = -1
+    @ObservationIgnored private var suppressNavRecord = false
+    @ObservationIgnored private var navRecordScheduled = false
+
+    var canGoBack: Bool { navIndex > 0 }
+    var canGoForward: Bool { navIndex >= 0 && navIndex < navHistory.count - 1 }
+
+    /// One logical move often touches several properties (jumping to a
+    /// package sets `selectedSection` then `selectedItemID`). Defer the
+    /// record to the next main-actor tick so the burst collapses into a
+    /// single history entry once every property has settled.
+    private func scheduleNavigationRecord() {
+        guard !suppressNavRecord, !navRecordScheduled else { return }
+        navRecordScheduled = true
+        Task { @MainActor in
+            self.navRecordScheduled = false
+            self.recordNavigation()
+        }
+    }
+
+    private func recordNavigation() {
+        let location = NavLocation(
+            section: selectedSection,
+            itemID: selectedItemID,
+            dependenciesClusterID: dependenciesClusterID
+        )
+        if navIndex >= 0, navHistory[navIndex] == location { return }
+        if navIndex < navHistory.count - 1 {
+            navHistory.removeSubrange((navIndex + 1)...)
+        }
+        navHistory.append(location)
+        navIndex = navHistory.count - 1
+    }
+
+    func goBack() {
+        guard canGoBack else { return }
+        navIndex -= 1
+        applyNavLocation(navHistory[navIndex])
+    }
+
+    func goForward() {
+        guard canGoForward else { return }
+        navIndex += 1
+        applyNavLocation(navHistory[navIndex])
+    }
+
+    private func applyNavLocation(_ location: NavLocation) {
+        suppressNavRecord = true
+        selectedSection = location.section
+        selectedItemID = location.itemID
+        dependenciesClusterID = location.dependenciesClusterID
+        suppressNavRecord = false
     }
 
     func reload() async {

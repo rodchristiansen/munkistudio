@@ -8,9 +8,15 @@ import Core
 struct DependenciesView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var zoom: CGFloat = 1
-    @State private var selectedClusterID: String?
     @State private var filter = ""
     @FocusState private var filterFocused: Bool
+
+    /// Cluster selection lives on the store so it survives navigating
+    /// away and back (deep-link state, not view-local).
+    private var clusterSelection: Binding<String?> {
+        Binding(get: { store.dependenciesClusterID },
+                set: { store.dependenciesClusterID = $0 })
+    }
 
     private var graph: DependencyGraph {
         DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
@@ -29,7 +35,7 @@ struct DependenciesView: View {
     }
 
     private var selectedCluster: DependencyCluster? {
-        clusters.first { $0.id == selectedClusterID } ?? filteredClusters.first
+        clusters.first { $0.id == store.dependenciesClusterID } ?? filteredClusters.first
     }
 
     var body: some View {
@@ -58,7 +64,7 @@ struct DependenciesView: View {
     }
 
     private func selectDefaultClusterIfNeeded() {
-        if selectedCluster == nil { selectedClusterID = clusters.first?.id }
+        if selectedCluster == nil { store.dependenciesClusterID = clusters.first?.id }
     }
 
     // MARK: - Header
@@ -107,7 +113,7 @@ struct DependenciesView: View {
             FilterField(text: $filter, prompt: "Filter clusters", focused: $filterFocused)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-            List(selection: $selectedClusterID) {
+            List(selection: clusterSelection) {
                 ForEach(filteredClusters) { cluster in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(cluster.title)
