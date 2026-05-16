@@ -56,13 +56,17 @@ public enum DependencyLinter {
         }
 
         // 1. Circular dependencies — non-trivial strongly-connected
-        //    components of the `requires` subgraph.
-        var cyclicNodes: Set<String> = []
+        //    components of the `requires` subgraph. Each cyclic node is
+        //    tagged with its component index so the redundancy pass can
+        //    tell "same cycle" from "two separate cycles".
+        var cycleComponentByNode: [String: Int] = [:]
+        var cycleIndex = 0
         for component in stronglyConnectedComponents(
             nodes: graph.nodes.map(\.name), adjacency: requiresAdjacency
         ) where component.count > 1 {
             let members = Set(component)
-            cyclicNodes.formUnion(members)
+            for node in members { cycleComponentByNode[node] = cycleIndex }
+            cycleIndex += 1
             let names = component.sorted()
             findings.append(DependencyFinding(
                 kind: .cycle,
@@ -77,9 +81,12 @@ public enum DependencyLinter {
 
         // 2. Redundant requirements — a direct `requires` edge whose
         //    target is already reachable through other requirements.
-        //    Edges inside a cycle are skipped; the cycle finding owns them.
+        //    Edges within a single cycle are skipped (that cycle's
+        //    finding owns them); an edge between two separate cycles is
+        //    still checked.
         for edge in requiresEdges {
-            if cyclicNodes.contains(edge.from), cyclicNodes.contains(edge.to) { continue }
+            if let component = cycleComponentByNode[edge.from],
+               component == cycleComponentByNode[edge.to] { continue }
             let reached = reachable(from: edge.from, skipping: edge, adjacency: requiresAdjacency)
             guard reached.contains(edge.to) else { continue }
             findings.append(DependencyFinding(

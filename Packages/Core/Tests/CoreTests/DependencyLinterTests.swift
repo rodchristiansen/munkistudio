@@ -81,6 +81,20 @@ struct DependencyLinterTests {
         #expect(Set(conflict.first?.nodes ?? []) == ["Excel", "OfficePrefs"])
     }
 
+    @Test("checks redundancy on an edge that spans two separate cycles")
+    func redundantEdgeBetweenCycles() {
+        // Cycle 1: A ⇄ B. Cycle 2: C ⇄ D. B bridges into cycle 2, and
+        // A → C is redundant (A already reaches C via A → B → C).
+        let findings = analyze([
+            pkg("A", requires: ["B", "C"]),
+            pkg("B", requires: ["A", "C"]),
+            pkg("C", requires: ["D"]),
+            pkg("D", requires: ["C"]),
+        ])
+        let redundant = findings.filter { $0.kind == .redundantRequires }
+        #expect(redundant.contains { $0.nodes == ["A", "C"] })
+    }
+
     @Test("flags a reference to a package not in the repo")
     func detectsDanglingReference() {
         let findings = analyze([pkg("App", requires: ["Ghost"])])
