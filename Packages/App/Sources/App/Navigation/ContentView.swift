@@ -161,6 +161,7 @@ private struct ContentColumn: View {
         case .packages: PackagesListView()
         case .manifests: ManifestsListView()
         case .catalogs: CatalogsListView()
+        case .dependencies: EmptyView()
         case .importer: EmptyView()
         case .git: GitView()
         }
@@ -177,6 +178,7 @@ private struct DetailColumn: View {
         case .packages: PackageDetailView()
         case .manifests: ManifestDetailView()
         case .catalogs: CatalogDetailView()
+        case .dependencies: EmptyView()
         case .importer: EmptyView()
         case .git: GitDetailView()
         }
@@ -192,6 +194,7 @@ private struct FullWidthColumn: View {
             case .dashboard: DashboardView()
             case .git: GitView()
             case .importer: ImportView()
+            case .dependencies: DependenciesView()
             default: EmptyView()
             }
         }
