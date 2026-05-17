@@ -373,7 +373,8 @@ struct DependenciesView: View {
                             node: node,
                             depth: 0,
                             selectedName: store.dependenciesManifestName,
-                            onSelect: { store.dependenciesManifestName = $0 }
+                            onSelect: { store.dependenciesManifestName = $0 },
+                            onOpen: { openManifest($0) }
                         )
                     }
                 }
@@ -407,7 +408,10 @@ struct DependenciesView: View {
         if let name = store.dependenciesManifestName,
            manifestGraph.nodes.contains(where: { $0.name == name }) {
             let subgraph = downstreamSubgraph(from: name, in: manifestGraph)
-            let layout = DependencyLayout.compute(subgraph)
+            // Flipped: the manifests an include chain bottoms out at —
+            // the foundational ones — sit at the top, the selected
+            // manifest at the bottom.
+            let layout = DependencyLayout.compute(subgraph, flipped: true)
             GeometryReader { geo in
                 ScrollView([.horizontal, .vertical]) {
                     graphContent(layout, problems: [])
@@ -467,39 +471,61 @@ struct DependenciesView: View {
         let icon: String = node.exists
             ? (mode == .manifests ? "list.bullet.rectangle.fill" : "shippingbox.fill")
             : "questionmark.diamond"
-        // A `Button` (not a tap gesture) so the node is keyboard-
-        // activatable and exposed to assistive tech as a control.
-        return Button {
-            navigate(to: node)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .imageScale(.small)
-                    .foregroundStyle(tint)
-                Text(node.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .padding(.horizontal, 10)
-            .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
-            .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
-                            style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
-            )
-            .contentShape(.rect)
+        return HStack(spacing: 6) {
+            Image(systemName: icon)
+                .imageScale(.small)
+                .foregroundStyle(tint)
+            Text(nodeLabel(node))
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
+        .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
+                        style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
+        )
+        .contentShape(.rect)
+        // Single-tap focuses the node; double-tap opens it in its tab.
+        // count:1 is attached first so focus isn't delayed.
+        .onTapGesture { handleNodeSingleTap(node) }
+        .onTapGesture(count: 2) { handleNodeDoubleTap(node) }
         .help(nodeHelp(node))
     }
 
+    /// The card label — a manifest's `manifestName` is a `/`-path, but the
+    /// card shows only its leaf component.
+    private func nodeLabel(_ node: DependencyGraph.Node) -> String {
+        node.name.split(separator: "/").last.map(String.init) ?? node.name
+    }
+
+    private func handleNodeSingleTap(_ node: DependencyGraph.Node) {
+        switch mode {
+        case .packages: navigate(to: node)
+        case .manifests: store.dependenciesManifestName = node.name
+        }
+    }
+
+    private func handleNodeDoubleTap(_ node: DependencyGraph.Node) {
+        switch mode {
+        case .packages: navigate(to: node)
+        case .manifests: openManifest(node.name)
+        }
+    }
+
     private func nodeHelp(_ node: DependencyGraph.Node) -> String {
-        let section = mode == .manifests ? "Manifests" : "Packages"
-        return node.exists
-            ? "Open \(node.name) in \(section)"
-            : "\(node.name) — referenced but not present in this repo"
+        guard node.exists else {
+            return "\(node.name) — referenced but not present in this repo"
+        }
+        switch mode {
+        case .packages:
+            return "Open \(node.name) in Packages"
+        case .manifests:
+            return "\(node.name) — click to focus, double-click to open in Manifests"
+        }
     }
 
     private func drawEdge(
@@ -544,19 +570,25 @@ struct DependenciesView: View {
         context.fill(head, with: .color(color.opacity(opacity)))
     }
 
+    /// Open a package node in the Packages tab. The section + item
+    /// change records a navigation entry, so Back / Forward return here.
     private func navigate(to node: DependencyGraph.Node) {
-        switch mode {
-        case .packages:
-            guard let record = store.snapshot.pkginfos.first(where: { $0.pkginfo.name == node.name }) else { return }
-            store.selectedSection = .packages
-            store.selectedItemID = AnyHashable(record.id)
-            let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces)
-            store.expandedCategories.insert(category?.isEmpty == false ? category! : "Uncategorized")
-        case .manifests:
-            guard let record = store.snapshot.manifests.first(where: { $0.manifest.manifestName == node.name }) else { return }
-            store.selectedSection = .manifests
-            store.selectedItemID = AnyHashable(record.id)
-        }
+        guard let record = store.snapshot.pkginfos.first(where: { $0.pkginfo.name == node.name }) else { return }
+        store.selectedSection = .packages
+        store.selectedItemID = AnyHashable(record.id)
+        let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces)
+        store.expandedCategories.insert(category?.isEmpty == false ? category! : "Uncategorized")
+    }
+
+    /// Open a manifest in the Manifests tab — used by the double-tap on
+    /// a tree row or a graph node. `manifestName` is canonicalised the
+    /// same way the graph is so a record always matches.
+    private func openManifest(_ manifestName: String) {
+        guard let record = store.snapshot.manifests.first(where: {
+            ManifestGraphBuilder.canonicalName($0.manifest.manifestName) == manifestName
+        }) else { return }
+        store.selectedSection = .manifests
+        store.selectedItemID = AnyHashable(record.id)
     }
 }
 
@@ -666,6 +698,7 @@ private struct ManifestFSRow: View {
     let depth: Int
     let selectedName: String?
     let onSelect: (String) -> Void
+    let onOpen: (String) -> Void
 
     @State private var expanded = true
 
@@ -675,7 +708,8 @@ private struct ManifestFSRow: View {
             if expanded {
                 ForEach(node.children) { child in
                     ManifestFSRow(node: child, depth: depth + 1,
-                                  selectedName: selectedName, onSelect: onSelect)
+                                  selectedName: selectedName,
+                                  onSelect: onSelect, onOpen: onOpen)
                 }
             }
         }
@@ -715,11 +749,16 @@ private struct ManifestFSRow: View {
             in: .rect(cornerRadius: 4)
         )
         .contentShape(.rect)
+        // count:1 first so selection isn't delayed; double-tap on a
+        // manifest opens it in the Manifests tab.
         .onTapGesture {
             switch node.kind {
             case .directory: expanded.toggle()
             case .manifest: if let name = node.manifestName { onSelect(name) }
             }
+        }
+        .onTapGesture(count: 2) {
+            if node.kind == .manifest, let name = node.manifestName { onOpen(name) }
         }
     }
 }
@@ -818,7 +857,10 @@ struct DependencyLayout {
 
     func point(for name: String) -> CGPoint? { positions[name] }
 
-    static func compute(_ graph: DependencyGraph) -> DependencyLayout {
+    /// `flipped` inverts the vertical order — used for the manifest map,
+    /// where the foundational manifests an include chain bottoms out at
+    /// belong at the top.
+    static func compute(_ graph: DependencyGraph, flipped: Bool = false) -> DependencyLayout {
         var targets: [String: [String]] = [:]
         for edge in graph.edges {
             targets[edge.from, default: []].append(edge.to)
@@ -853,7 +895,7 @@ struct DependencyLayout {
             let row = (rows[level] ?? []).sorted { $0.name < $1.name }
             let rowW = CGFloat(row.count) * nodeW + CGFloat(max(0, row.count - 1)) * xGap
             let startX = (totalW - rowW) / 2 + nodeW / 2
-            let y = CGFloat(maxLayer - level) * (nodeH + yGap) + nodeH / 2
+            let y = CGFloat(flipped ? level : maxLayer - level) * (nodeH + yGap) + nodeH / 2
             for (index, node) in row.enumerated() {
                 let point = CGPoint(x: startX + CGFloat(index) * (nodeW + xGap), y: y)
                 positions[node.name] = point
