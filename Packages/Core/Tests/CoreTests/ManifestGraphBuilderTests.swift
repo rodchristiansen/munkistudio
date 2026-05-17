@@ -50,6 +50,17 @@ struct ManifestGraphBuilderTests {
         #expect(graph.edges.count == 1)
     }
 
+    @Test("resolves includes that carry a file extension")
+    func resolvesExtensionedReference() {
+        let graph = ManifestGraphBuilder.build(manifests: [
+            manifest("Assigned/Faculty", includes: ["CoreManifest.yaml", "Assigned.yaml"]),
+            manifest("CoreManifest"),
+            manifest("Assigned"),
+        ])
+        #expect(Set(graph.edges.map(\.to)) == ["CoreManifest", "Assigned"])
+        #expect(graph.nodes.allSatisfy { $0.exists })
+    }
+
     @Test("builds an edge per distinct included manifest")
     func multipleInclusions() {
         let graph = ManifestGraphBuilder.build(manifests: [

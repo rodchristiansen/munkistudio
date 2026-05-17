@@ -83,22 +83,28 @@ public enum ManifestGraphBuilder {
     /// Unlike the package graph, every manifest is kept as a node even
     /// with no inclusion relationship — a standalone client manifest is
     /// still a meaningful entry in the tree.
+    ///
+    /// `manifestName` is stored without a file extension, but real repos
+    /// reference includes inconsistently — `CoreManifest`, `Assigned.yaml`
+    /// and `Foo.plist` all occur. Both sides are canonicalised to the
+    /// extensionless form so a reference always resolves to its manifest.
     public static func build(manifests: [Manifest]) -> DependencyGraph {
-        let existing = Set(manifests.map(\.manifestName))
+        let existing = Set(manifests.map { canonicalName($0.manifestName) })
         var edges: [DependencyGraph.Edge] = []
         var seen = Set<String>()
         var nodeNames = Set<String>()
 
         for manifest in manifests {
-            let name = manifest.manifestName
+            let name = canonicalName(manifest.manifestName)
             guard !name.isEmpty else { continue }
             nodeNames.insert(name)
             for included in manifest.includedManifests ?? [] {
-                guard name != included, !included.isEmpty else { continue }
-                let key = "\(name)\u{1f}\(included)"
+                let target = canonicalName(included)
+                guard name != target, !target.isEmpty else { continue }
+                let key = "\(name)\u{1f}\(target)"
                 guard seen.insert(key).inserted else { continue }
-                edges.append(.init(from: name, to: included, kind: .manifestInclusion))
-                nodeNames.insert(included)
+                edges.append(.init(from: name, to: target, kind: .manifestInclusion))
+                nodeNames.insert(target)
             }
         }
 
@@ -106,5 +112,14 @@ public enum ManifestGraphBuilder {
             DependencyGraph.Node(name: $0, exists: existing.contains($0))
         }
         return DependencyGraph(nodes: nodes, edges: edges)
+    }
+
+    /// Drop a manifest file extension so a reference (`Assigned.yaml`)
+    /// matches the extensionless `manifestName` (`Assigned`).
+    public static func canonicalName(_ name: String) -> String {
+        for ext in [".yaml", ".yml", ".plist"] where name.hasSuffix(ext) {
+            return String(name.dropLast(ext.count))
+        }
+        return name
     }
 }

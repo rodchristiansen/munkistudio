@@ -24,9 +24,10 @@ struct DependenciesView: View {
     @State private var findings: [DependencyFinding] = []
     @State private var showingIssues = false
 
-    // Manifests mode — the inclusion graph and its hierarchy outline.
+    // Manifests mode — the inclusion graph (drives the map) and the
+    // filesystem tree of the manifests/ folder (drives the left panel).
     @State private var manifestGraph = DependencyGraph(nodes: [], edges: [])
-    @State private var manifestOutline: [ManifestOutlineNode] = []
+    @State private var manifestTree: [ManifestFSNode] = []
 
     private var mode: DependencyMode { store.dependencyMode }
 
@@ -55,23 +56,29 @@ struct DependenciesView: View {
         clusters.first { $0.id == store.dependenciesClusterID } ?? filteredClusters.first
     }
 
-    /// The manifest hierarchy outline, pruned to the filter query.
-    private var filteredOutline: [ManifestOutlineNode] {
+    /// The manifest filesystem tree, pruned to the filter query.
+    private var filteredTree: [ManifestFSNode] {
         let query = filter.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return manifestOutline }
-        return manifestOutline.compactMap { prune($0, query: query) }
+        guard !query.isEmpty else { return manifestTree }
+        return manifestTree.compactMap { prune($0, query: query) }
     }
 
-    private func prune(_ node: ManifestOutlineNode, query: String) -> ManifestOutlineNode? {
-        let matchedChildren = node.children.compactMap { prune($0, query: query) }
+    private func prune(_ node: ManifestFSNode, query: String) -> ManifestFSNode? {
         let selfMatches = node.name.localizedCaseInsensitiveContains(query)
-        guard selfMatches || !matchedChildren.isEmpty else { return nil }
-        return ManifestOutlineNode(
-            name: node.name,
-            exists: node.exists,
-            children: selfMatches ? node.children : matchedChildren,
-            path: node.path
-        )
+        switch node.kind {
+        case .manifest:
+            return selfMatches ? node : nil
+        case .directory:
+            let matchedChildren = node.children.compactMap { prune($0, query: query) }
+            guard selfMatches || !matchedChildren.isEmpty else { return nil }
+            return ManifestFSNode(
+                kind: .directory,
+                name: node.name,
+                manifestName: nil,
+                children: selfMatches ? node.children : matchedChildren,
+                id: node.id
+            )
+        }
     }
 
     var body: some View {
@@ -115,7 +122,7 @@ struct DependenciesView: View {
 
     @ViewBuilder
     private var manifestsContent: some View {
-        if manifestOutline.isEmpty {
+        if manifestTree.isEmpty {
             ContentUnavailableView(
                 "No Manifests",
                 systemImage: "list.bullet.rectangle",
@@ -155,7 +162,10 @@ struct DependenciesView: View {
         selectDefaultClusterIfNeeded()
 
         manifestGraph = ManifestGraphBuilder.build(manifests: store.snapshot.manifests.map(\.manifest))
-        manifestOutline = ManifestOutline.build(manifestGraph)
+        manifestTree = ManifestFSTree.build(
+            manifestNames: store.snapshot.manifests.map(\.manifest.manifestName),
+            inclusionGraph: manifestGraph
+        )
         selectDefaultManifestIfNeeded()
     }
 
@@ -173,7 +183,7 @@ struct DependenciesView: View {
     private func selectDefaultManifestIfNeeded() {
         let name = store.dependenciesManifestName
         let isValid = name != nil && manifestGraph.nodes.contains { $0.name == name }
-        if !isValid { store.dependenciesManifestName = manifestOutline.first?.name }
+        if !isValid { store.dependenciesManifestName = ManifestFSTree.firstManifest(in: manifestTree) }
     }
 
     // MARK: - Header
@@ -358,8 +368,8 @@ struct DependenciesView: View {
                 .padding(.vertical, 8)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    ForEach(filteredOutline) { node in
-                        ManifestOutlineRow(
+                    ForEach(filteredTree) { node in
+                        ManifestFSRow(
                             node: node,
                             depth: 0,
                             selectedName: store.dependenciesManifestName,
@@ -560,73 +570,99 @@ private struct Line: Shape {
     }
 }
 
-// MARK: - Manifest hierarchy outline
+// MARK: - Manifest filesystem tree
 
-/// One entry in the manifest inclusion outline. A manifest pulled in by
-/// more than one parent appears once under each — `path` (the ancestor
-/// chain) keeps each occurrence uniquely identifiable.
-struct ManifestOutlineNode: Identifiable {
+/// One entry in the manifests/ filesystem tree — either a directory
+/// (a group) or a manifest file (selectable, drives the map).
+struct ManifestFSNode: Identifiable {
+    enum Kind { case directory, manifest }
+    let kind: Kind
+    /// Last path component — the display name.
     let name: String
-    let exists: Bool
-    let children: [ManifestOutlineNode]
-    let path: String
-
-    var id: String { path }
+    /// The full `manifestName` (a `/`-path) for a `.manifest`; nil for
+    /// a directory.
+    let manifestName: String?
+    let children: [ManifestFSNode]
+    let id: String
 }
 
-enum ManifestOutline {
-    /// Build the inclusion outline. Roots are manifests no other manifest
-    /// includes; each expands into its `included_manifests`, recursively.
-    /// A pure inclusion cycle has no root, so any manifest left uncovered
-    /// is seeded as its own root rather than vanishing from the list.
-    static func build(_ graph: DependencyGraph) -> [ManifestOutlineNode] {
-        let childrenOf = Dictionary(grouping: graph.edges, by: \.from)
-            .mapValues { $0.map(\.to).sorted() }
-        let included = Set(graph.edges.map(\.to))
-        let existsByName = Dictionary(graph.nodes.map { ($0.name, $0.exists) },
-                                      uniquingKeysWith: { first, _ in first })
+enum ManifestFSTree {
+    /// Build the manifests/ directory tree from manifest names (each a
+    /// `/`-separated path). Manifest files sort before subfolders at
+    /// every level; manifests are ordered by how many other manifests
+    /// include them, so a foundational manifest rises to the top.
+    static func build(manifestNames: [String], inclusionGraph: DependencyGraph) -> [ManifestFSNode] {
+        var inDegree: [String: Int] = [:]
+        for edge in inclusionGraph.edges { inDegree[edge.to, default: 0] += 1 }
+        let entries = manifestNames
+            .map { (name: $0, parts: $0.split(separator: "/").map(String.init)) }
+            .filter { !$0.parts.isEmpty }
+        return level(entries, depth: 0, parentPath: "", inDegree: inDegree)
+    }
 
-        func makeNode(_ name: String, ancestors: Set<String>, parentPath: String) -> ManifestOutlineNode {
-            let path = parentPath.isEmpty ? name : parentPath + "\u{1f}" + name
-            var children: [ManifestOutlineNode] = []
-            // Stop at a node already on the path — an inclusion cycle.
-            if !ancestors.contains(name) {
-                let next = ancestors.union([name])
-                for child in childrenOf[name] ?? [] {
-                    children.append(makeNode(child, ancestors: next, parentPath: path))
-                }
+    private static func level(
+        _ entries: [(name: String, parts: [String])],
+        depth: Int,
+        parentPath: String,
+        inDegree: [String: Int]
+    ) -> [ManifestFSNode] {
+        var manifests: [ManifestFSNode] = []
+        var dirEntries: [String: [(name: String, parts: [String])]] = [:]
+        var dirOrder: [String] = []
+
+        for entry in entries {
+            let component = entry.parts[depth]
+            if entry.parts.count == depth + 1 {
+                manifests.append(ManifestFSNode(
+                    kind: .manifest, name: component, manifestName: entry.name,
+                    children: [], id: "m:" + entry.name))
+            } else {
+                if dirEntries[component] == nil { dirOrder.append(component) }
+                dirEntries[component, default: []].append(entry)
             }
-            return ManifestOutlineNode(
-                name: name,
-                exists: existsByName[name] ?? false,
-                children: children,
-                path: path
-            )
         }
 
-        let roots = graph.nodes.map(\.name).filter { !included.contains($0) }.sorted()
-        var result = roots.map { makeNode($0, ancestors: [], parentPath: "") }
+        // Manifests: most-included first, alphabetical to break ties.
+        manifests.sort { lhs, rhs in
+            let l = inDegree[ManifestGraphBuilder.canonicalName(lhs.manifestName ?? ""), default: 0]
+            let r = inDegree[ManifestGraphBuilder.canonicalName(rhs.manifestName ?? ""), default: 0]
+            if l != r { return l > r }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
 
-        var covered = Set<String>()
-        func collect(_ node: ManifestOutlineNode) {
-            covered.insert(node.name)
-            node.children.forEach(collect)
+        let directories = dirOrder
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { dir -> ManifestFSNode in
+                let path = parentPath.isEmpty ? dir : parentPath + "/" + dir
+                return ManifestFSNode(
+                    kind: .directory, name: dir, manifestName: nil,
+                    children: level(dirEntries[dir] ?? [], depth: depth + 1,
+                                    parentPath: path, inDegree: inDegree),
+                    id: "d:" + path)
+            }
+
+        return manifests + directories
+    }
+
+    /// The first selectable manifest, depth-first — the importance-sorted
+    /// top entry, used as the default selection.
+    static func firstManifest(in nodes: [ManifestFSNode]) -> String? {
+        for node in nodes {
+            switch node.kind {
+            case .manifest:
+                return node.manifestName
+            case .directory:
+                if let found = firstManifest(in: node.children) { return found }
+            }
         }
-        result.forEach(collect)
-        for orphan in graph.nodes.map(\.name).sorted() where !covered.contains(orphan) {
-            let node = makeNode(orphan, ancestors: [], parentPath: "")
-            result.append(node)
-            collect(node)
-        }
-        return result.sorted { $0.name < $1.name }
+        return nil
     }
 }
 
-/// One row of the manifest outline, drawing its included children
-/// recursively. Selection is by manifest name, so picking any occurrence
-/// of a multi-parented manifest focuses the same subtree.
-private struct ManifestOutlineRow: View {
-    let node: ManifestOutlineNode
+/// One row of the manifest filesystem tree. Directories toggle their
+/// children; manifests select and scope the map downstream of them.
+private struct ManifestFSRow: View {
+    let node: ManifestFSNode
     let depth: Int
     let selectedName: String?
     let onSelect: (String) -> Void
@@ -638,31 +674,34 @@ private struct ManifestOutlineRow: View {
             rowContent
             if expanded {
                 ForEach(node.children) { child in
-                    ManifestOutlineRow(node: child, depth: depth + 1,
-                                       selectedName: selectedName, onSelect: onSelect)
+                    ManifestFSRow(node: child, depth: depth + 1,
+                                  selectedName: selectedName, onSelect: onSelect)
                 }
             }
         }
     }
 
+    private var isSelected: Bool {
+        node.kind == .manifest && node.manifestName == selectedName
+    }
+
     private var rowContent: some View {
         HStack(spacing: 5) {
-            if node.children.isEmpty {
-                Color.clear.frame(width: 12)
-            } else {
+            if node.kind == .directory {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(width: 12)
-                    .contentShape(.rect)
-                    .onTapGesture { expanded.toggle() }
+            } else {
+                Color.clear.frame(width: 12)
             }
-            Image(systemName: node.exists ? "list.bullet.rectangle" : "questionmark.diamond")
+            Image(systemName: node.kind == .directory ? "folder.fill" : "list.bullet.rectangle")
                 .imageScale(.small)
-                .foregroundStyle(node.exists ? Color.accentColor : Color.secondary)
+                .foregroundStyle(node.kind == .directory ? Color.secondary : Color.accentColor)
                 .frame(width: 16)
             Text(node.name)
                 .font(.callout)
+                .fontWeight(node.kind == .directory ? .medium : .regular)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
@@ -672,11 +711,16 @@ private struct ManifestOutlineRow: View {
         .padding(.trailing, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            selectedName == node.name ? Color.accentColor.opacity(0.18) : Color.clear,
+            isSelected ? Color.accentColor.opacity(0.18) : Color.clear,
             in: .rect(cornerRadius: 4)
         )
         .contentShape(.rect)
-        .onTapGesture { onSelect(node.name) }
+        .onTapGesture {
+            switch node.kind {
+            case .directory: expanded.toggle()
+            case .manifest: if let name = node.manifestName { onSelect(name) }
+            }
+        }
     }
 }
 
