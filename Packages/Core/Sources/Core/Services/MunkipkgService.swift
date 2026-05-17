@@ -1,5 +1,13 @@
 import Foundation
 
+/// `UserDefaults` keys shared between the App settings layer and the
+/// Infra service implementations. Lives in Core so neither side has to
+/// import the other just to agree on a key string.
+public enum MunkipkgDefaults {
+    /// Overrides the `munkipkg` executable path. Empty = standard path.
+    public static let executablePathKey = "MunkiStudio.settings.munkipkgExecutablePath"
+}
+
 /// Streamed events from a `munkipkg --build` run.
 public enum MunkipkgEvent: Sendable {
     /// A line of munkipkg output.

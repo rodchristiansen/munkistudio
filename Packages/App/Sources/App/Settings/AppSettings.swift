@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import Infra
+import Core
 
 /// App-wide preferences, persisted to `UserDefaults`. Non-secret values
 /// only — API tokens and PATs belong in the Keychain, never here. Each
@@ -47,6 +47,6 @@ final class AppSettings {
         static let reopenLastRepository = "MunkiStudio.settings.reopenLastRepositoryOnLaunch"
         static let gitHooksPathOverride = "MunkiStudio.settings.gitHooksPathOverride"
         static let munkipkgProjectsPath = "MunkiStudio.settings.munkipkgProjectsPath"
-        static let munkipkgExecutablePath = MunkipkgRunner.executablePathDefaultsKey
+        static let munkipkgExecutablePath = MunkipkgDefaults.executablePathKey
     }
 }

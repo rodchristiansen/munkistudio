@@ -10,11 +10,6 @@ public final class MunkipkgRunner: MunkipkgService {
     /// path is set in Settings.
     public static let defaultExecutablePath = "/usr/local/munki/munkipkg"
 
-    /// `UserDefaults` key the executable-path override is stored under.
-    /// `AppSettings` writes the same key — the runner can't import the
-    /// App module, so this constant is the shared contract.
-    public static let executablePathDefaultsKey = "MunkiStudio.settings.munkipkgExecutablePath"
-
     public init() {}
 
     /// Resolved from the `munkipkgExecutablePath` setting, falling back to
@@ -22,7 +17,7 @@ public final class MunkipkgRunner: MunkipkgService {
     /// effect without relaunching.
     private var executableURL: URL {
         let stored = UserDefaults.standard
-            .string(forKey: Self.executablePathDefaultsKey)?
+            .string(forKey: MunkipkgDefaults.executablePathKey)?
             .trimmingCharacters(in: .whitespaces)
         let path = (stored?.isEmpty == false) ? stored! : Self.defaultExecutablePath
         return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
@@ -218,9 +213,14 @@ public final class MunkipkgRunner: MunkipkgService {
             )
         }
         let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-        guard let asset = release.assets.first(where: { $0.name == "munkipkg" })
-                ?? release.assets.first else {
-            throw MunkipkgError("The latest munkipkg release has no downloadable asset.")
+        // Only ever install an asset literally named `munkipkg` — never
+        // fall back to whatever happens to be attached (a tarball, a
+        // dSYM, release notes) and run it as the binary.
+        guard let asset = release.assets.first(where: { $0.name == "munkipkg" }) else {
+            throw MunkipkgError(
+                "The latest munkipkg release has no asset named \"munkipkg\". "
+                + "Attach the built binary to the release."
+            )
         }
         let (downloaded, _) = try await URLSession.shared.download(from: asset.browserDownloadURL)
         let staged = FileManager.default.temporaryDirectory
