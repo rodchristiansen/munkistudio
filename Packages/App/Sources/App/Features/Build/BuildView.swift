@@ -45,40 +45,35 @@ struct BuildView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-        }
-        .task(id: settings.munkipkgProjectsPath) {
-            await reload()
-            startWatching()
-        }
-        .onDisappear {
-            folderWatcher?.cancel()
-            folderWatcher = nil
-        }
-        .alert("Rename Project", isPresented: renamePresented) {
-            TextField("Name", text: $renameText)
-            Button("Rename") { commitRename() }
-            Button("Cancel", role: .cancel) { renameTarget = nil }
-        }
+        content
+            .navigationSubtitle(subtitle)
+            .toolbar {
+                if loading {
+                    ToolbarItem(placement: .automatic) {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+            .task(id: settings.munkipkgProjectsPath) {
+                await reload()
+                startWatching()
+            }
+            .onDisappear {
+                folderWatcher?.cancel()
+                folderWatcher = nil
+            }
+            .alert("Rename Project", isPresented: renamePresented) {
+                TextField("Name", text: $renameText)
+                Button("Rename") { commitRename() }
+                Button("Cancel", role: .cancel) { renameTarget = nil }
+            }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Build").font(.headline)
-                Text(projects.isEmpty
-                     ? "munkipkg projects"
-                     : "\(projects.count) munkipkg project\(projects.count == 1 ? "" : "s")")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if loading { ProgressView().controlSize(.small) }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+    /// The project count, shown as the window's toolbar subtitle.
+    private var subtitle: String {
+        projects.isEmpty
+            ? "munkipkg projects"
+            : "\(projects.count) munkipkg project\(projects.count == 1 ? "" : "s")"
     }
 
     @ViewBuilder

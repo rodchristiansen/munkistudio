@@ -14,14 +14,11 @@ struct ImportView: View {
     @State private var isTargeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Import").font(.largeTitle.bold())
-            content
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onChange(of: store.pendingImportURLs) { consumePendingImports() }
-        .onAppear { consumePendingImports() }
+        content
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onChange(of: store.pendingImportURLs) { consumePendingImports() }
+            .onAppear { consumePendingImports() }
     }
 
     /// Pick up installers handed off from another tab (e.g. a `.pkg`
