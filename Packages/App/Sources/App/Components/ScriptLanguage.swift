@@ -5,7 +5,7 @@ import SwiftUI
 /// shebang first, then on simple content heuristics so a Python script
 /// with no shebang still gets the right keyword set.
 enum ScriptLanguage: String, CaseIterable, Sendable {
-    case bash, zsh, sh, python, ruby, perl, applescript, swift, plainText
+    case bash, zsh, sh, python, ruby, perl, applescript, swift, plainText, xml
 
     var displayName: String {
         switch self {
@@ -18,6 +18,17 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
         case .applescript: "AppleScript"
         case .swift: "Swift"
         case .plainText: "Plain text"
+        case .xml: "XML"
+        }
+    }
+
+    /// True for interpreted scripts that should carry a `#!` shebang.
+    /// Markup and compiled-language sources should not be flagged for a
+    /// missing shebang.
+    var expectsShebang: Bool {
+        switch self {
+        case .bash, .zsh, .sh, .python, .ruby, .perl: true
+        case .applescript, .swift, .plainText, .xml: false
         }
     }
 
@@ -33,6 +44,14 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
             if lower.contains("osascript") || lower.contains("applescript") { return .applescript }
             if lower.contains("swift") { return .swift }
             if lower.hasSuffix("/sh") || lower.hasSuffix(" sh") { return .sh }
+        }
+        // XML / property list — no shebang, opens with an XML prolog,
+        // doctype, or root element.
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("<?xml")
+            || trimmed.hasPrefix("<!DOCTYPE")
+            || trimmed.hasPrefix("<plist") {
+            return .xml
         }
         // Fall back to content heuristics. `import` + `def`/`class` =
         // python; `puts` / `end` = ruby; `tell application` = AppleScript.
@@ -83,7 +102,7 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
              "do", "try", "throws", "return", "switch", "case", "default",
              "break", "continue", "true", "false", "nil", "self", "Self",
              "async", "await", "actor", "where"]
-        case .plainText:
+        case .plainText, .xml:
             []
         }
     }
@@ -94,7 +113,7 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
         case .bash, .zsh, .sh, .python, .ruby, .perl: "#"
         case .swift: "//"
         case .applescript: "--"
-        case .plainText: nil
+        case .plainText, .xml: nil
         }
     }
 }

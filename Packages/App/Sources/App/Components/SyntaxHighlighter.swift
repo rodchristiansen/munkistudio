@@ -136,7 +136,7 @@ enum ScriptLinter {
         guard !source.isEmpty else { return [] }
         var warnings: [String] = []
         let firstLine = source.split(separator: "\n", omittingEmptySubsequences: false).first ?? ""
-        if !firstLine.hasPrefix("#!") && language != .applescript {
+        if !firstLine.hasPrefix("#!") && language.expectsShebang {
             warnings.append("Missing shebang on first line (e.g. #!/bin/bash, #!/usr/bin/env python3).")
         }
         if source.contains("\r") {
