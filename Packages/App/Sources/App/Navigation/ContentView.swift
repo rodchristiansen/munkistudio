@@ -177,6 +177,15 @@ private struct SidebarView: View {
                 .tag(section)
         }
         .navigationTitle("Repository")
+        // Clearing the projects path removes the Build row; if it was
+        // selected, fall back to the dashboard so the detail column
+        // doesn't keep rendering an orphaned section.
+        .onChange(of: settings.munkipkgProjectsPath) {
+            if selection == .build,
+               settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces).isEmpty {
+                selection = .dashboard
+            }
+        }
     }
 }
 

@@ -10,6 +10,11 @@ public final class MunkipkgRunner: MunkipkgService {
     /// path is set in Settings.
     public static let defaultExecutablePath = "/usr/local/munki/munkipkg"
 
+    /// `UserDefaults` key the executable-path override is stored under.
+    /// `AppSettings` writes the same key — the runner can't import the
+    /// App module, so this constant is the shared contract.
+    public static let executablePathDefaultsKey = "MunkiStudio.settings.munkipkgExecutablePath"
+
     public init() {}
 
     /// Resolved from the `munkipkgExecutablePath` setting, falling back to
@@ -17,7 +22,7 @@ public final class MunkipkgRunner: MunkipkgService {
     /// effect without relaunching.
     private var executableURL: URL {
         let stored = UserDefaults.standard
-            .string(forKey: "MunkiStudio.settings.munkipkgExecutablePath")?
+            .string(forKey: Self.executablePathDefaultsKey)?
             .trimmingCharacters(in: .whitespaces)
         let path = (stored?.isEmpty == false) ? stored! : Self.defaultExecutablePath
         return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
@@ -25,11 +30,15 @@ public final class MunkipkgRunner: MunkipkgService {
 
     public func projects(in folder: URL) async throws -> [MunkipkgProject] {
         let fileManager = FileManager.default
-        let entries = (try? fileManager.contentsOfDirectory(
+        // Let a missing or unreadable projects folder propagate so the
+        // UI can show "Couldn't read projects". A single malformed
+        // project, by contrast, is skipped — one bad build-info
+        // shouldn't blank the whole sidebar.
+        let entries = try fileManager.contentsOfDirectory(
             at: folder,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        )) ?? []
+        )
 
         var projects: [MunkipkgProject] = []
         for entry in entries {
@@ -127,11 +136,15 @@ public final class MunkipkgRunner: MunkipkgService {
     ) -> AsyncThrowingStream<MunkipkgEvent, any Error> {
         let executable = executableURL
         let projectDirectory = project.directoryURL
-        let productURL = project.buildDirectory.appending(path: project.buildInfo.name)
+        // munkipkg writes the package to `build/<name>.pkg` — the fork
+        // appends `.pkg` to `name` itself when it isn't already there.
+        let name = project.buildInfo.name
+        let packageFileName = name.hasSuffix(".pkg") ? name : name + ".pkg"
+        let productURL = project.buildDirectory.appending(path: packageFileName)
         let arguments = ["--build"] + options.arguments + [projectDirectory.path]
 
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     for try await event in ProcessRunner.stream(
                         executable,
@@ -156,6 +169,10 @@ public final class MunkipkgRunner: MunkipkgService {
                     continuation.finish(throwing: error)
                 }
             }
+            // Cancelling the consumer (e.g. navigating away mid-build)
+            // tears down the inner task, which drops the `ProcessRunner`
+            // stream and terminates the `munkipkg` child.
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 

@@ -205,7 +205,12 @@ struct BuildView: View {
         guard !newName.isEmpty, newName != project.name else { return }
         let destination = project.directoryURL.deletingLastPathComponent().appending(path: newName)
         guard !FileManager.default.fileExists(atPath: destination.path) else { return }
-        try? FileManager.default.moveItem(at: project.directoryURL, to: destination)
+        do {
+            try FileManager.default.moveItem(at: project.directoryURL, to: destination)
+        } catch {
+            loadError = "Couldn't rename \"\(project.name)\": \(error.localizedDescription)"
+            return
+        }
         Task {
             await reload()
             selectedProjectID = destination.path
@@ -220,7 +225,12 @@ struct BuildView: View {
             destination = parent.appending(path: "\(project.name) copy \(index)")
             index += 1
         }
-        try? FileManager.default.copyItem(at: project.directoryURL, to: destination)
+        do {
+            try FileManager.default.copyItem(at: project.directoryURL, to: destination)
+        } catch {
+            loadError = "Couldn't duplicate \"\(project.name)\": \(error.localizedDescription)"
+            return
+        }
         await reload()
         selectedProjectID = destination.path
     }
@@ -233,7 +243,12 @@ struct BuildView: View {
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        try? FileManager.default.removeItem(at: project.directoryURL)
+        do {
+            try FileManager.default.removeItem(at: project.directoryURL)
+        } catch {
+            loadError = "Couldn't delete \"\(project.name)\": \(error.localizedDescription)"
+            return
+        }
         if selectedProjectID == project.id { selectedProjectID = nil }
         await reload()
     }
@@ -533,7 +548,7 @@ private struct BuildProjectDetail: View {
 
     private var packageGroup: some View {
         group("Package") {
-            row("Output name") { textField($buildInfo.name, prompt: "Example.pkg") }
+            row("Output name") { textField($buildInfo.name, prompt: "Example") }
             row("Identifier") { textField($buildInfo.identifier, prompt: "com.example.pkg") }
             row("Version") { textField($buildInfo.version, prompt: "1.0") }
             row("Install location") { textField($buildInfo.installLocation, prompt: "/") }
@@ -825,11 +840,43 @@ private let payloadTextExtensions: Set<String> = [
     "js", "ts", "swift", "c", "h", "cpp", "cc", "m", "mm", "go", "rs",
     "md", "markdown", "txt", "text", "log", "applescript",
     "json", "yaml", "yml", "xml", "plist", "toml", "csv",
-    "conf", "cfg", "ini", "env", "gitignore", "css", "html", "htm",
+    "conf", "cfg", "ini", "css", "html", "htm",
+]
+
+/// Bare dotfile names that are editable text — these report an empty
+/// `pathExtension`, so the extension set above never matches them.
+private let payloadTextDotfiles: Set<String> = [
+    ".env", ".gitignore", ".gitattributes", ".bashrc", ".bash_profile",
+    ".zshrc", ".zprofile", ".profile", ".editorconfig",
 ]
 
 private func isPayloadTextFile(_ url: URL) -> Bool {
-    payloadTextExtensions.contains(url.pathExtension.lowercased())
+    let ext = url.pathExtension.lowercased()
+    if !ext.isEmpty { return payloadTextExtensions.contains(ext) }
+    return payloadTextDotfiles.contains(url.lastPathComponent.lowercased())
+}
+
+/// Recursively read a payload directory into `PayloadNode`s. Free and
+/// `nonisolated` so it can run on a detached task — the walk is pure
+/// file I/O and never touches view state.
+private func buildPayloadTree(at directory: URL) -> [PayloadNode] {
+    let fileManager = FileManager.default
+    let entries = (try? fileManager.contentsOfDirectory(
+        at: directory,
+        includingPropertiesForKeys: [.isDirectoryKey],
+        options: [.skipsHiddenFiles]
+    )) ?? []
+    return entries
+        .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+        .map { url in
+            var isDirectory: ObjCBool = false
+            fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            return PayloadNode(
+                url: url,
+                isDirectory: isDirectory.boolValue,
+                children: isDirectory.boolValue ? buildPayloadTree(at: url) : nil
+            )
+        }
 }
 
 /// File browser for the project's `payload/` — the literal tree that
@@ -850,6 +897,7 @@ private struct PayloadSection: View {
     @State private var editingURL: URL?
     @State private var editingText = ""
     @State private var editingOriginal = ""
+    @State private var editingPermissions: Int?
     @State private var watcher: RecursiveDirectoryWatcher?
 
     private var payloadURL: URL { project.directoryURL.appending(path: "payload") }
@@ -1001,14 +1049,26 @@ private struct PayloadSection: View {
               let data = try? Data(contentsOf: node.url) else { return }
         editingText = String(decoding: data, as: UTF8.self)
         editingOriginal = editingText
+        // Remember the file's mode — an atomic write replaces the inode,
+        // so the executable bit on a staged helper/script would be lost
+        // unless we restore it on save.
+        editingPermissions = (try? FileManager.default.attributesOfItem(atPath: node.url.path))
+            .flatMap { $0[.posixPermissions] as? NSNumber }?.intValue
         editingURL = node.url
     }
 
     private func commitEdit() {
         if let url = editingURL, editingText != editingOriginal {
             try? editingText.write(to: url, atomically: true, encoding: .utf8)
+            if let mode = editingPermissions {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: NSNumber(value: mode)],
+                    ofItemAtPath: url.path
+                )
+            }
         }
         editingURL = nil
+        editingPermissions = nil
     }
 
     /// Directory new items land in — the given folder (or the selection
@@ -1098,27 +1158,13 @@ private struct PayloadSection: View {
         if !fileManager.fileExists(atPath: payloadURL.path) {
             try? fileManager.createDirectory(at: payloadURL, withIntermediateDirectories: true)
         }
-        nodes = buildTree(at: payloadURL)
-    }
-
-    private func buildTree(at directory: URL) -> [PayloadNode] {
-        let fileManager = FileManager.default
-        let entries = (try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-        return entries
-            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
-            .map { url in
-                var isDirectory: ObjCBool = false
-                fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory)
-                return PayloadNode(
-                    url: url,
-                    isDirectory: isDirectory.boolValue,
-                    children: isDirectory.boolValue ? buildTree(at: url) : nil
-                )
-            }
+        // Walk the payload off the main actor — an app-bundle payload
+        // can hold thousands of files, and reloadTree fires on every
+        // FSEvent burst. Publishing `nodes` hops back to the main actor.
+        let root = payloadURL
+        Task {
+            nodes = await Task.detached { buildPayloadTree(at: root) }.value
+        }
     }
 
     private func findNode(_ id: String, in nodes: [PayloadNode]) -> PayloadNode? {
@@ -1181,6 +1227,10 @@ private struct PayloadTreeRow: View {
             in: .rect(cornerRadius: 4)
         )
         .contentShape(.rect)
+        // Single-tap selects; double-tap opens. The count:1 handler is
+        // attached first so SwiftUI delivers selection immediately
+        // instead of stalling for the double-click interval.
+        .onTapGesture { selection = node.id }
         .onTapGesture(count: 2) {
             if node.isDirectory {
                 expanded.toggle()
@@ -1190,7 +1240,6 @@ private struct PayloadTreeRow: View {
                 NSWorkspace.shared.open(node.url)
             }
         }
-        .onTapGesture { selection = node.id }
         .contextMenu {
             if node.isDirectory {
                 Button("New Folder") { perform(.newFolder, node) }
