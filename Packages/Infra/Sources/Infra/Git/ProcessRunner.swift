@@ -111,8 +111,14 @@ enum ProcessRunner {
                         continuation.yield(.line(line.hasSuffix("\r") ? String(line.dropLast()) : line))
                     }
                 } catch {
-                    // A PTY primary returns EIO once the child closes
-                    // its replica — treat any read error as end-of-output.
+                    // A PTY primary returns EIO once the child closes its
+                    // replica — that's expected end-of-output. A plain
+                    // pipe only throws on a real failure, so propagate it
+                    // instead of masking it as a clean finish.
+                    if !usePTY {
+                        continuation.finish(throwing: error)
+                        return
+                    }
                 }
                 process.waitUntilExit()
                 continuation.yield(.terminated(process.terminationStatus))
@@ -127,6 +133,13 @@ enum ProcessRunner {
 
     /// Allocate a pseudo-terminal: the parent's read handle (primary) and
     /// the child's write handle (replica).
+    ///
+    /// The replica is handed over with default termios and window size —
+    /// enough to make children line-buffer (the only reason we use a
+    /// PTY), but not a full Terminal.app emulation. A child that probes
+    /// the window size (`TIOCGWINSZ`) or expects raw mode won't get
+    /// sensible answers; `tcsetattr` / `TIOCSWINSZ` would be needed for
+    /// that. Fine for `munkipkg`; revisit if other callers opt into PTY.
     private static func makePTY() -> (primary: FileHandle, replica: FileHandle)? {
         let primaryFD = posix_openpt(O_RDWR | O_NOCTTY)
         guard primaryFD >= 0 else { return nil }

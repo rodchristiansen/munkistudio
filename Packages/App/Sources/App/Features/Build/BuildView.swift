@@ -213,8 +213,18 @@ struct BuildView: View {
         }
         Task {
             await reload()
-            selectedProjectID = destination.path
+            selectedProjectID = projectID(matching: destination)
         }
+    }
+
+    /// Resolve a freshly created/renamed project to its `id` from the
+    /// reloaded list — `URL.path` can differ from a project's stored id
+    /// (percent-escapes, symlinks, trailing slash), so match on the
+    /// standardized directory URL rather than assuming the paths agree.
+    private func projectID(matching directory: URL) -> String? {
+        projects.first {
+            $0.directoryURL.standardizedFileURL == directory.standardizedFileURL
+        }?.id
     }
 
     private func duplicateProject(_ project: MunkipkgProject) async {
@@ -232,7 +242,7 @@ struct BuildView: View {
             return
         }
         await reload()
-        selectedProjectID = destination.path
+        selectedProjectID = projectID(matching: destination)
     }
 
     private func deleteProject(_ project: MunkipkgProject) async {
@@ -1047,8 +1057,15 @@ private struct PayloadSection: View {
     private func beginEditing(_ node: PayloadNode) {
         guard !node.isDirectory,
               let data = try? Data(contentsOf: node.url) else { return }
-        editingText = String(decoding: data, as: UTF8.self)
-        editingOriginal = editingText
+        // Refuse to edit non-UTF-8 content as text — a lossy decode
+        // would write U+FFFD replacements back over a binary plist,
+        // a Latin-1 config, etc. Hand those to the system editor.
+        guard let text = String(data: data, encoding: .utf8) else {
+            NSWorkspace.shared.open(node.url)
+            return
+        }
+        editingText = text
+        editingOriginal = text
         // Remember the file's mode — an atomic write replaces the inode,
         // so the executable bit on a staged helper/script would be lost
         // unless we restore it on save.
@@ -1279,7 +1296,7 @@ private struct PayloadTreeRow: View {
 /// Watches a single directory for direct-child changes — entries added,
 /// removed or renamed. Not recursive: a directory vnode's `.write`
 /// event fires only for changes to that directory's own listing.
-final class DirectoryWatcher {
+private final class DirectoryWatcher {
     private var source: (any DispatchSourceFileSystemObject)?
 
     init?(url: URL, onChange: @escaping () -> Void) {
@@ -1306,7 +1323,7 @@ final class DirectoryWatcher {
 
 /// Watches a directory tree recursively via FSEvents — used for a
 /// package payload, where files can land at any depth.
-final class RecursiveDirectoryWatcher {
+private final class RecursiveDirectoryWatcher {
     private var stream: FSEventStreamRef?
     private let onChange: () -> Void
 
