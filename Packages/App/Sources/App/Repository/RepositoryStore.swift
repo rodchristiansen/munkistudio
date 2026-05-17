@@ -60,6 +60,12 @@ final class RepositoryStore {
         didSet { scheduleNavigationRecord() }
     }
 
+    /// Dependencies section: Packages vs Manifests mode, and the manifest
+    /// focused in Manifests mode. Stored here — like the cluster id and
+    /// the list view modes — so they survive navigating away and back.
+    var dependencyMode: DependencyMode = .packages
+    var dependenciesManifestName: String?
+
     /// Packages-list view mode. Persisted here — not view-local `@State`
     /// — so the grouping tab and sort survive navigating away and back.
     var packagesGrouping: PackageGrouping = .categories

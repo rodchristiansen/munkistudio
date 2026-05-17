@@ -17,7 +17,7 @@ public struct DependencyGraph: Sendable {
     }
 
     public struct Edge: Sendable, Hashable {
-        public enum Kind: Sendable, Hashable { case requires, updateFor }
+        public enum Kind: Sendable, Hashable { case requires, updateFor, manifestInclusion }
 
         public var from: String
         public var to: String
@@ -67,6 +67,38 @@ public enum DependencyGraphBuilder {
             }
             for target in pkg.updateFor ?? [] {
                 addEdge(from: pkg.name, to: target, kind: .updateFor)
+            }
+        }
+
+        let nodes = nodeNames.sorted().map {
+            DependencyGraph.Node(name: $0, exists: existing.contains($0))
+        }
+        return DependencyGraph(nodes: nodes, edges: edges)
+    }
+}
+
+public enum ManifestGraphBuilder {
+    /// Build an inclusion graph from manifests. An edge runs from a
+    /// manifest to each manifest it pulls in via `included_manifests`.
+    /// Unlike the package graph, every manifest is kept as a node even
+    /// with no inclusion relationship — a standalone client manifest is
+    /// still a meaningful entry in the tree.
+    public static func build(manifests: [Manifest]) -> DependencyGraph {
+        let existing = Set(manifests.map(\.manifestName))
+        var edges: [DependencyGraph.Edge] = []
+        var seen = Set<String>()
+        var nodeNames = Set<String>()
+
+        for manifest in manifests {
+            let name = manifest.manifestName
+            guard !name.isEmpty else { continue }
+            nodeNames.insert(name)
+            for included in manifest.includedManifests ?? [] {
+                guard name != included, !included.isEmpty else { continue }
+                let key = "\(name)\u{1f}\(included)"
+                guard seen.insert(key).inserted else { continue }
+                edges.append(.init(from: name, to: included, kind: .manifestInclusion))
+                nodeNames.insert(included)
             }
         }
 

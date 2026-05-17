@@ -1,24 +1,40 @@
 import SwiftUI
 import Core
 
-/// Full-width section drawing the repo's `requires` / `update_for`
-/// relationships. A whole-repo graph is an unreadable hairball, so the
-/// graph is split into connected clusters — pick one from the list and
-/// see just that neighbourhood. Click a node to jump to its package.
+/// Which relationship graph the Dependencies section is showing.
+enum DependencyMode: String, Hashable, CaseIterable, Sendable {
+    case packages, manifests
+}
+
+/// Full-width section drawing the repo's relationship graphs. Two modes:
+/// Packages shows `requires` / `update_for` between pkginfos, split into
+/// connected clusters; Manifests shows the `included_manifests` tree,
+/// with a hierarchy outline on the left and the subtree downstream of
+/// the selected manifest mapped on the right.
 struct DependenciesView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var zoom: CGFloat = 1
     @State private var filter = ""
     @FocusState private var filterFocused: Bool
 
-    /// Graph + clusters derived from the snapshot, cached so zoom /
-    /// filter / selection changes don't rebuild the whole-repo graph on
-    /// every body pass. `rebuildGraph()` refreshes them when the pkginfo
-    /// set actually changes.
+    // Packages mode — graph + clusters + linter findings, cached so
+    // zoom / filter / selection changes don't rebuild on every body pass.
     @State private var graph = DependencyGraph(nodes: [], edges: [])
     @State private var clusters: [DependencyCluster] = []
     @State private var findings: [DependencyFinding] = []
     @State private var showingIssues = false
+
+    // Manifests mode — the inclusion graph and its hierarchy outline.
+    @State private var manifestGraph = DependencyGraph(nodes: [], edges: [])
+    @State private var manifestOutline: [ManifestOutlineNode] = []
+
+    private var mode: DependencyMode { store.dependencyMode }
+
+    // MARK: - Bindings
+
+    private var modeBinding: Binding<DependencyMode> {
+        Binding(get: { store.dependencyMode }, set: { store.dependencyMode = $0 })
+    }
 
     /// Cluster selection lives on the store so it survives navigating
     /// away and back (deep-link state, not view-local).
@@ -39,45 +55,108 @@ struct DependenciesView: View {
         clusters.first { $0.id == store.dependenciesClusterID } ?? filteredClusters.first
     }
 
+    /// The manifest hierarchy outline, pruned to the filter query.
+    private var filteredOutline: [ManifestOutlineNode] {
+        let query = filter.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return manifestOutline }
+        return manifestOutline.compactMap { prune($0, query: query) }
+    }
+
+    private func prune(_ node: ManifestOutlineNode, query: String) -> ManifestOutlineNode? {
+        let matchedChildren = node.children.compactMap { prune($0, query: query) }
+        let selfMatches = node.name.localizedCaseInsensitiveContains(query)
+        guard selfMatches || !matchedChildren.isEmpty else { return nil }
+        return ManifestOutlineNode(
+            name: node.name,
+            exists: node.exists,
+            children: selfMatches ? node.children : matchedChildren,
+            path: node.path
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            if clusters.isEmpty {
-                ContentUnavailableView(
-                    "No Relationships",
-                    systemImage: "point.3.connected.trianglepath.dotted",
-                    description: Text("No package in this repo declares a `requires` or `update_for` relationship.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                HSplitView {
-                    clusterList
-                        .frame(minWidth: 200, idealWidth: 250, maxWidth: 380)
-                    graphPane
-                        .frame(minWidth: 360, maxWidth: .infinity)
-                }
-            }
+            content
         }
-        .navigationSubtitle(graphSubtitle)
+        .navigationSubtitle(subtitle)
         .onAppear { rebuildGraph() }
         .onChange(of: store.snapshot.pkginfos) { rebuildGraph() }
+        .onChange(of: store.snapshot.manifests) { rebuildGraph() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch mode {
+        case .packages: packagesContent
+        case .manifests: manifestsContent
+        }
+    }
+
+    @ViewBuilder
+    private var packagesContent: some View {
+        if clusters.isEmpty {
+            ContentUnavailableView(
+                "No Relationships",
+                systemImage: "point.3.connected.trianglepath.dotted",
+                description: Text("No package in this repo declares a `requires` or `update_for` relationship.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HSplitView {
+                clusterList
+                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 380)
+                graphPane
+                    .frame(minWidth: 360, maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var manifestsContent: some View {
+        if manifestOutline.isEmpty {
+            ContentUnavailableView(
+                "No Manifests",
+                systemImage: "list.bullet.rectangle",
+                description: Text("This repo has no manifests to map.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HSplitView {
+                manifestList
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 400)
+                manifestGraphPane
+                    .frame(minWidth: 360, maxWidth: .infinity)
+            }
+        }
     }
 
     /// Graph size, shown as the window's toolbar subtitle.
-    private var graphSubtitle: String {
-        let packages = graph.nodes.count
-        let clusterCount = clusters.count
-        return "\(packages) connected package\(packages == 1 ? "" : "s") "
-            + "in \(clusterCount) cluster\(clusterCount == 1 ? "" : "s")"
+    private var subtitle: String {
+        switch mode {
+        case .packages:
+            let packages = graph.nodes.count
+            return "\(packages) connected package\(packages == 1 ? "" : "s") "
+                + "in \(clusters.count) cluster\(clusters.count == 1 ? "" : "s")"
+        case .manifests:
+            let count = manifestGraph.nodes.count
+            let links = manifestGraph.edges.count
+            return "\(count) manifest\(count == 1 ? "" : "s") · "
+                + "\(links) inclusion link\(links == 1 ? "" : "s")"
+        }
     }
 
-    /// Rebuild the cached graph + clusters from the current snapshot.
+    /// Rebuild both cached graphs from the current snapshot.
     private func rebuildGraph() {
         graph = DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
         clusters = DependencyClusterizer.clusters(from: graph)
         findings = DependencyLinter.analyze(graph)
         selectDefaultClusterIfNeeded()
+
+        manifestGraph = ManifestGraphBuilder.build(manifests: store.snapshot.manifests.map(\.manifest))
+        manifestOutline = ManifestOutline.build(manifestGraph)
+        selectDefaultManifestIfNeeded()
     }
 
     /// Seed or correct the cluster selection. `selectedCluster` masks a
@@ -90,26 +169,54 @@ struct DependenciesView: View {
         if !isValid { store.dependenciesClusterID = clusters.first?.id }
     }
 
+    /// Seed or correct the manifest selection the same way.
+    private func selectDefaultManifestIfNeeded() {
+        let name = store.dependenciesManifestName
+        let isValid = name != nil && manifestGraph.nodes.contains { $0.name == name }
+        if !isValid { store.dependenciesManifestName = manifestOutline.first?.name }
+    }
+
     // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 14) {
-            issuesButton
-            Spacer()
-            legendItem(color: .blue, dashed: false, label: "requires")
-            legendItem(color: .orange, dashed: true, label: "update_for")
-            Divider().frame(height: 18)
-            HStack(spacing: 4) {
-                Button { setZoom(zoom - 0.2) } label: { Image(systemName: "minus.magnifyingglass") }
-                    .disabled(zoom <= 0.4)
-                Button { zoom = 1 } label: { Text("\(Int(zoom * 100))%").monospacedDigit().frame(width: 42) }
-                    .buttonStyle(.plain)
-                Button { setZoom(zoom + 0.2) } label: { Image(systemName: "plus.magnifyingglass") }
-                    .disabled(zoom >= 2)
+            Picker("", selection: modeBinding) {
+                Text("Packages").tag(DependencyMode.packages)
+                Text("Manifests").tag(DependencyMode.manifests)
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            if mode == .packages { issuesButton }
+            Spacer()
+            legend
+            Divider().frame(height: 18)
+            zoomControls
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var legend: some View {
+        switch mode {
+        case .packages:
+            legendItem(color: .blue, dashed: false, label: "requires")
+            legendItem(color: .orange, dashed: true, label: "update_for")
+        case .manifests:
+            legendItem(color: .purple, dashed: false, label: "includes")
+        }
+    }
+
+    private var zoomControls: some View {
+        HStack(spacing: 4) {
+            Button { setZoom(zoom - 0.2) } label: { Image(systemName: "minus.magnifyingglass") }
+                .disabled(zoom <= 0.4)
+            Button { zoom = 1 } label: { Text("\(Int(zoom * 100))%").monospacedDigit().frame(width: 42) }
+                .buttonStyle(.plain)
+            Button { setZoom(zoom + 0.2) } label: { Image(systemName: "plus.magnifyingglass") }
+                .disabled(zoom >= 2)
+        }
     }
 
     private func legendItem(color: Color, dashed: Bool, label: String) -> some View {
@@ -125,7 +232,7 @@ struct DependenciesView: View {
         zoom = min(2, max(0.4, (value * 10).rounded() / 10))
     }
 
-    // MARK: - Issues
+    // MARK: - Issues (Packages mode)
 
     @ViewBuilder
     private var issuesButton: some View {
@@ -208,7 +315,7 @@ struct DependenciesView: View {
         return result
     }
 
-    // MARK: - Cluster list
+    // MARK: - Cluster list (Packages mode)
 
     private var clusterList: some View {
         VStack(spacing: 0) {
@@ -242,7 +349,33 @@ struct DependenciesView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // MARK: - Graph pane
+    // MARK: - Manifest hierarchy outline (Manifests mode)
+
+    private var manifestList: some View {
+        VStack(spacing: 0) {
+            FilterField(text: $filter, prompt: "Filter manifests", focused: $filterFocused)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(filteredOutline) { node in
+                        ManifestOutlineRow(
+                            node: node,
+                            depth: 0,
+                            selectedName: store.dependenciesManifestName,
+                            onSelect: { store.dependenciesManifestName = $0 }
+                        )
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+            }
+            .scrollContentBackground(.hidden)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Graph panes
 
     @ViewBuilder
     private var graphPane: some View {
@@ -250,7 +383,7 @@ struct DependenciesView: View {
             let layout = DependencyLayout.compute(cluster.graph)
             GeometryReader { geo in
                 ScrollView([.horizontal, .vertical]) {
-                    graphContent(layout)
+                    graphContent(layout, problems: problemEdges)
                         .frame(minWidth: geo.size.width, minHeight: geo.size.height)
                 }
             }
@@ -259,9 +392,46 @@ struct DependenciesView: View {
         }
     }
 
-    private func graphContent(_ layout: DependencyLayout) -> some View {
-        let problems = problemEdges
-        return ZStack(alignment: .topLeading) {
+    @ViewBuilder
+    private var manifestGraphPane: some View {
+        if let name = store.dependenciesManifestName,
+           manifestGraph.nodes.contains(where: { $0.name == name }) {
+            let subgraph = downstreamSubgraph(from: name, in: manifestGraph)
+            let layout = DependencyLayout.compute(subgraph)
+            GeometryReader { geo in
+                ScrollView([.horizontal, .vertical]) {
+                    graphContent(layout, problems: [])
+                        .frame(minWidth: geo.size.width, minHeight: geo.size.height)
+                }
+            }
+        } else {
+            ContentUnavailableView("Select a Manifest", systemImage: "sidebar.left")
+        }
+    }
+
+    /// The subgraph reachable downstream of `name` — the manifest plus
+    /// everything it pulls in, transitively. The visited set guards the
+    /// walk against inclusion cycles.
+    private func downstreamSubgraph(from name: String, in graph: DependencyGraph) -> DependencyGraph {
+        let targets = Dictionary(grouping: graph.edges, by: \.from).mapValues { $0.map(\.to) }
+        var reachable: Set<String> = [name]
+        var queue = [name]
+        while let current = queue.popLast() {
+            for target in targets[current] ?? [] where reachable.insert(target).inserted {
+                queue.append(target)
+            }
+        }
+        return DependencyGraph(
+            nodes: graph.nodes.filter { reachable.contains($0.name) },
+            edges: graph.edges.filter { reachable.contains($0.from) && reachable.contains($0.to) }
+        )
+    }
+
+    private func graphContent(
+        _ layout: DependencyLayout,
+        problems: Set<DependencyGraph.Edge>
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
             Canvas { context, _ in
                 for edge in layout.edges {
                     guard let a = layout.point(for: edge.from),
@@ -284,13 +454,16 @@ struct DependenciesView: View {
 
     private func nodeView(_ node: DependencyGraph.Node) -> some View {
         let tint: Color = node.exists ? .accentColor : .secondary
+        let icon: String = node.exists
+            ? (mode == .manifests ? "list.bullet.rectangle.fill" : "shippingbox.fill")
+            : "questionmark.diamond"
         // A `Button` (not a tap gesture) so the node is keyboard-
         // activatable and exposed to assistive tech as a control.
         return Button {
             navigate(to: node)
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: node.exists ? "shippingbox.fill" : "questionmark.diamond")
+                Image(systemName: icon)
                     .imageScale(.small)
                     .foregroundStyle(tint)
                 Text(node.name)
@@ -309,7 +482,14 @@ struct DependenciesView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .help(node.exists ? "Open \(node.name) in Packages" : "\(node.name) — referenced but not present in this repo")
+        .help(nodeHelp(node))
+    }
+
+    private func nodeHelp(_ node: DependencyGraph.Node) -> String {
+        let section = mode == .manifests ? "Manifests" : "Packages"
+        return node.exists
+            ? "Open \(node.name) in \(section)"
+            : "\(node.name) — referenced but not present in this repo"
     }
 
     private func drawEdge(
@@ -319,8 +499,14 @@ struct DependenciesView: View {
         kind: DependencyGraph.Edge.Kind,
         isProblem: Bool
     ) {
-        let color: Color = isProblem ? .red : (kind == .requires ? .blue : .orange)
-        let dash: [CGFloat] = kind == .requires ? [] : [5, 4]
+        let baseColor: Color
+        switch kind {
+        case .requires: baseColor = .blue
+        case .updateFor: baseColor = .orange
+        case .manifestInclusion: baseColor = .purple
+        }
+        let color: Color = isProblem ? .red : baseColor
+        let dash: [CGFloat] = kind == .updateFor ? [5, 4] : []
         let opacity: Double = isProblem ? 0.95 : 0.7
         let lineWidth: CGFloat = isProblem ? 2.5 : 1.5
 
@@ -349,11 +535,18 @@ struct DependenciesView: View {
     }
 
     private func navigate(to node: DependencyGraph.Node) {
-        guard let record = store.snapshot.pkginfos.first(where: { $0.pkginfo.name == node.name }) else { return }
-        store.selectedSection = .packages
-        store.selectedItemID = AnyHashable(record.id)
-        let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces)
-        store.expandedCategories.insert(category?.isEmpty == false ? category! : "Uncategorized")
+        switch mode {
+        case .packages:
+            guard let record = store.snapshot.pkginfos.first(where: { $0.pkginfo.name == node.name }) else { return }
+            store.selectedSection = .packages
+            store.selectedItemID = AnyHashable(record.id)
+            let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces)
+            store.expandedCategories.insert(category?.isEmpty == false ? category! : "Uncategorized")
+        case .manifests:
+            guard let record = store.snapshot.manifests.first(where: { $0.manifest.manifestName == node.name }) else { return }
+            store.selectedSection = .manifests
+            store.selectedItemID = AnyHashable(record.id)
+        }
     }
 }
 
@@ -364,6 +557,126 @@ private struct Line: Shape {
         p.move(to: CGPoint(x: rect.minX, y: rect.midY))
         p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
         return p
+    }
+}
+
+// MARK: - Manifest hierarchy outline
+
+/// One entry in the manifest inclusion outline. A manifest pulled in by
+/// more than one parent appears once under each — `path` (the ancestor
+/// chain) keeps each occurrence uniquely identifiable.
+struct ManifestOutlineNode: Identifiable {
+    let name: String
+    let exists: Bool
+    let children: [ManifestOutlineNode]
+    let path: String
+
+    var id: String { path }
+}
+
+enum ManifestOutline {
+    /// Build the inclusion outline. Roots are manifests no other manifest
+    /// includes; each expands into its `included_manifests`, recursively.
+    /// A pure inclusion cycle has no root, so any manifest left uncovered
+    /// is seeded as its own root rather than vanishing from the list.
+    static func build(_ graph: DependencyGraph) -> [ManifestOutlineNode] {
+        let childrenOf = Dictionary(grouping: graph.edges, by: \.from)
+            .mapValues { $0.map(\.to).sorted() }
+        let included = Set(graph.edges.map(\.to))
+        let existsByName = Dictionary(graph.nodes.map { ($0.name, $0.exists) },
+                                      uniquingKeysWith: { first, _ in first })
+
+        func makeNode(_ name: String, ancestors: Set<String>, parentPath: String) -> ManifestOutlineNode {
+            let path = parentPath.isEmpty ? name : parentPath + "\u{1f}" + name
+            var children: [ManifestOutlineNode] = []
+            // Stop at a node already on the path — an inclusion cycle.
+            if !ancestors.contains(name) {
+                let next = ancestors.union([name])
+                for child in childrenOf[name] ?? [] {
+                    children.append(makeNode(child, ancestors: next, parentPath: path))
+                }
+            }
+            return ManifestOutlineNode(
+                name: name,
+                exists: existsByName[name] ?? false,
+                children: children,
+                path: path
+            )
+        }
+
+        let roots = graph.nodes.map(\.name).filter { !included.contains($0) }.sorted()
+        var result = roots.map { makeNode($0, ancestors: [], parentPath: "") }
+
+        var covered = Set<String>()
+        func collect(_ node: ManifestOutlineNode) {
+            covered.insert(node.name)
+            node.children.forEach(collect)
+        }
+        result.forEach(collect)
+        for orphan in graph.nodes.map(\.name).sorted() where !covered.contains(orphan) {
+            let node = makeNode(orphan, ancestors: [], parentPath: "")
+            result.append(node)
+            collect(node)
+        }
+        return result.sorted { $0.name < $1.name }
+    }
+}
+
+/// One row of the manifest outline, drawing its included children
+/// recursively. Selection is by manifest name, so picking any occurrence
+/// of a multi-parented manifest focuses the same subtree.
+private struct ManifestOutlineRow: View {
+    let node: ManifestOutlineNode
+    let depth: Int
+    let selectedName: String?
+    let onSelect: (String) -> Void
+
+    @State private var expanded = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            rowContent
+            if expanded {
+                ForEach(node.children) { child in
+                    ManifestOutlineRow(node: child, depth: depth + 1,
+                                       selectedName: selectedName, onSelect: onSelect)
+                }
+            }
+        }
+    }
+
+    private var rowContent: some View {
+        HStack(spacing: 5) {
+            if node.children.isEmpty {
+                Color.clear.frame(width: 12)
+            } else {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+                    .contentShape(.rect)
+                    .onTapGesture { expanded.toggle() }
+            }
+            Image(systemName: node.exists ? "list.bullet.rectangle" : "questionmark.diamond")
+                .imageScale(.small)
+                .foregroundStyle(node.exists ? Color.accentColor : Color.secondary)
+                .frame(width: 16)
+            Text(node.name)
+                .font(.callout)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+        .padding(.leading, CGFloat(depth) * 14 + 4)
+        .padding(.trailing, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            selectedName == node.name ? Color.accentColor.opacity(0.18) : Color.clear,
+            in: .rect(cornerRadius: 4)
+        )
+        .contentShape(.rect)
+        .onTapGesture { onSelect(node.name) }
     }
 }
 
