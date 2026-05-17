@@ -6,6 +6,7 @@ struct CatalogsListView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var search: String = ""
     @State private var makecatalogsPresented: Bool = false
+    @State private var lastBuilt: Date?
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -46,7 +47,14 @@ struct CatalogsListView: View {
                 }
             }
         }
-        .navigationTitle("Catalogs (\(store.snapshot.catalogs.count))")
+        .navigationTitle("Catalogs")
+        .navigationSubtitle(catalogsSubtitle)
+        // Keyed on the repo root so switching repositories re-reads the
+        // timestamp instead of showing the previous repo's.
+        .task(id: store.repository?.rootURL) { refreshLastBuilt() }
+        .onChange(of: makecatalogsPresented) { _, presented in
+            if !presented { refreshLastBuilt() }
+        }
         .sheet(isPresented: $makecatalogsPresented) {
             MakecatalogsSheet()
         }
@@ -56,6 +64,40 @@ struct CatalogsListView: View {
         guard !search.isEmpty else { return store.snapshot.catalogs }
         let query = search.lowercased()
         return store.snapshot.catalogs.filter { $0.name.lowercased().contains(query) }
+    }
+
+    /// When `makecatalogs` last rebuilt the catalog files, shown as the
+    /// column's title-bar subtitle.
+    private var catalogsSubtitle: String {
+        guard let lastBuilt else { return "Not yet built" }
+        let relative = Self.relativeFormatter.localizedString(for: lastBuilt, relativeTo: .now)
+        return "Last updated \(relative)"
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
+    /// Newest modification time among the on-disk catalog files —
+    /// `makecatalogs` deletes and rewrites them all, so the freshest
+    /// file dates its last run.
+    private func refreshLastBuilt() {
+        guard let repo = store.repository else { lastBuilt = nil; return }
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: repo.catalogsURL,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        lastBuilt = entries.compactMap { url -> Date? in
+            // Only catalog files date the run — skip any subdirectory
+            // or stray non-regular entry under catalogs/.
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else { return nil }
+            return values.contentModificationDate
+        }.max()
     }
 }
 

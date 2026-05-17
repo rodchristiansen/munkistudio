@@ -14,14 +14,11 @@ struct ImportView: View {
     @State private var isTargeted = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Import").font(.largeTitle.bold())
-            content
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onChange(of: store.pendingImportURLs) { consumePendingImports() }
-        .onAppear { consumePendingImports() }
+        content
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onChange(of: store.pendingImportURLs) { consumePendingImports() }
+            .onAppear { consumePendingImports() }
     }
 
     /// Pick up installers handed off from another tab (e.g. a `.pkg`
@@ -83,6 +80,8 @@ struct ImportView: View {
                 Button("Add files…") { pickFiles() }
                 Button("Clear queue") { importStore.clearQueue() }
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -108,6 +107,7 @@ struct ImportView: View {
                     Task { await processQueue() }
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(importStore.mode == .running)
             }
         }

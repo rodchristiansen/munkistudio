@@ -41,7 +41,7 @@ struct DependenciesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header(clusterCount: clusters.count, packageCount: graph.nodes.count)
+            header
             Divider()
             if clusters.isEmpty {
                 ContentUnavailableView(
@@ -59,8 +59,17 @@ struct DependenciesView: View {
                 }
             }
         }
+        .navigationSubtitle(graphSubtitle)
         .onAppear { rebuildGraph() }
         .onChange(of: store.snapshot.pkginfos) { rebuildGraph() }
+    }
+
+    /// Graph size, shown as the window's toolbar subtitle.
+    private var graphSubtitle: String {
+        let packages = graph.nodes.count
+        let clusterCount = clusters.count
+        return "\(packages) connected package\(packages == 1 ? "" : "s") "
+            + "in \(clusterCount) cluster\(clusterCount == 1 ? "" : "s")"
     }
 
     /// Rebuild the cached graph + clusters from the current snapshot.
@@ -83,13 +92,8 @@ struct DependenciesView: View {
 
     // MARK: - Header
 
-    private func header(clusterCount: Int, packageCount: Int) -> some View {
+    private var header: some View {
         HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Dependencies").font(.headline)
-                Text("\(packageCount) connected package\(packageCount == 1 ? "" : "s") in \(clusterCount) cluster\(clusterCount == 1 ? "" : "s")")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             issuesButton
             Spacer()
             legendItem(color: .blue, dashed: false, label: "requires")

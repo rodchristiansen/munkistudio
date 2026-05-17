@@ -53,9 +53,11 @@ struct ImportWizardView: View {
                 .layoutPriority(-1)
 
             Button("Cancel", role: .cancel) { importStore.resetToIdle() }
+                .buttonStyle(.bordered)
             // Back is always present (disabled on Step 1) so Cancel /
             // Back / advance never shift position between steps.
             Button("Back") { goBack() }
+                .buttonStyle(.bordered)
                 .disabled(importStore.step == .review)
             Button(importStore.step.advanceLabel) {
                 Task { await advance() }
@@ -70,7 +72,9 @@ struct ImportWizardView: View {
 
             Spacer()
             Button("Pick a different file…") { importStore.resetToIdle() }
+                .buttonStyle(.bordered)
         }
+        .controlSize(.large)
     }
 
     private var canAdvance: Bool {
