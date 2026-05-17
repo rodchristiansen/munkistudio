@@ -20,6 +20,17 @@ struct ImportView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: store.pendingImportURLs) { consumePendingImports() }
+        .onAppear { consumePendingImports() }
+    }
+
+    /// Pick up installers handed off from another tab (e.g. a `.pkg`
+    /// the Build tab just produced) and route them into the wizard.
+    private func consumePendingImports() {
+        guard !store.pendingImportURLs.isEmpty else { return }
+        let urls = store.pendingImportURLs
+        store.pendingImportURLs = []
+        importStore.handle(droppedURLs: urls)
     }
 
     @ViewBuilder

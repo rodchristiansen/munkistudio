@@ -157,9 +157,19 @@ struct RepositoryWorkspace: View {
 
 private struct SidebarView: View {
     @Binding var selection: SidebarSection
+    @Environment(AppSettings.self) private var settings
+
+    /// The Build section only appears once a munkipkg projects folder is
+    /// configured — there's nothing to show without one.
+    private var sections: [SidebarSection] {
+        SidebarSection.allCases.filter { section in
+            section != .build
+                || !settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+    }
 
     var body: some View {
-        List(SidebarSection.allCases, selection: Binding(
+        List(sections, selection: Binding(
             get: { Optional(selection) },
             set: { if let value = $0 { selection = value } }
         )) { section in
@@ -181,6 +191,7 @@ private struct ContentColumn: View {
         case .manifests: ManifestsListView()
         case .catalogs: CatalogsListView()
         case .dependencies: EmptyView()
+        case .build: EmptyView()
         case .importer: EmptyView()
         case .git: GitView()
         }
@@ -198,6 +209,7 @@ private struct DetailColumn: View {
         case .manifests: ManifestDetailView()
         case .catalogs: CatalogDetailView()
         case .dependencies: EmptyView()
+        case .build: EmptyView()
         case .importer: EmptyView()
         case .git: GitDetailView()
         }
@@ -214,6 +226,7 @@ private struct FullWidthColumn: View {
             case .git: GitView()
             case .importer: ImportView()
             case .dependencies: DependenciesView()
+            case .build: BuildView()
             default: EmptyView()
             }
         }

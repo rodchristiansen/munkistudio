@@ -74,6 +74,11 @@ final class RepositoryStore {
     /// back restores the panel and selection instead of resetting.
     let gitPaneState = GitPaneState()
 
+    /// Installer URLs handed off to the Import wizard — e.g. a `.pkg`
+    /// the Build tab just produced. The Import view consumes and clears
+    /// these when it appears.
+    var pendingImportURLs: [URL] = []
+
     var loadState: LoadState = .idle
 
     /// Free-text query backing the global search pane.

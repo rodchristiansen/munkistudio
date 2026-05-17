@@ -17,6 +17,17 @@ final class AppSettings {
         didSet { defaults.set(gitHooksPathOverride, forKey: Key.gitHooksPathOverride) }
     }
 
+    /// Folder of munkipkg package-source projects the Build tab scans.
+    var munkipkgProjectsPath: String {
+        didSet { defaults.set(munkipkgProjectsPath, forKey: Key.munkipkgProjectsPath) }
+    }
+
+    /// Path to the `munkipkg` executable. Empty = the standard
+    /// `/usr/local/munki/munkipkg`.
+    var munkipkgExecutablePath: String {
+        didSet { defaults.set(munkipkgExecutablePath, forKey: Key.munkipkgExecutablePath) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -25,10 +36,16 @@ final class AppSettings {
             defaults.object(forKey: Key.reopenLastRepository) as? Bool ?? true
         self.gitHooksPathOverride =
             defaults.string(forKey: Key.gitHooksPathOverride) ?? ""
+        self.munkipkgProjectsPath =
+            defaults.string(forKey: Key.munkipkgProjectsPath) ?? ""
+        self.munkipkgExecutablePath =
+            defaults.string(forKey: Key.munkipkgExecutablePath) ?? ""
     }
 
     private enum Key {
         static let reopenLastRepository = "MunkiStudio.settings.reopenLastRepositoryOnLaunch"
         static let gitHooksPathOverride = "MunkiStudio.settings.gitHooksPathOverride"
+        static let munkipkgProjectsPath = "MunkiStudio.settings.munkipkgProjectsPath"
+        static let munkipkgExecutablePath = "MunkiStudio.settings.munkipkgExecutablePath"
     }
 }

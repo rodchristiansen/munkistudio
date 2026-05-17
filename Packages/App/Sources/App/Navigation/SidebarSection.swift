@@ -10,6 +10,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     case manifests = "Manifests"
     case catalogs = "Catalogs"
     case dependencies = "Dependencies"
+    case build = "Build"
     case importer = "Import"
     case git = "Git"
 
@@ -22,6 +23,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
         case .manifests: "list.bullet.rectangle"
         case .catalogs: "books.vertical"
         case .dependencies: "point.3.connected.trianglepath.dotted"
+        case .build: "hammer"
         case .importer: "square.and.arrow.down"
         case .git: "arrow.triangle.branch"
         }
@@ -33,7 +35,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     /// columns. These get a single full-width pane next to the sidebar.
     var prefersFullWidth: Bool {
         switch self {
-        case .dashboard, .git, .importer, .dependencies: true
+        case .dashboard, .git, .importer, .dependencies, .build: true
         case .packages, .manifests, .catalogs: false
         }
     }

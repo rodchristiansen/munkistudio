@@ -2,7 +2,9 @@
 .DS_Store
 
 # Xcode
-build/
+# Anchored to the repo root — an unanchored `build/` also matches the
+# `Features/Build/` source directory on case-insensitive filesystems.
+/build/
 DerivedData/
 *.xcuserstate
 *.xcuserdatad
@@ -26,4 +28,3 @@ Package.resolved
 # Misc
 *.log
 .env
-build/
