@@ -17,6 +17,9 @@ struct ScriptEditor: View {
     /// editors are placed side-by-side so the pair claims as much
     /// vertical room as two stacked single editors would.
     var editorHeight: CGFloat = 200
+    /// Callers that supply their own title / Expand / Save row pass
+    /// `false` so only the bordered editor is drawn.
+    var showsHeader: Bool = true
 
     @State private var fullScreenPresented: Bool = false
 
@@ -24,7 +27,7 @@ struct ScriptEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            header
+            if showsHeader { header }
             inlineEditor
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -39,6 +42,14 @@ struct ScriptEditor: View {
             if !label.isEmpty {
                 Text(label).font(.headline)
             }
+            Button {
+                fullScreenPresented = true
+            } label: {
+                Label("Expand", systemImage: "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Open full-screen editor with linter and line numbers")
             if !text.isEmpty {
                 Text(language.displayName)
                     .font(.caption.monospaced())
@@ -48,20 +59,8 @@ struct ScriptEditor: View {
                 Text("\(lineCount) lines")
                     .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
-            } else {
-                Text("No script")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
             Spacer()
-            Button {
-                fullScreenPresented = true
-            } label: {
-                Label("Expand", systemImage: "arrow.up.left.and.arrow.down.right")
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .help("Open full-screen editor with linter and line numbers")
             if !text.isEmpty {
                 Button(role: .destructive) {
                     text = ""
