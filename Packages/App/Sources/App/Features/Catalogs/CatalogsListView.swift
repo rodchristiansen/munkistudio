@@ -49,7 +49,9 @@ struct CatalogsListView: View {
         }
         .navigationTitle("Catalogs")
         .navigationSubtitle(catalogsSubtitle)
-        .onAppear { refreshLastBuilt() }
+        // Keyed on the repo root so switching repositories re-reads the
+        // timestamp instead of showing the previous repo's.
+        .task(id: store.repository?.rootURL) { refreshLastBuilt() }
         .onChange(of: makecatalogsPresented) { _, presented in
             if !presented { refreshLastBuilt() }
         }
@@ -83,13 +85,18 @@ struct CatalogsListView: View {
     /// file dates its last run.
     private func refreshLastBuilt() {
         guard let repo = store.repository else { lastBuilt = nil; return }
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isRegularFileKey]
         let entries = (try? FileManager.default.contentsOfDirectory(
             at: repo.catalogsURL,
-            includingPropertiesForKeys: [.contentModificationDateKey],
+            includingPropertiesForKeys: Array(keys),
             options: [.skipsHiddenFiles]
         )) ?? []
-        lastBuilt = entries.compactMap {
-            (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        lastBuilt = entries.compactMap { url -> Date? in
+            // Only catalog files date the run — skip any subdirectory
+            // or stray non-regular entry under catalogs/.
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else { return nil }
+            return values.contentModificationDate
         }.max()
     }
 }
