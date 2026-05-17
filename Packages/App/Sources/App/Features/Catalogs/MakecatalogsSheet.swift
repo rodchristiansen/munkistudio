@@ -19,14 +19,22 @@ struct MakecatalogsSheet: View {
                 Spacer()
                 if outcome == nil { ProgressView().controlSize(.small) }
             }
-            ScrollView {
-                Text(output)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(output)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .frame(minWidth: 820, minHeight: 140)
+                .background(.regularMaterial, in: .rect(cornerRadius: 8))
+                // Tail the log — keep the newest line in view as
+                // output streams in, so the run shows live progress.
+                .onChange(of: output) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
             }
-            .frame(minWidth: 520, minHeight: 280)
-            .background(.regularMaterial, in: .rect(cornerRadius: 8))
             if let outcome {
                 HStack {
                     if outcome.exitCode == 0 {
