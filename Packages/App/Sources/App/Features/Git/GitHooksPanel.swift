@@ -140,6 +140,8 @@ struct GitHookDetailPane: View {
                       ? "Whether git runs this hook — toggles its executable bit"
                       : "Save the hook to create the file, then activate it")
                 Button("Save") { Task { await save(hook) } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
                     .disabled(!state.hookDraftDirty)
             }
             Text(hook.name).font(.headline)

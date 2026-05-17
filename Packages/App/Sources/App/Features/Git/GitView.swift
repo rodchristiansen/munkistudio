@@ -100,7 +100,8 @@ struct GitView: View {
         }
         .labelStyle(.titleAndIcon)
         .fontWeight(.semibold)
-        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .controlSize(.large)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
@@ -363,15 +364,18 @@ struct GitView: View {
     private var commitActionRow: some View {
         HStack {
             Button("Stage All") { Task { await toggleStageAll() } }
-                .controlSize(.small)
+                .buttonStyle(.bordered)
                 .disabled(state.files.isEmpty)
             Spacer()
             Button("Commit") { Task { await runCommit() } }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(state.commitSubject.isEmpty)
             Button("Commit & Push") { Task { await runCommitAndPush() } }
+                .buttonStyle(.bordered)
                 .disabled(state.commitSubject.isEmpty)
         }
+        .controlSize(.large)
     }
 
     private func statusIcon(for kind: GitPaneState.StatusKind) -> String {

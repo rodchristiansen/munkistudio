@@ -80,6 +80,8 @@ struct ImportView: View {
                 Button("Add files…") { pickFiles() }
                 Button("Clear queue") { importStore.clearQueue() }
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -105,6 +107,7 @@ struct ImportView: View {
                     Task { await processQueue() }
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(importStore.mode == .running)
             }
         }

@@ -359,18 +359,21 @@ private struct BuildProjectDetail: View {
                     } label: {
                         Label("Reveal in Finder", systemImage: "folder")
                     }
+                    .buttonStyle(.bordered)
                     Button {
                         store.pendingImportURLs = [builtPackageURL]
                         store.selectedSection = .importer
                     } label: {
                         Label("Import into Repo", systemImage: "square.and.arrow.down")
                     }
+                    .buttonStyle(.bordered)
                 }
                 Button {
                     showBuildOptions = true
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
+                .buttonStyle(.bordered)
                 .help("Build options")
                 .popover(isPresented: $showBuildOptions, arrowEdge: .bottom) {
                     buildOptionsPopover
