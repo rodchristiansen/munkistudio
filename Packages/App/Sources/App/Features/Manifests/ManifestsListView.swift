@@ -49,7 +49,18 @@ struct ManifestsListView: View {
                 )
             }
         }
-        .navigationTitle("Manifests (\(store.snapshot.manifests.count))")
+        .navigationTitle("Manifests")
+        .navigationSubtitle(manifestsSubtitle)
+    }
+
+    /// Manifest count plus how many are pulled in as sub-manifests,
+    /// shown as the column's title-bar subtitle.
+    private var manifestsSubtitle: String {
+        let records = store.snapshot.manifests
+        let total = records.count
+        let includedNames = Set(records.flatMap { $0.manifest.includedManifests ?? [] })
+        let included = records.filter { includedNames.contains($0.manifest.manifestName) }.count
+        return "\(total) manifest\(total == 1 ? "" : "s") · \(included) included"
     }
 
     @ViewBuilder

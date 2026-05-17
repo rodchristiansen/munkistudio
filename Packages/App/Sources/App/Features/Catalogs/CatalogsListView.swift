@@ -46,7 +46,8 @@ struct CatalogsListView: View {
                 }
             }
         }
-        .navigationTitle("Catalogs (\(store.snapshot.catalogs.count))")
+        .navigationTitle("Catalogs")
+        .navigationSubtitle("\(store.snapshot.catalogs.count) total")
         .sheet(isPresented: $makecatalogsPresented) {
             MakecatalogsSheet()
         }

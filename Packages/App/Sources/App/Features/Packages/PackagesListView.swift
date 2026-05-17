@@ -43,8 +43,15 @@ struct PackagesListView: View {
                 )
             }
         }
-        .navigationTitle("Packages (\(store.snapshot.pkginfos.count))")
+        .navigationTitle("Packages")
+        .navigationSubtitle(packagesSubtitle)
         .onAppear { searchFocused = false }
+    }
+
+    /// Pkginfo count, shown as the column's title-bar subtitle.
+    private var packagesSubtitle: String {
+        let count = store.snapshot.pkginfos.count
+        return "\(count) pkginfo file\(count == 1 ? "" : "s")"
     }
 
     @ViewBuilder
