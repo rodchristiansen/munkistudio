@@ -124,9 +124,9 @@ struct DependenciesView: View {
     private var manifestsContent: some View {
         if manifestTree.isEmpty {
             ContentUnavailableView(
-                "No Manifests",
-                systemImage: "list.bullet.rectangle",
-                description: Text("This repo has no manifests to map.")
+                "No Relationships",
+                systemImage: "point.3.connected.trianglepath.dotted",
+                description: Text("No manifest in this repo includes another via `included_manifests`.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -626,7 +626,12 @@ enum ManifestFSTree {
     static func build(manifestNames: [String], inclusionGraph: DependencyGraph) -> [ManifestFSNode] {
         var inDegree: [String: Int] = [:]
         for edge in inclusionGraph.edges { inDegree[edge.to, default: 0] += 1 }
+        // Only list manifests that include something — a manifest with no
+        // `included_manifests` has no downstream to explore, so it isn't
+        // a useful entry (it still appears in the map as a leaf node).
+        let includers = Set(inclusionGraph.edges.map(\.from))
         let entries = manifestNames
+            .filter { includers.contains(ManifestGraphBuilder.canonicalName($0)) }
             .map { (name: $0, parts: $0.split(separator: "/").map(String.init)) }
             .filter { !$0.parts.isEmpty }
         return level(entries, depth: 0, parentPath: "", inDegree: inDegree)
