@@ -1,11 +1,15 @@
 import Foundation
 
-/// A directed graph of pkginfo relationships — `requires` and
-/// `update_for` edges. Pure data; built by ``DependencyGraphBuilder``.
+/// A directed relationship graph. Used for two kinds of relationship:
+/// pkginfo `requires` / `update_for` edges (``DependencyGraphBuilder``)
+/// and manifest `included_manifests` edges (``ManifestGraphBuilder``).
+/// Pure data — the edge `kind` distinguishes which.
 public struct DependencyGraph: Sendable {
     public struct Node: Sendable, Hashable, Identifiable {
         public var name: String
-        /// `true` when a pkginfo with this exact name exists in the repo.
+        /// `true` when an item (pkginfo or manifest) with this exact
+        /// name exists in the repo — `false` for a referenced-but-absent
+        /// relationship target.
         public var exists: Bool
 
         public var id: String { name }
@@ -38,7 +42,9 @@ public struct DependencyGraph: Sendable {
         self.edges = edges
     }
 
-    public var isEmpty: Bool { edges.isEmpty }
+    /// A graph with no nodes. A node-only graph (standalone manifests
+    /// with no inclusion edges) is not empty.
+    public var isEmpty: Bool { nodes.isEmpty }
 }
 
 public enum DependencyGraphBuilder {

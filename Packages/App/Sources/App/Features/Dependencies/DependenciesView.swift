@@ -8,9 +8,9 @@ enum DependencyMode: String, Hashable, CaseIterable, Sendable {
 
 /// Full-width section drawing the repo's relationship graphs. Two modes:
 /// Packages shows `requires` / `update_for` between pkginfos, split into
-/// connected clusters; Manifests shows the `included_manifests` tree,
-/// with a hierarchy outline on the left and the subtree downstream of
-/// the selected manifest mapped on the right.
+/// connected clusters. Manifests shows `included_manifests` edges: the
+/// left panel is the manifests/ filesystem tree; selecting a manifest
+/// maps the subtree downstream of it through `included_manifests`.
 struct DependenciesView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var zoom: CGFloat = 1
@@ -359,7 +359,7 @@ struct DependenciesView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // MARK: - Manifest hierarchy outline (Manifests mode)
+    // MARK: - Manifest filesystem tree (Manifests mode)
 
     private var manifestList: some View {
         VStack(spacing: 0) {
