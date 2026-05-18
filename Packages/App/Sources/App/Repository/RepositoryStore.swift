@@ -60,6 +60,16 @@ final class RepositoryStore {
         didSet { scheduleNavigationRecord() }
     }
 
+    /// Dependencies section: Packages vs Manifests mode, and the manifest
+    /// focused in Manifests mode. Recorded in navigation history so
+    /// Back / Forward restore the exact Dependencies view.
+    var dependencyMode: DependencyMode = .packages {
+        didSet { scheduleNavigationRecord() }
+    }
+    var dependenciesManifestName: String? {
+        didSet { scheduleNavigationRecord() }
+    }
+
     /// Packages-list view mode. Persisted here — not view-local `@State`
     /// — so the grouping tab and sort survive navigating away and back.
     var packagesGrouping: PackageGrouping = .categories
@@ -156,6 +166,8 @@ final class RepositoryStore {
         var section: SidebarSection
         var itemID: AnyHashable?
         var dependenciesClusterID: String?
+        var dependencyMode: DependencyMode
+        var dependenciesManifestName: String?
     }
 
     private var navHistory: [NavLocation] = []
@@ -183,7 +195,9 @@ final class RepositoryStore {
         let location = NavLocation(
             section: selectedSection,
             itemID: selectedItemID,
-            dependenciesClusterID: dependenciesClusterID
+            dependenciesClusterID: dependenciesClusterID,
+            dependencyMode: dependencyMode,
+            dependenciesManifestName: dependenciesManifestName
         )
         if navIndex >= 0, navHistory[navIndex] == location { return }
         if navIndex < navHistory.count - 1 {
@@ -210,6 +224,8 @@ final class RepositoryStore {
         selectedSection = location.section
         selectedItemID = location.itemID
         dependenciesClusterID = location.dependenciesClusterID
+        dependencyMode = location.dependencyMode
+        dependenciesManifestName = location.dependenciesManifestName
         suppressNavRecord = false
     }
 

@@ -1,24 +1,41 @@
 import SwiftUI
 import Core
 
-/// Full-width section drawing the repo's `requires` / `update_for`
-/// relationships. A whole-repo graph is an unreadable hairball, so the
-/// graph is split into connected clusters — pick one from the list and
-/// see just that neighbourhood. Click a node to jump to its package.
+/// Which relationship graph the Dependencies section is showing.
+enum DependencyMode: String, Hashable, CaseIterable, Sendable {
+    case packages, manifests
+}
+
+/// Full-width section drawing the repo's relationship graphs. Two modes:
+/// Packages shows `requires` / `update_for` between pkginfos, split into
+/// connected clusters. Manifests shows `included_manifests` edges: the
+/// left panel is the manifests/ filesystem tree; selecting a manifest
+/// maps the subtree downstream of it through `included_manifests`.
 struct DependenciesView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var zoom: CGFloat = 1
     @State private var filter = ""
     @FocusState private var filterFocused: Bool
 
-    /// Graph + clusters derived from the snapshot, cached so zoom /
-    /// filter / selection changes don't rebuild the whole-repo graph on
-    /// every body pass. `rebuildGraph()` refreshes them when the pkginfo
-    /// set actually changes.
+    // Packages mode — graph + clusters + linter findings, cached so
+    // zoom / filter / selection changes don't rebuild on every body pass.
     @State private var graph = DependencyGraph(nodes: [], edges: [])
     @State private var clusters: [DependencyCluster] = []
     @State private var findings: [DependencyFinding] = []
     @State private var showingIssues = false
+
+    // Manifests mode — the inclusion graph (drives the map) and the
+    // filesystem tree of the manifests/ folder (drives the left panel).
+    @State private var manifestGraph = DependencyGraph(nodes: [], edges: [])
+    @State private var manifestTree: [ManifestFSNode] = []
+
+    private var mode: DependencyMode { store.dependencyMode }
+
+    // MARK: - Bindings
+
+    private var modeBinding: Binding<DependencyMode> {
+        Binding(get: { store.dependencyMode }, set: { store.dependencyMode = $0 })
+    }
 
     /// Cluster selection lives on the store so it survives navigating
     /// away and back (deep-link state, not view-local).
@@ -39,45 +56,117 @@ struct DependenciesView: View {
         clusters.first { $0.id == store.dependenciesClusterID } ?? filteredClusters.first
     }
 
+    /// The manifest filesystem tree, pruned to the filter query.
+    private var filteredTree: [ManifestFSNode] {
+        let query = filter.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return manifestTree }
+        return manifestTree.compactMap { prune($0, query: query) }
+    }
+
+    private func prune(_ node: ManifestFSNode, query: String) -> ManifestFSNode? {
+        let selfMatches = node.name.localizedCaseInsensitiveContains(query)
+        switch node.kind {
+        case .manifest:
+            return selfMatches ? node : nil
+        case .directory:
+            let matchedChildren = node.children.compactMap { prune($0, query: query) }
+            guard selfMatches || !matchedChildren.isEmpty else { return nil }
+            return ManifestFSNode(
+                kind: .directory,
+                name: node.name,
+                manifestName: nil,
+                children: selfMatches ? node.children : matchedChildren,
+                id: node.id
+            )
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            if clusters.isEmpty {
-                ContentUnavailableView(
-                    "No Relationships",
-                    systemImage: "point.3.connected.trianglepath.dotted",
-                    description: Text("No package in this repo declares a `requires` or `update_for` relationship.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                HSplitView {
-                    clusterList
-                        .frame(minWidth: 200, idealWidth: 250, maxWidth: 380)
-                    graphPane
-                        .frame(minWidth: 360, maxWidth: .infinity)
-                }
-            }
+            content
         }
-        .navigationSubtitle(graphSubtitle)
+        .navigationSubtitle(subtitle)
         .onAppear { rebuildGraph() }
         .onChange(of: store.snapshot.pkginfos) { rebuildGraph() }
+        .onChange(of: store.snapshot.manifests) { rebuildGraph() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch mode {
+        case .packages: packagesContent
+        case .manifests: manifestsContent
+        }
+    }
+
+    @ViewBuilder
+    private var packagesContent: some View {
+        if clusters.isEmpty {
+            ContentUnavailableView(
+                "No Relationships",
+                systemImage: "point.3.connected.trianglepath.dotted",
+                description: Text("No package in this repo declares a `requires` or `update_for` relationship.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HSplitView {
+                clusterList
+                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 380)
+                graphPane
+                    .frame(minWidth: 360, maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var manifestsContent: some View {
+        if manifestTree.isEmpty {
+            ContentUnavailableView(
+                "No Relationships",
+                systemImage: "point.3.connected.trianglepath.dotted",
+                description: Text("No manifest in this repo includes another via `included_manifests`.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HSplitView {
+                manifestList
+                    .frame(minWidth: 200, idealWidth: 260, maxWidth: 400)
+                manifestGraphPane
+                    .frame(minWidth: 360, maxWidth: .infinity)
+            }
+        }
     }
 
     /// Graph size, shown as the window's toolbar subtitle.
-    private var graphSubtitle: String {
-        let packages = graph.nodes.count
-        let clusterCount = clusters.count
-        return "\(packages) connected package\(packages == 1 ? "" : "s") "
-            + "in \(clusterCount) cluster\(clusterCount == 1 ? "" : "s")"
+    private var subtitle: String {
+        switch mode {
+        case .packages:
+            let packages = graph.nodes.count
+            return "\(packages) connected package\(packages == 1 ? "" : "s") "
+                + "in \(clusters.count) cluster\(clusters.count == 1 ? "" : "s")"
+        case .manifests:
+            let count = manifestGraph.nodes.count
+            let links = manifestGraph.edges.count
+            return "\(count) manifest\(count == 1 ? "" : "s") · "
+                + "\(links) inclusion link\(links == 1 ? "" : "s")"
+        }
     }
 
-    /// Rebuild the cached graph + clusters from the current snapshot.
+    /// Rebuild both cached graphs from the current snapshot.
     private func rebuildGraph() {
         graph = DependencyGraphBuilder.build(pkginfos: store.snapshot.pkginfos.map(\.pkginfo))
         clusters = DependencyClusterizer.clusters(from: graph)
         findings = DependencyLinter.analyze(graph)
         selectDefaultClusterIfNeeded()
+
+        manifestGraph = ManifestGraphBuilder.build(manifests: store.snapshot.manifests.map(\.manifest))
+        manifestTree = ManifestFSTree.build(
+            manifestNames: store.snapshot.manifests.map(\.manifest.manifestName),
+            inclusionGraph: manifestGraph
+        )
+        selectDefaultManifestIfNeeded()
     }
 
     /// Seed or correct the cluster selection. `selectedCluster` masks a
@@ -90,26 +179,54 @@ struct DependenciesView: View {
         if !isValid { store.dependenciesClusterID = clusters.first?.id }
     }
 
+    /// Seed or correct the manifest selection the same way.
+    private func selectDefaultManifestIfNeeded() {
+        let name = store.dependenciesManifestName
+        let isValid = name != nil && manifestGraph.nodes.contains { $0.name == name }
+        if !isValid { store.dependenciesManifestName = ManifestFSTree.firstManifest(in: manifestTree) }
+    }
+
     // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 14) {
-            issuesButton
-            Spacer()
-            legendItem(color: .blue, dashed: false, label: "requires")
-            legendItem(color: .orange, dashed: true, label: "update_for")
-            Divider().frame(height: 18)
-            HStack(spacing: 4) {
-                Button { setZoom(zoom - 0.2) } label: { Image(systemName: "minus.magnifyingglass") }
-                    .disabled(zoom <= 0.4)
-                Button { zoom = 1 } label: { Text("\(Int(zoom * 100))%").monospacedDigit().frame(width: 42) }
-                    .buttonStyle(.plain)
-                Button { setZoom(zoom + 0.2) } label: { Image(systemName: "plus.magnifyingglass") }
-                    .disabled(zoom >= 2)
+            Picker("", selection: modeBinding) {
+                Text("Packages").tag(DependencyMode.packages)
+                Text("Manifests").tag(DependencyMode.manifests)
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            if mode == .packages { issuesButton }
+            Spacer()
+            legend
+            Divider().frame(height: 18)
+            zoomControls
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var legend: some View {
+        switch mode {
+        case .packages:
+            legendItem(color: .blue, dashed: false, label: "requires")
+            legendItem(color: .orange, dashed: true, label: "update_for")
+        case .manifests:
+            legendItem(color: .purple, dashed: false, label: "includes")
+        }
+    }
+
+    private var zoomControls: some View {
+        HStack(spacing: 4) {
+            Button { setZoom(zoom - 0.2) } label: { Image(systemName: "minus.magnifyingglass") }
+                .disabled(zoom <= 0.4)
+            Button { zoom = 1 } label: { Text("\(Int(zoom * 100))%").monospacedDigit().frame(width: 42) }
+                .buttonStyle(.plain)
+            Button { setZoom(zoom + 0.2) } label: { Image(systemName: "plus.magnifyingglass") }
+                .disabled(zoom >= 2)
+        }
     }
 
     private func legendItem(color: Color, dashed: Bool, label: String) -> some View {
@@ -125,7 +242,7 @@ struct DependenciesView: View {
         zoom = min(2, max(0.4, (value * 10).rounded() / 10))
     }
 
-    // MARK: - Issues
+    // MARK: - Issues (Packages mode)
 
     @ViewBuilder
     private var issuesButton: some View {
@@ -208,7 +325,7 @@ struct DependenciesView: View {
         return result
     }
 
-    // MARK: - Cluster list
+    // MARK: - Cluster list (Packages mode)
 
     private var clusterList: some View {
         VStack(spacing: 0) {
@@ -242,7 +359,34 @@ struct DependenciesView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // MARK: - Graph pane
+    // MARK: - Manifest filesystem tree (Manifests mode)
+
+    private var manifestList: some View {
+        VStack(spacing: 0) {
+            FilterField(text: $filter, prompt: "Filter manifests", focused: $filterFocused)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(filteredTree) { node in
+                        ManifestFSRow(
+                            node: node,
+                            depth: 0,
+                            selectedName: store.dependenciesManifestName,
+                            onSelect: { store.dependenciesManifestName = $0 },
+                            onOpen: { openManifest($0) }
+                        )
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+            }
+            .scrollContentBackground(.hidden)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Graph panes
 
     @ViewBuilder
     private var graphPane: some View {
@@ -250,7 +394,7 @@ struct DependenciesView: View {
             let layout = DependencyLayout.compute(cluster.graph)
             GeometryReader { geo in
                 ScrollView([.horizontal, .vertical]) {
-                    graphContent(layout)
+                    graphContent(layout, problems: problemEdges)
                         .frame(minWidth: geo.size.width, minHeight: geo.size.height)
                 }
             }
@@ -259,9 +403,49 @@ struct DependenciesView: View {
         }
     }
 
-    private func graphContent(_ layout: DependencyLayout) -> some View {
-        let problems = problemEdges
-        return ZStack(alignment: .topLeading) {
+    @ViewBuilder
+    private var manifestGraphPane: some View {
+        if let name = store.dependenciesManifestName,
+           manifestGraph.nodes.contains(where: { $0.name == name }) {
+            let subgraph = downstreamSubgraph(from: name, in: manifestGraph)
+            // Flipped: the manifests an include chain bottoms out at —
+            // the foundational ones — sit at the top, the selected
+            // manifest at the bottom.
+            let layout = DependencyLayout.compute(subgraph, flipped: true)
+            GeometryReader { geo in
+                ScrollView([.horizontal, .vertical]) {
+                    graphContent(layout, problems: [])
+                        .frame(minWidth: geo.size.width, minHeight: geo.size.height)
+                }
+            }
+        } else {
+            ContentUnavailableView("Select a Manifest", systemImage: "sidebar.left")
+        }
+    }
+
+    /// The subgraph reachable downstream of `name` — the manifest plus
+    /// everything it pulls in, transitively. The visited set guards the
+    /// walk against inclusion cycles.
+    private func downstreamSubgraph(from name: String, in graph: DependencyGraph) -> DependencyGraph {
+        let targets = Dictionary(grouping: graph.edges, by: \.from).mapValues { $0.map(\.to) }
+        var reachable: Set<String> = [name]
+        var queue = [name]
+        while let current = queue.popLast() {
+            for target in targets[current] ?? [] where reachable.insert(target).inserted {
+                queue.append(target)
+            }
+        }
+        return DependencyGraph(
+            nodes: graph.nodes.filter { reachable.contains($0.name) },
+            edges: graph.edges.filter { reachable.contains($0.from) && reachable.contains($0.to) }
+        )
+    }
+
+    private func graphContent(
+        _ layout: DependencyLayout,
+        problems: Set<DependencyGraph.Edge>
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
             Canvas { context, _ in
                 for edge in layout.edges {
                     guard let a = layout.point(for: edge.from),
@@ -284,32 +468,64 @@ struct DependenciesView: View {
 
     private func nodeView(_ node: DependencyGraph.Node) -> some View {
         let tint: Color = node.exists ? .accentColor : .secondary
-        // A `Button` (not a tap gesture) so the node is keyboard-
-        // activatable and exposed to assistive tech as a control.
-        return Button {
-            navigate(to: node)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: node.exists ? "shippingbox.fill" : "questionmark.diamond")
-                    .imageScale(.small)
-                    .foregroundStyle(tint)
-                Text(node.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .padding(.horizontal, 10)
-            .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
-            .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
-                            style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
-            )
-            .contentShape(.rect)
+        let icon: String = node.exists
+            ? (mode == .manifests ? "list.bullet.rectangle.fill" : "shippingbox.fill")
+            : "questionmark.diamond"
+        return HStack(spacing: 6) {
+            Image(systemName: icon)
+                .imageScale(.small)
+                .foregroundStyle(tint)
+            Text(nodeLabel(node))
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
-        .buttonStyle(.plain)
-        .help(node.exists ? "Open \(node.name) in Packages" : "\(node.name) — referenced but not present in this repo")
+        .padding(.horizontal, 10)
+        .frame(width: DependencyLayout.nodeW, height: DependencyLayout.nodeH)
+        .background(tint.opacity(node.exists ? 0.12 : 0.06), in: .rect(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tint.opacity(node.exists ? 0.55 : 0.3),
+                        style: StrokeStyle(lineWidth: 1, dash: node.exists ? [] : [3, 2]))
+        )
+        .contentShape(.rect)
+        // Single-tap focuses the node; double-tap opens it in its tab.
+        // count:1 is attached first so focus isn't delayed.
+        .onTapGesture { handleNodeSingleTap(node) }
+        .onTapGesture(count: 2) { handleNodeDoubleTap(node) }
+        .help(nodeHelp(node))
+    }
+
+    /// The card label — a manifest's `manifestName` is a `/`-path, but the
+    /// card shows only its leaf component.
+    private func nodeLabel(_ node: DependencyGraph.Node) -> String {
+        node.name.split(separator: "/").last.map(String.init) ?? node.name
+    }
+
+    private func handleNodeSingleTap(_ node: DependencyGraph.Node) {
+        switch mode {
+        case .packages: navigate(to: node)
+        case .manifests: store.dependenciesManifestName = node.name
+        }
+    }
+
+    private func handleNodeDoubleTap(_ node: DependencyGraph.Node) {
+        switch mode {
+        case .packages: navigate(to: node)
+        case .manifests: openManifest(node.name)
+        }
+    }
+
+    private func nodeHelp(_ node: DependencyGraph.Node) -> String {
+        guard node.exists else {
+            return "\(node.name) — referenced but not present in this repo"
+        }
+        switch mode {
+        case .packages:
+            return "Open \(node.name) in Packages"
+        case .manifests:
+            return "\(node.name) — click to focus, double-click to open in Manifests"
+        }
     }
 
     private func drawEdge(
@@ -319,8 +535,14 @@ struct DependenciesView: View {
         kind: DependencyGraph.Edge.Kind,
         isProblem: Bool
     ) {
-        let color: Color = isProblem ? .red : (kind == .requires ? .blue : .orange)
-        let dash: [CGFloat] = kind == .requires ? [] : [5, 4]
+        let baseColor: Color
+        switch kind {
+        case .requires: baseColor = .blue
+        case .updateFor: baseColor = .orange
+        case .manifestInclusion: baseColor = .purple
+        }
+        let color: Color = isProblem ? .red : baseColor
+        let dash: [CGFloat] = kind == .updateFor ? [5, 4] : []
         let opacity: Double = isProblem ? 0.95 : 0.7
         let lineWidth: CGFloat = isProblem ? 2.5 : 1.5
 
@@ -348,12 +570,25 @@ struct DependenciesView: View {
         context.fill(head, with: .color(color.opacity(opacity)))
     }
 
+    /// Open a package node in the Packages tab. The section + item
+    /// change records a navigation entry, so Back / Forward return here.
     private func navigate(to node: DependencyGraph.Node) {
         guard let record = store.snapshot.pkginfos.first(where: { $0.pkginfo.name == node.name }) else { return }
         store.selectedSection = .packages
         store.selectedItemID = AnyHashable(record.id)
         let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces)
         store.expandedCategories.insert(category?.isEmpty == false ? category! : "Uncategorized")
+    }
+
+    /// Open a manifest in the Manifests tab — used by the double-tap on
+    /// a tree row or a graph node. `manifestName` is canonicalised the
+    /// same way the graph is so a record always matches.
+    private func openManifest(_ manifestName: String) {
+        guard let record = store.snapshot.manifests.first(where: {
+            ManifestGraphBuilder.canonicalName($0.manifest.manifestName) == manifestName
+        }) else { return }
+        store.selectedSection = .manifests
+        store.selectedItemID = AnyHashable(record.id)
     }
 }
 
@@ -364,6 +599,172 @@ private struct Line: Shape {
         p.move(to: CGPoint(x: rect.minX, y: rect.midY))
         p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
         return p
+    }
+}
+
+// MARK: - Manifest filesystem tree
+
+/// One entry in the manifests/ filesystem tree — either a directory
+/// (a group) or a manifest file (selectable, drives the map).
+struct ManifestFSNode: Identifiable {
+    enum Kind { case directory, manifest }
+    let kind: Kind
+    /// Last path component — the display name.
+    let name: String
+    /// The full `manifestName` (a `/`-path) for a `.manifest`; nil for
+    /// a directory.
+    let manifestName: String?
+    let children: [ManifestFSNode]
+    let id: String
+}
+
+enum ManifestFSTree {
+    /// Build the manifests/ directory tree from manifest names (each a
+    /// `/`-separated path). Manifest files sort before subfolders at
+    /// every level; manifests are ordered by how many other manifests
+    /// include them, so a foundational manifest rises to the top.
+    static func build(manifestNames: [String], inclusionGraph: DependencyGraph) -> [ManifestFSNode] {
+        var inDegree: [String: Int] = [:]
+        for edge in inclusionGraph.edges { inDegree[edge.to, default: 0] += 1 }
+        // Only list manifests that include something — a manifest with no
+        // `included_manifests` has no downstream to explore, so it isn't
+        // a useful entry (it still appears in the map as a leaf node).
+        let includers = Set(inclusionGraph.edges.map(\.from))
+        let entries = manifestNames
+            .filter { includers.contains(ManifestGraphBuilder.canonicalName($0)) }
+            .map { (name: $0, parts: $0.split(separator: "/").map(String.init)) }
+            .filter { !$0.parts.isEmpty }
+        return level(entries, depth: 0, parentPath: "", inDegree: inDegree)
+    }
+
+    private static func level(
+        _ entries: [(name: String, parts: [String])],
+        depth: Int,
+        parentPath: String,
+        inDegree: [String: Int]
+    ) -> [ManifestFSNode] {
+        var manifests: [ManifestFSNode] = []
+        var dirEntries: [String: [(name: String, parts: [String])]] = [:]
+        var dirOrder: [String] = []
+
+        for entry in entries {
+            let component = entry.parts[depth]
+            if entry.parts.count == depth + 1 {
+                manifests.append(ManifestFSNode(
+                    kind: .manifest, name: component, manifestName: entry.name,
+                    children: [], id: "m:" + entry.name))
+            } else {
+                if dirEntries[component] == nil { dirOrder.append(component) }
+                dirEntries[component, default: []].append(entry)
+            }
+        }
+
+        // Manifests: most-included first, alphabetical to break ties.
+        manifests.sort { lhs, rhs in
+            let l = inDegree[ManifestGraphBuilder.canonicalName(lhs.manifestName ?? ""), default: 0]
+            let r = inDegree[ManifestGraphBuilder.canonicalName(rhs.manifestName ?? ""), default: 0]
+            if l != r { return l > r }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+
+        let directories = dirOrder
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { dir -> ManifestFSNode in
+                let path = parentPath.isEmpty ? dir : parentPath + "/" + dir
+                return ManifestFSNode(
+                    kind: .directory, name: dir, manifestName: nil,
+                    children: level(dirEntries[dir] ?? [], depth: depth + 1,
+                                    parentPath: path, inDegree: inDegree),
+                    id: "d:" + path)
+            }
+
+        return manifests + directories
+    }
+
+    /// The first selectable manifest, depth-first — the importance-sorted
+    /// top entry, used as the default selection.
+    static func firstManifest(in nodes: [ManifestFSNode]) -> String? {
+        for node in nodes {
+            switch node.kind {
+            case .manifest:
+                return node.manifestName
+            case .directory:
+                if let found = firstManifest(in: node.children) { return found }
+            }
+        }
+        return nil
+    }
+}
+
+/// One row of the manifest filesystem tree. Directories toggle their
+/// children; manifests select and scope the map downstream of them.
+private struct ManifestFSRow: View {
+    let node: ManifestFSNode
+    let depth: Int
+    let selectedName: String?
+    let onSelect: (String) -> Void
+    let onOpen: (String) -> Void
+
+    @State private var expanded = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            rowContent
+            if expanded {
+                ForEach(node.children) { child in
+                    ManifestFSRow(node: child, depth: depth + 1,
+                                  selectedName: selectedName,
+                                  onSelect: onSelect, onOpen: onOpen)
+                }
+            }
+        }
+    }
+
+    private var isSelected: Bool {
+        node.kind == .manifest && node.manifestName == selectedName
+    }
+
+    private var rowContent: some View {
+        HStack(spacing: 5) {
+            if node.kind == .directory {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12)
+            } else {
+                Color.clear.frame(width: 12)
+            }
+            Image(systemName: node.kind == .directory ? "folder.fill" : "list.bullet.rectangle")
+                .imageScale(.small)
+                .foregroundStyle(node.kind == .directory ? Color.secondary : Color.accentColor)
+                .frame(width: 16)
+            Text(node.name)
+                .font(.callout)
+                .fontWeight(node.kind == .directory ? .medium : .regular)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+        .padding(.leading, CGFloat(depth) * 14 + 4)
+        .padding(.trailing, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.18) : Color.clear,
+            in: .rect(cornerRadius: 4)
+        )
+        .contentShape(.rect)
+        // count:1 first so selection isn't delayed; double-tap on a
+        // manifest opens it in the Manifests tab.
+        .onTapGesture {
+            switch node.kind {
+            case .directory: expanded.toggle()
+            case .manifest: if let name = node.manifestName { onSelect(name) }
+            }
+        }
+        .onTapGesture(count: 2) {
+            if node.kind == .manifest, let name = node.manifestName { onOpen(name) }
+        }
     }
 }
 
@@ -461,7 +862,10 @@ struct DependencyLayout {
 
     func point(for name: String) -> CGPoint? { positions[name] }
 
-    static func compute(_ graph: DependencyGraph) -> DependencyLayout {
+    /// `flipped` inverts the vertical order — used for the manifest map,
+    /// where the foundational manifests an include chain bottoms out at
+    /// belong at the top.
+    static func compute(_ graph: DependencyGraph, flipped: Bool = false) -> DependencyLayout {
         var targets: [String: [String]] = [:]
         for edge in graph.edges {
             targets[edge.from, default: []].append(edge.to)
@@ -496,7 +900,7 @@ struct DependencyLayout {
             let row = (rows[level] ?? []).sorted { $0.name < $1.name }
             let rowW = CGFloat(row.count) * nodeW + CGFloat(max(0, row.count - 1)) * xGap
             let startX = (totalW - rowW) / 2 + nodeW / 2
-            let y = CGFloat(maxLayer - level) * (nodeH + yGap) + nodeH / 2
+            let y = CGFloat(flipped ? level : maxLayer - level) * (nodeH + yGap) + nodeH / 2
             for (index, node) in row.enumerated() {
                 let point = CGPoint(x: startX + CGFloat(index) * (nodeW + xGap), y: y)
                 positions[node.name] = point
