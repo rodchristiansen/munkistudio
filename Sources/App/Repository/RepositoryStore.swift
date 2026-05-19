@@ -53,6 +53,12 @@ final class RepositoryStore {
         didSet { scheduleNavigationRecord() }
     }
 
+    /// Set when navigation (search, Back / Forward) wants the middle-column
+    /// list to scroll the selected item into view. The list view consumes
+    /// and clears it. A plain row click never sets this, so clicking an
+    /// already-visible row doesn't yank the list around.
+    var pendingRevealItemID: AnyHashable?
+
     /// Cluster selected in the Dependencies section. Lives on the store
     /// (not view-local `@State`) so it survives the view being torn down
     /// when the user navigates away and back.
@@ -231,6 +237,7 @@ final class RepositoryStore {
         dependencyMode = location.dependencyMode
         dependenciesManifestName = location.dependenciesManifestName
         suppressNavRecord = false
+        pendingRevealItemID = location.itemID
     }
 
     func reload() async {

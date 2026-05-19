@@ -22,7 +22,17 @@ struct ManifestTreeList: View {
 
     var body: some View {
         @Bindable var bindableStore = store
-        List(selection: $bindableStore.selectedItemID) {
+        ScrollViewReader { proxy in
+            list
+                .onChange(of: store.pendingRevealItemID, initial: true) { _, target in
+                    revealItem(target, proxy: proxy)
+                }
+        }
+    }
+
+    private var list: some View {
+        @Bindable var bindableStore = store
+        return List(selection: $bindableStore.selectedItemID) {
             ForEach(rows) { row in
                 if let tag = row.selectionTag {
                     ManifestRow(row: row, folderIcon: grouping.folderIcon)
@@ -103,6 +113,62 @@ struct ManifestTreeList: View {
         duplicateTarget = nil
         guard !name.isEmpty else { return }
         Task { await store.duplicateManifest(target, as: name) }
+    }
+
+    /// Expand the folders enclosing the reveal target and scroll its row
+    /// into view. Driven by search / Back-Forward navigation — never by a
+    /// plain row click — so clicking a visible row doesn't yank the list.
+    private func revealItem(_ target: AnyHashable?, proxy: ScrollViewProxy) {
+        guard let url = target?.base as? URL,
+              let record = records.first(where: { $0.fileURL == url }) else { return }
+        expandAncestors(of: record)
+        store.pendingRevealItemID = nil
+        // Two-pass scroll: a lazy List hasn't measured rows it has never
+        // drawn, so a single scrollTo to an off-screen row lands short.
+        // The first pass jumps roughly there and forces those rows to be
+        // realised; the second lands on the row precisely.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let rowID = leafRowID(for: record) else { return }
+            proxy.scrollTo(rowID, anchor: .center)
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(rowID, anchor: .center)
+            }
+        }
+    }
+
+    /// Expand every folder a record is nested under for the current
+    /// grouping, so its leaf row becomes part of the flattened `rows`.
+    private func expandAncestors(of record: ManifestRecord) {
+        switch grouping {
+        case .directories:
+            let segments = record.manifest.manifestName.split(separator: "/").map(String.init)
+            guard !segments.isEmpty else { return }
+            // Expand each path prefix, including the record's own path —
+            // a manifest that is also a folder shows its row only when
+            // that folder is open.
+            for end in 1...segments.count {
+                store.expandedManifestPaths.insert(segments[0..<end].joined(separator: "/"))
+            }
+        case .types:
+            store.expandedManifestPaths.insert(
+                referencedNames.contains(record.manifest.manifestName) ? "Included" : "Top-level"
+            )
+        case .catalogs:
+            store.expandedManifestPaths.insert(record.manifest.catalogs?.first ?? "No catalog")
+        }
+    }
+
+    /// The flattened-row id for a record's leaf, or `nil` if it isn't
+    /// currently visible (its folders are still collapsed).
+    private func leafRowID(for record: ManifestRecord) -> String? {
+        for row in rows {
+            if case .leaf(let leafRecord, _) = row.kind, leafRecord.fileURL == record.fileURL {
+                return row.id
+            }
+        }
+        return nil
     }
 
     private var rows: [ManifestFlatRow] {

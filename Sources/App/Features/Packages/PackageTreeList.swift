@@ -13,18 +13,45 @@ struct PackageTreeList: View {
 
     var body: some View {
         @Bindable var bindableStore = store
-        List(selection: $bindableStore.selectedItemID) {
-            ForEach(rows) { row in
-                if let tag = row.selectionTag {
-                    PackageRowView(row: row, folderIcon: grouping.folderIcon)
-                        .tag(tag)
-                        .listRowSeparator(.hidden)
-                        .accessibilityLabel(row.accessibilityLabel)
-                } else {
-                    PackageRowView(row: row, folderIcon: grouping.folderIcon)
-                        .listRowSeparator(.hidden)
-                        .accessibilityLabel(row.accessibilityLabel)
+        ScrollViewReader { proxy in
+            List(selection: $bindableStore.selectedItemID) {
+                ForEach(rows) { row in
+                    if let tag = row.selectionTag {
+                        PackageRowView(row: row, folderIcon: grouping.folderIcon)
+                            .tag(tag)
+                            .listRowSeparator(.hidden)
+                            .accessibilityLabel(row.accessibilityLabel)
+                    } else {
+                        PackageRowView(row: row, folderIcon: grouping.folderIcon)
+                            .listRowSeparator(.hidden)
+                            .accessibilityLabel(row.accessibilityLabel)
+                    }
                 }
+            }
+            .onChange(of: store.pendingRevealItemID, initial: true) { _, target in
+                revealItem(target, proxy: proxy)
+            }
+        }
+    }
+
+    /// Expand the category holding the reveal target and scroll its row
+    /// into view. Driven by search / Back-Forward navigation — never by a
+    /// plain row click — so clicking a visible row doesn't yank the list.
+    private func revealItem(_ target: AnyHashable?, proxy: ScrollViewProxy) {
+        guard let url = target?.base as? URL,
+              let record = records.first(where: { $0.fileURL == url }) else { return }
+        store.expandedCategories.insert(groupKey(for: record))
+        store.pendingRevealItemID = nil
+        // Two-pass scroll: a lazy List hasn't measured rows it has never
+        // drawn, so a single scrollTo to an off-screen row lands short.
+        // The first pass jumps roughly there and forces those rows to be
+        // realised; the second lands on the row precisely.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            proxy.scrollTo(url.path, anchor: .center)
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(url.path, anchor: .center)
             }
         }
     }
