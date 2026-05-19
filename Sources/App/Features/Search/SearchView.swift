@@ -111,6 +111,7 @@ struct SearchResultsFloatingPanel: View {
             if let record = store.snapshot.pkginfos.first(where: { $0.fileURL == file.fileURL }) {
                 store.selectedSection = .packages
                 store.selectedItemID = AnyHashable(record.id)
+                store.pendingRevealItemID = AnyHashable(record.id)
                 let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "Uncategorized"
                 store.expandedCategories.insert(category)
             }
@@ -118,6 +119,7 @@ struct SearchResultsFloatingPanel: View {
             if let record = store.snapshot.manifests.first(where: { $0.fileURL == file.fileURL }) {
                 store.selectedSection = .manifests
                 store.selectedItemID = AnyHashable(record.id)
+                store.pendingRevealItemID = AnyHashable(record.id)
             }
         }
         store.searchQuery = ""
@@ -158,6 +160,7 @@ struct SearchSuggestionRows: View {
             if let record = store.snapshot.pkginfos.first(where: { $0.fileURL == file.fileURL }) {
                 store.selectedSection = .packages
                 store.selectedItemID = AnyHashable(record.id)
+                store.pendingRevealItemID = AnyHashable(record.id)
                 let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "Uncategorized"
                 store.expandedCategories.insert(category)
             }
@@ -165,6 +168,7 @@ struct SearchSuggestionRows: View {
             if let record = store.snapshot.manifests.first(where: { $0.fileURL == file.fileURL }) {
                 store.selectedSection = .manifests
                 store.selectedItemID = AnyHashable(record.id)
+                store.pendingRevealItemID = AnyHashable(record.id)
             }
         }
         store.searchQuery = ""
@@ -358,6 +362,7 @@ struct SearchResultsPanel: View {
             if let record = store.snapshot.pkginfos.first(where: { $0.fileURL == file.fileURL }) {
                 store.selectedSection = .packages
                 store.selectedItemID = AnyHashable(record.id)
+                store.pendingRevealItemID = AnyHashable(record.id)
                 let category = record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? "Uncategorized"
                 store.expandedCategories.insert(category)
             }
@@ -365,6 +370,7 @@ struct SearchResultsPanel: View {
             if let record = store.snapshot.manifests.first(where: { $0.fileURL == file.fileURL }) {
                 store.selectedSection = .manifests
                 store.selectedItemID = AnyHashable(record.id)
+                store.pendingRevealItemID = AnyHashable(record.id)
             }
         }
         dismiss()
