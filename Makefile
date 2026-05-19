@@ -49,7 +49,11 @@ TEAM_ID                    := $(call strip_quotes,$(TEAM_ID))
 # or the command line. macOS shows CFBundleShortVersionString and
 # CFBundleVersion separately, so the trailing HHMM is split off as the
 # build number: 2026.05.19.1430 → marketing "2026.05.19", build "1430".
-VERSION           := $(or $(call strip_quotes,$(VERSION)),$(shell date '+%Y.%m.%d.%H%M'))
+#
+# Pin the timestamp to America/Vancouver so local builds and CI builds
+# (GitHub Actions runners default to UTC) produce comparable versions —
+# otherwise an evening Pacific build can date-stamp the next day.
+VERSION           := $(or $(call strip_quotes,$(VERSION)),$(shell TZ=America/Vancouver date '+%Y.%m.%d.%H%M'))
 MARKETING_VERSION := $(shell echo $(VERSION) | sed 's/\.[^.]*$$//')
 BUILD             := $(shell echo $(VERSION) | sed 's/.*\.//')
 
