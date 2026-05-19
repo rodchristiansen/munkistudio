@@ -136,6 +136,10 @@ final class RepositoryStore {
     /// duplicate / delete), surfaced as an alert in the Manifests list.
     var manifestActionError: String?
 
+    /// Last error from a pkginfo lifecycle action (rename / duplicate /
+    /// delete), surfaced as an alert in the Packages list.
+    var packageActionError: String?
+
     /// Most recently opened repositories, newest first.
     private(set) var recentRepositories: [URL]
 
@@ -421,6 +425,71 @@ final class RepositoryStore {
         } catch {
             manifestActionError = error.localizedDescription
             return nil
+        }
+    }
+
+    // MARK: Package lifecycle
+
+    func deletePackage(_ record: PkginfoRecord) async {
+        do {
+            try await services.packages.delete(record)
+            snapshot.pkginfos.removeAll { $0.fileURL == record.fileURL }
+            pkginfoDrafts.removeValue(forKey: record.fileURL)
+            draftFormats.removeValue(forKey: record.fileURL)
+            if selectedItemID == AnyHashable(record.id) {
+                selectedItemID = nil
+            }
+            recomputeCatalogs()
+        } catch {
+            packageActionError = error.localizedDescription
+        }
+    }
+
+    /// Rename a pkginfo file, carrying any unsaved draft edits to the new
+    /// file URL. Only the file is renamed — the pkginfo `name` key is
+    /// untouched.
+    @discardableResult
+    func renamePackage(_ record: PkginfoRecord, to newName: String) async -> PkginfoRecord? {
+        guard let repo = repository else { return nil }
+        do {
+            let renamed = try await services.packages.rename(record, to: newName, in: repo)
+            if let draft = pkginfoDrafts.removeValue(forKey: record.fileURL) {
+                pkginfoDrafts[renamed.fileURL] = draft
+            }
+            if let format = draftFormats.removeValue(forKey: record.fileURL) {
+                draftFormats[renamed.fileURL] = format
+            }
+            snapshot.pkginfos.removeAll { $0.fileURL == record.fileURL }
+            upsert(renamed)
+            selectedItemID = AnyHashable(renamed.id)
+            return renamed
+        } catch {
+            packageActionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Duplicate a pkginfo file under `newName` and select the copy.
+    @discardableResult
+    func duplicatePackage(_ record: PkginfoRecord, as newName: String) async -> PkginfoRecord? {
+        guard let repo = repository else { return nil }
+        do {
+            let copy = try await services.packages.duplicate(record, as: newName, in: repo)
+            upsert(copy)
+            selectedItemID = AnyHashable(copy.id)
+            return copy
+        } catch {
+            packageActionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Recompute the catalog projection from the current pkginfo set.
+    private func recomputeCatalogs() {
+        let captured = snapshot.pkginfos
+        Task {
+            let catalogs = await services.catalogs.catalogs(from: captured)
+            self.snapshot.catalogs = catalogs
         }
     }
 

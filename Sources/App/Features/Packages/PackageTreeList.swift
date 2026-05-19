@@ -11,6 +11,12 @@ struct PackageTreeList: View {
     let sort: PackageSort
     var forceExpandAll: Bool = false
 
+    @State private var renameTarget: PkginfoRecord?
+    @State private var renameText = ""
+    @State private var duplicateTarget: PkginfoRecord?
+    @State private var duplicateText = ""
+    @State private var deleteTarget: PkginfoRecord?
+
     var body: some View {
         @Bindable var bindableStore = store
         ScrollViewReader { proxy in
@@ -21,6 +27,7 @@ struct PackageTreeList: View {
                             .tag(tag)
                             .listRowSeparator(.hidden)
                             .accessibilityLabel(row.accessibilityLabel)
+                            .contextMenu { leafMenu(for: row) }
                     } else {
                         PackageRowView(row: row, folderIcon: grouping.folderIcon)
                             .listRowSeparator(.hidden)
@@ -31,7 +38,73 @@ struct PackageTreeList: View {
             .onChange(of: store.pendingRevealItemID, initial: true) { _, target in
                 revealItem(target, proxy: proxy)
             }
+            .alert("Rename Package File", isPresented: renamePresented) {
+                TextField("Filename", text: $renameText)
+                Button("Rename", action: commitRename)
+                Button("Cancel", role: .cancel) { renameTarget = nil }
+            } message: {
+                Text("Renames the pkginfo file on disk. The package name and any manifest references are left unchanged.")
+            }
+            .alert("Duplicate Package", isPresented: duplicatePresented) {
+                TextField("Filename", text: $duplicateText)
+                Button("Duplicate", action: commitDuplicate)
+                Button("Cancel", role: .cancel) { duplicateTarget = nil }
+            } message: {
+                Text("Creates a copy of this pkginfo file under a new filename.")
+            }
+            .alert("Delete Package", isPresented: deletePresented, presenting: deleteTarget) { record in
+                Button("Delete", role: .destructive) {
+                    Task { await store.deletePackage(record) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { record in
+                Text("Delete \u{201c}\(record.fileURL.lastPathComponent)\u{201d}? This removes the pkginfo file from disk and can't be undone.")
+            }
         }
+    }
+
+    @ViewBuilder
+    private func leafMenu(for row: PackageFlatRow) -> some View {
+        if case .leaf(let record) = row.kind {
+            Button("Rename\u{2026}") {
+                renameText = record.fileURL.deletingPathExtension().lastPathComponent
+                renameTarget = record
+            }
+            Button("Duplicate\u{2026}") {
+                duplicateText = record.fileURL.deletingPathExtension().lastPathComponent + " copy"
+                duplicateTarget = record
+            }
+            Divider()
+            Button("Delete\u{2026}", role: .destructive) {
+                deleteTarget = record
+            }
+        }
+    }
+
+    private var renamePresented: Binding<Bool> {
+        Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })
+    }
+    private var duplicatePresented: Binding<Bool> {
+        Binding(get: { duplicateTarget != nil }, set: { if !$0 { duplicateTarget = nil } })
+    }
+    private var deletePresented: Binding<Bool> {
+        Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
+    }
+
+    private func commitRename() {
+        guard let target = renameTarget else { return }
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        renameTarget = nil
+        guard !name.isEmpty else { return }
+        Task { await store.renamePackage(target, to: name) }
+    }
+
+    private func commitDuplicate() {
+        guard let target = duplicateTarget else { return }
+        let name = duplicateText.trimmingCharacters(in: .whitespacesAndNewlines)
+        duplicateTarget = nil
+        guard !name.isEmpty else { return }
+        Task { await store.duplicatePackage(target, as: name) }
     }
 
     /// Expand the category holding the reveal target and scroll its row

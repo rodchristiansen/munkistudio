@@ -94,6 +94,7 @@ private struct PackageEditor: View {
                 .buttonStyle(.plain)
             }
             Spacer()
+            RecordActionMenu(record: .package(record))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

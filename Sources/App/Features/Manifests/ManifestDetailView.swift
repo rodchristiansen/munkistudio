@@ -75,7 +75,9 @@ private struct ManifestEditor: View {
 
     private var identityCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            CardSectionHeader("Identity")
+            CardSectionHeader("Identity") {
+                RecordActionMenu(record: .manifest(record))
+            }
             VStack(alignment: .leading, spacing: 10) {
                 LabelledField("Name") {
                     Text(draft.wrappedValue.manifestName)
