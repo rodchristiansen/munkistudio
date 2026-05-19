@@ -17,6 +17,7 @@ struct IconNameField: View {
     @State private var customMode: Bool = false
     @State private var generating: Bool = false
     @State private var generateError: String?
+    @State private var generateStatus: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -89,6 +90,12 @@ struct IconNameField: View {
                     .onSubmit { loadImage() }
                     .onChange(of: iconName ?? "") { _, _ in loadImage() }
                 }
+                if let generateStatus {
+                    Text(generateStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer()
         }
@@ -106,16 +113,36 @@ struct IconNameField: View {
     }
 
     /// Run `iconimporter` for this package, then refresh the thumbnail.
+    /// iconimporter writes `<name>.png` for a single-app package, numbered
+    /// `<name>_N.png` variants for a multi-app one, or nothing when the
+    /// installer has no extractable application icon.
     private func generate() {
         guard let repo = store.repository, !packageName.isEmpty else { return }
+        let name = packageName
         generating = true
+        generateStatus = nil
         Task {
             do {
-                try await store.services.iconImporter.generateIcon(
-                    forItem: packageName,
+                let written = try await store.services.iconImporter.generateIcon(
+                    forItem: name,
                     force: true,
                     in: repo
                 )
+                // Refresh the icon list so the picker shows the new files.
+                if let icons = try? await store.services.icons.load(in: repo) {
+                    store.snapshot.icons = icons
+                }
+                switch written.count {
+                case 0:
+                    generateStatus = "No application icons found in the installer item."
+                case 1:
+                    let file = written[0]
+                    iconName = (file == "\(name).png") ? nil : file
+                    generateStatus = "Generated \(file)."
+                default:
+                    iconName = written[0]
+                    generateStatus = "iconimporter found \(written.count) icons — pick one from the menu."
+                }
             } catch {
                 generateError = error.localizedDescription
             }
@@ -148,11 +175,13 @@ struct IconNameField: View {
 
     private func loadImage() {
         let resolvedName = iconName ?? "\(packageName).png"
-        guard let repo = store.repository else {
+        // Read the bytes ourselves so a freshly regenerated icon always
+        // replaces a stale image rather than serving a cached NSImage.
+        guard let repo = store.repository,
+              let data = try? Data(contentsOf: repo.iconsURL.appending(path: resolvedName)) else {
             nsImage = nil
             return
         }
-        let url = repo.iconsURL.appending(path: resolvedName)
-        nsImage = NSImage(contentsOf: url)
+        nsImage = NSImage(data: data)
     }
 }

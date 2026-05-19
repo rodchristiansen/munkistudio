@@ -10,12 +10,11 @@ public actor IconImporterRunner: IconImporterService {
         self.executableURL = executableURL
     }
 
-    @discardableResult
     public func generateIcon(
         forItem itemName: String,
         force: Bool,
         in repository: MunkiRepository
-    ) async throws -> String {
+    ) async throws -> [String] {
         var args: [String] = []
         if force { args.append("--force") }
         args.append(contentsOf: ["--item", itemName])
@@ -42,6 +41,20 @@ public actor IconImporterRunner: IconImporterService {
                 output: output
             )
         }
-        return output
+        return Self.writtenIconNames(from: output)
+    }
+
+    /// Parse the `Wrote: icons/<file>` lines `iconimporter` prints into
+    /// the bare icon filenames it created.
+    static func writtenIconNames(from output: String) -> [String] {
+        var names: [String] = []
+        for line in output.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("Wrote:") else { continue }
+            let path = trimmed.dropFirst("Wrote:".count).trimmingCharacters(in: .whitespaces)
+            let name = (path as NSString).lastPathComponent
+            if !name.isEmpty { names.append(name) }
+        }
+        return names
     }
 }
