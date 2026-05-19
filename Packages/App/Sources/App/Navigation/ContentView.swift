@@ -19,6 +19,20 @@ struct ContentView: View {
         }
         .navigationTitle(store.repository?.displayName ?? "MunkiStudio")
         .task { await autoOpenIfAvailable() }
+        .sheet(isPresented: onboardingPresented) {
+            OnboardingView()
+        }
+    }
+
+    /// Drives the first-run onboarding sheet. Any dismissal — finishing,
+    /// skipping, or closing — marks onboarding complete so it shows once.
+    private var onboardingPresented: Binding<Bool> {
+        Binding(
+            get: { !settings.hasCompletedOnboarding },
+            set: { presented in
+                if !presented { settings.hasCompletedOnboarding = true }
+            }
+        )
     }
 
     /// Re-open the last repo automatically. Fires at most once per
