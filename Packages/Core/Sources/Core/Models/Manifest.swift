@@ -37,6 +37,26 @@ public struct Manifest: Sendable, Hashable, Codable, Identifiable {
         self.manifestName = manifestName
     }
 
+    /// Returns a human-readable reason `name` is unfit for a manifest
+    /// filename, or `nil` when it is valid. Slashes are allowed — they
+    /// nest the file under `manifests/` — but path traversal (`..`),
+    /// absolute paths and empty segments are rejected so a name can't
+    /// escape the `manifests/` directory.
+    public static func nameRejectionReason(_ name: String) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Enter a name." }
+        if trimmed.hasPrefix("/") { return "A name can't start with a slash." }
+        if trimmed.hasPrefix("~") { return "A name can't start with \u{201c}~\u{201d}." }
+        let segments = trimmed.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        for segment in segments {
+            if segment.isEmpty { return "A name can't contain an empty path segment." }
+            if segment == "." || segment == ".." {
+                return "A name can't contain \u{201c}.\u{201d} or \u{201c}..\u{201d} segments."
+            }
+        }
+        return nil
+    }
+
     private enum FixedKey: String, CodingKey {
         case catalogs
         case includedManifests = "included_manifests"

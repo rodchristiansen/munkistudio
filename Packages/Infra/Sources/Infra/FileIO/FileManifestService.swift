@@ -60,6 +60,9 @@ public actor FileManifestService: ManifestService {
         in repository: MunkiRepository,
         format: RepoFormat?
     ) async throws -> ManifestRecord {
+        if let reason = Manifest.nameRejectionReason(name) {
+            throw RepositoryError.invalidName(reason)
+        }
         let chosenFormat = format ?? repository.defaultFormat
         let filename = "\(name).\(chosenFormat.preferredExtension)"
         let url = repository.manifestsURL.appending(path: filename)
@@ -75,6 +78,39 @@ public actor FileManifestService: ManifestService {
 
     public func delete(_ record: ManifestRecord) async throws {
         try FileManager.default.removeItem(at: record.fileURL)
+    }
+
+    public func rename(
+        _ record: ManifestRecord,
+        to newName: String,
+        in repository: MunkiRepository
+    ) async throws -> ManifestRecord {
+        if let reason = Manifest.nameRejectionReason(newName) {
+            throw RepositoryError.invalidName(reason)
+        }
+        // Preserve the file's on-disk extension form — manifests may
+        // legitimately live without an extension.
+        let ext = record.fileURL.pathExtension
+        let filename = ext.isEmpty ? newName : "\(newName).\(ext)"
+        let newURL = repository.manifestsURL.appending(path: filename)
+        guard newURL != record.fileURL else { return record }
+        if FileManager.default.fileExists(atPath: newURL.path) {
+            throw RepositoryError.duplicateName(filename)
+        }
+        var manifest = record.manifest
+        manifest.manifestName = newName
+        let renamed = ManifestRecord(manifest: manifest, fileURL: newURL, format: record.format)
+        try ManifestFileCoder.write(renamed)
+        try FileManager.default.removeItem(at: record.fileURL)
+        return renamed
+    }
+
+    public func duplicate(
+        _ record: ManifestRecord,
+        as newName: String,
+        in repository: MunkiRepository
+    ) async throws -> ManifestRecord {
+        try await create(named: newName, body: record.manifest, in: repository, format: record.format)
     }
 
     public func convertFormat(

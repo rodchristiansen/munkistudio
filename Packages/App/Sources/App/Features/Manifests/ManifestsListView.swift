@@ -8,6 +8,7 @@ struct ManifestsListView: View {
     @State private var search: String = ""
     @State private var criteriaGroup = ManifestCriteriaGroup()
     @State private var filterPopoverShown = false
+    @State private var showNewManifest = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -22,6 +23,13 @@ struct ManifestsListView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 Spacer()
+                Button {
+                    showNewManifest = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("New manifest")
+                .disabled(store.repository == nil)
                 filterButton
                 SortMenu(sort: $bindableStore.manifestsSort)
             }
@@ -51,6 +59,21 @@ struct ManifestsListView: View {
         }
         .navigationTitle("Manifests")
         .navigationSubtitle(manifestsSubtitle)
+        .sheet(isPresented: $showNewManifest) {
+            NewManifestSheet()
+        }
+        .alert("Couldn't Complete Action", isPresented: errorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(store.manifestActionError ?? "")
+        }
+    }
+
+    private var errorPresented: Binding<Bool> {
+        Binding(
+            get: { store.manifestActionError != nil },
+            set: { if !$0 { store.manifestActionError = nil } }
+        )
     }
 
     /// Manifest count plus the total number of `included_manifests`
@@ -150,5 +173,70 @@ enum ManifestGrouping: String, CaseIterable, Identifiable, Hashable {
         case .types: "square.stack.3d.up"
         case .catalogs: "books.vertical"
         }
+    }
+}
+
+/// Sheet for creating a new, empty manifest — a name (slashes allowed for
+/// nesting) and the on-disk format.
+private struct NewManifestSheet: View {
+    @Environment(RepositoryStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var format: RepoFormat = .plist
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// `nil` while the field is empty (show the neutral hint instead) or
+    /// when the name is valid; otherwise the reason it's rejected.
+    private var rejectionReason: String? {
+        name.isEmpty ? nil : Manifest.nameRejectionReason(name)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New Manifest").font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Manifest name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                if let rejectionReason {
+                    Text(rejectionReason)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("Use slashes to nest, e.g. labs/imac-lab.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Picker("Format", selection: $format) {
+                ForEach(RepoFormat.allCases, id: \.self) { fmt in
+                    Text(fmt.preferredExtension.uppercased()).tag(fmt)
+                }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Create") { create() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(Manifest.nameRejectionReason(name) != nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear { format = store.repository?.defaultFormat ?? .plist }
+    }
+
+    private func create() {
+        guard Manifest.nameRejectionReason(name) == nil else { return }
+        let chosenName = trimmedName
+        let chosenFormat = format
+        dismiss()
+        Task { await store.createManifest(named: chosenName, format: chosenFormat) }
     }
 }

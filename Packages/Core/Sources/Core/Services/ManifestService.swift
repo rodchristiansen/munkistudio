@@ -21,6 +21,21 @@ public protocol ManifestService: Sendable {
 
     func delete(_ record: ManifestRecord) async throws
 
+    /// Rename a manifest. The file moves to a path derived from `newName`
+    /// (nested paths allowed) and `manifestName` is updated to match.
+    func rename(
+        _ record: ManifestRecord,
+        to newName: String,
+        in repository: MunkiRepository
+    ) async throws -> ManifestRecord
+
+    /// Duplicate a manifest under `newName`, copying its full contents.
+    func duplicate(
+        _ record: ManifestRecord,
+        as newName: String,
+        in repository: MunkiRepository
+    ) async throws -> ManifestRecord
+
     func convertFormat(
         _ record: ManifestRecord,
         to format: RepoFormat
