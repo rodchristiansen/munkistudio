@@ -238,12 +238,13 @@ public extension ManifestCriterion {
     private func arrayValue(in ctx: ManifestRecordContext) -> [String] {
         switch attribute {
         case .anyInstallsItem:
-            return (ctx.manifest.managedInstalls ?? [])
-                + (ctx.manifest.managedUninstalls ?? [])
-                + (ctx.manifest.managedUpdates ?? [])
-                + (ctx.manifest.optionalInstalls ?? [])
-                + (ctx.manifest.defaultInstalls ?? [])
-                + (ctx.manifest.featuredItems ?? [])
+            var items: [String] = ctx.manifest.managedInstalls ?? []
+            items += ctx.manifest.managedUninstalls ?? []
+            items += ctx.manifest.managedUpdates ?? []
+            items += ctx.manifest.optionalInstalls ?? []
+            items += ctx.manifest.defaultInstalls ?? []
+            items += ctx.manifest.featuredItems ?? []
+            return items
         case .anyCatalog: return ctx.manifest.catalogs ?? []
         case .anyManagedInstallsItem: return ctx.manifest.managedInstalls ?? []
         case .anyManagedUninstallsItem: return ctx.manifest.managedUninstalls ?? []
