@@ -168,9 +168,11 @@ pkg: sign-app
 	@mkdir -p $(PKG_PROJECT)/payload/Applications
 	ditto $(APP_BUNDLE) $(PKG_PROJECT)/payload/Applications/$(APP_NAME).app
 	@printf '%s\n' \
+	    "name: $(APP_NAME)-$(VERSION).pkg" \
 	    "identifier: $(PKG_ID)" \
-	    "install_location: /" \
 	    "version: '$(VERSION)'" \
+	    "distribution_style: true" \
+	    "install_location: /" \
 	    "ownership: recommended" \
 	    "postinstall_action: none" \
 	    "suppress_bundle_relocation: true" \
