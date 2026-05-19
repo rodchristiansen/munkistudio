@@ -21,16 +21,22 @@ public struct DependencyGraph: Sendable {
     }
 
     public struct Edge: Sendable, Hashable {
-        public enum Kind: Sendable, Hashable { case requires, updateFor, manifestInclusion }
+        public enum Kind: Sendable, Hashable {
+            case requires, updateFor, manifestInclusion, conditionalInclusion
+        }
 
         public var from: String
         public var to: String
         public var kind: Kind
+        /// For `.conditionalInclusion` edges, the manifest `condition`
+        /// string that gates the inclusion. `nil` for every other kind.
+        public var condition: String?
 
-        public init(from: String, to: String, kind: Kind) {
+        public init(from: String, to: String, kind: Kind, condition: String? = nil) {
             self.from = from
             self.to = to
             self.kind = kind
+            self.condition = condition
         }
     }
 
@@ -94,23 +100,69 @@ public enum ManifestGraphBuilder {
     /// reference includes inconsistently — `CoreManifest`, `Assigned.yaml`
     /// and `Foo.plist` all occur. Both sides are canonicalised to the
     /// extensionless form so a reference always resolves to its manifest.
+    /// Builds the inclusion graph. Top-level `included_manifests` become
+    /// `.manifestInclusion` edges; manifests pulled in from inside a
+    /// `conditional_items` block become `.conditionalInclusion` edges
+    /// carrying the gating `condition`. An unconditional inclusion always
+    /// wins — a conditional edge is only emitted when no unconditional
+    /// edge already connects the same pair.
     public static func build(manifests: [Manifest]) -> DependencyGraph {
         let existing = Set(manifests.map { canonicalName($0.manifestName) })
         var edges: [DependencyGraph.Edge] = []
         var seen = Set<String>()
         var nodeNames = Set<String>()
 
+        func addEdge(
+            from: String,
+            to rawTarget: String,
+            kind: DependencyGraph.Edge.Kind,
+            condition: String?
+        ) {
+            let target = canonicalName(rawTarget)
+            guard from != target, !target.isEmpty else { return }
+            let key = "\(from)\u{1f}\(target)"
+            guard seen.insert(key).inserted else { return }
+            edges.append(.init(from: from, to: target, kind: kind, condition: condition))
+            nodeNames.insert(target)
+        }
+
+        // Flatten conditional includes, recursing through nested
+        // `conditional_items`. Each carries the condition of the block
+        // that directly holds the `included_manifests`.
+        func conditionalIncludes(
+            _ items: [ConditionalItem],
+            into result: inout [(target: String, condition: String)]
+        ) {
+            for item in items {
+                for included in item.includedManifests ?? [] {
+                    result.append((included, item.condition))
+                }
+                if let nested = item.conditionalItems {
+                    conditionalIncludes(nested, into: &result)
+                }
+            }
+        }
+
+        // Pass 1 — every manifest is a node; unconditional includes.
         for manifest in manifests {
             let name = canonicalName(manifest.manifestName)
             guard !name.isEmpty else { continue }
             nodeNames.insert(name)
             for included in manifest.includedManifests ?? [] {
-                let target = canonicalName(included)
-                guard name != target, !target.isEmpty else { continue }
-                let key = "\(name)\u{1f}\(target)"
-                guard seen.insert(key).inserted else { continue }
-                edges.append(.init(from: name, to: target, kind: .manifestInclusion))
-                nodeNames.insert(target)
+                addEdge(from: name, to: included, kind: .manifestInclusion, condition: nil)
+            }
+        }
+
+        // Pass 2 — conditional includes, skipped where an unconditional
+        // edge already exists for the same pair.
+        for manifest in manifests {
+            let name = canonicalName(manifest.manifestName)
+            guard !name.isEmpty, let conditionals = manifest.conditionalItems else { continue }
+            var collected: [(target: String, condition: String)] = []
+            conditionalIncludes(conditionals, into: &collected)
+            for entry in collected {
+                addEdge(from: name, to: entry.target, kind: .conditionalInclusion,
+                        condition: entry.condition)
             }
         }
 
