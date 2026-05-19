@@ -63,7 +63,7 @@ ICON_SRC      := resources/$(APP_NAME).icon
 ICON_BUILD    := $(BUILD_DIR)/actool-out
 
 .PHONY: app release run clean dist sign-app build-pkg sign-pkg \
-        notarize-pkg verify check-signing-config list-identities help
+        notarize-pkg notarize verify check-signing-config list-identities help
 
 # --- Development ---------------------------------------------------------
 
@@ -160,9 +160,16 @@ sign-pkg: build-pkg
 	    $(PKG_OUTPUT) $(PKG_OUTPUT).signed
 	@mv $(PKG_OUTPUT).signed $(PKG_OUTPUT)
 
-# Notarize via a notarytool keychain profile when one is configured,
-# otherwise fall back to an Apple ID + app-specific password.
-notarize-pkg: sign-pkg
+# Full chain: build + sign the package, then notarize it.
+notarize-pkg: sign-pkg notarize
+
+# Notarize + staple an already-signed .pkg. No build prerequisites, so
+# this also serves as a cheap retry after a transient notary-network
+# failure — `make notarize` resubmits the existing package. Uses a
+# notarytool keychain profile when configured, otherwise an Apple ID
+# and app-specific password.
+notarize:
+	@test -f "$(PKG_OUTPUT)" || { echo "No signed package at $(PKG_OUTPUT) — run 'make dist' first."; exit 1; }
 	@echo "Submitting $(PKG_OUTPUT) to Apple — this can take a few minutes."
 	@if [ -n "$(NOTARIZATION_PROFILE)" ]; then \
 	    xcrun notarytool submit "$(PKG_OUTPUT)" \
@@ -173,7 +180,7 @@ notarize-pkg: sign-pkg
 	        --password "$(NOTARIZATION_PASSWORD)" \
 	        --team-id "$(TEAM_ID)" --wait; \
 	fi
-	xcrun stapler staple $(PKG_OUTPUT)
+	xcrun stapler staple "$(PKG_OUTPUT)"
 
 verify:
 	@test -f $(PKG_OUTPUT) || { echo "No package at $(PKG_OUTPUT) — run 'make dist' first."; exit 1; }
@@ -197,6 +204,7 @@ help:
 	@echo "  make run              build (debug) and launch"
 	@echo "  make release          release build of the .app"
 	@echo "  make dist             signed + notarized .pkg for the Munki repo"
+	@echo "  make notarize         re-notarize an already-built .pkg (retry)"
 	@echo "  make verify           re-check an existing package"
 	@echo "  make list-identities  show keychain signing identities"
 	@echo "  make clean            remove build artifacts"
