@@ -53,7 +53,6 @@ VERSION           := $(or $(call strip_quotes,$(VERSION)),$(shell date '+%Y.%m.%
 MARKETING_VERSION := $(shell echo $(VERSION) | sed 's/\.[^.]*$$//')
 BUILD             := $(shell echo $(VERSION) | sed 's/.*\.//')
 
-APP_PACKAGE   := Packages/App
 APP_NAME      := MunkiStudio
 BUILD_DIR     := build
 APP_BUNDLE    := $(BUILD_DIR)/$(APP_NAME).app
@@ -62,7 +61,9 @@ APP_MACOS     := $(APP_CONTENTS)/MacOS
 APP_RESOURCES := $(APP_CONTENTS)/Resources
 PKG_PROJECT   := $(BUILD_DIR)/munkipkg
 PKG_OUTPUT    := $(BUILD_DIR)/$(APP_NAME)-$(VERSION).pkg
-BIN_PATH       = $(APP_PACKAGE)/.build/$(CONFIGURATION)/$(APP_NAME)
+BIN_PATH       = .build/$(CONFIGURATION)/$(APP_NAME)
+INFO_PLIST    := resources/Info.plist
+ENTITLEMENTS  := resources/MunkiStudio.entitlements
 
 # munkipkg builds, signs, notarizes, and staples the installer package.
 MUNKIPKG      ?= /usr/local/munki/munkipkg
@@ -95,23 +96,21 @@ release: $(APP_BUNDLE)
 run: app
 	open $(APP_BUNDLE)
 
-# Run the unit tests. The App package has no test target — tests live
-# in Core and Infra.
+# Run the unit tests — the CoreTests and InfraTests suites.
 test:
-	cd Packages/Core && swift test
-	cd Packages/Infra && swift test
+	swift test
 
 # Build the SPM binary and assemble the .app bundle. The ad-hoc
 # signature is enough for local runs; `make dist` re-signs with a real
 # Developer ID identity before packaging.
 $(APP_BUNDLE): FORCE | $(BUILD_DIR)
-	cd $(APP_PACKAGE) && swift build -c $(CONFIGURATION)
+	swift build -c $(CONFIGURATION)
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(APP_MACOS) $(APP_RESOURCES)
 	cp $(BIN_PATH) $(APP_MACOS)/$(APP_NAME)
 	@chmod +x $(APP_MACOS)/$(APP_NAME)
 	@./scripts/render-info-plist.sh \
-	    $(APP_PACKAGE)/Info.plist \
+	    $(INFO_PLIST) \
 	    "$(BUNDLE_ID)" "$(MARKETING_VERSION)" "$(BUILD)" \
 	    > $(APP_CONTENTS)/Info.plist
 	@if [ -d "$(ICON_SRC)" ]; then \
@@ -129,7 +128,7 @@ $(APP_BUNDLE): FORCE | $(BUILD_DIR)
 	    echo "No app icon at $(ICON_SRC) — building without one."; \
 	fi
 	codesign --force --options runtime \
-	    --entitlements $(APP_PACKAGE)/MunkiStudio.entitlements \
+	    --entitlements $(ENTITLEMENTS) \
 	    --sign "$(SIGN_IDENTITY)" \
 	    $(APP_BUNDLE)
 
@@ -140,7 +139,7 @@ FORCE:
 
 clean:
 	rm -rf $(BUILD_DIR)
-	cd $(APP_PACKAGE) && swift package clean
+	swift package clean
 
 # --- Release pipeline ----------------------------------------------------
 
@@ -154,7 +153,7 @@ dist: pkg verify
 sign-app: check-signing-config release
 	@echo "Signing $(APP_BUNDLE)"
 	codesign --force --options runtime --timestamp \
-	    --entitlements $(APP_PACKAGE)/MunkiStudio.entitlements \
+	    --entitlements $(ENTITLEMENTS) \
 	    --sign "$(SIGNING_IDENTITY_APP)" \
 	    $(APP_BUNDLE)
 
