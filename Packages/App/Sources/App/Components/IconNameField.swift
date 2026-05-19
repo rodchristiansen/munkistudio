@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 import Core
 
-/// `icon_name` editor: a thumbnail of the resolved icon next to a Menu
-/// that lists every file under the repo's `icons/` directory, plus a
-/// "Custom…" item that falls through to a free-text field for hand-typed
-/// names (for icons that don't exist yet on disk). Lives in the Basic
-/// Info panel.
+/// `icon_name` editor: a thumbnail of the resolved icon next to a
+/// searchable picker that filters every file under the repo's `icons/`
+/// directory, plus a "Custom…" entry that falls through to a free-text
+/// field for hand-typed names (for icons that don't exist yet on disk).
+/// Lives in the Basic Info panel.
 struct IconNameField: View {
     @Environment(RepositoryStore.self) private var store
     @Binding var iconName: String?
@@ -18,35 +18,20 @@ struct IconNameField: View {
     @State private var generating: Bool = false
     @State private var generateError: String?
     @State private var generateStatus: String?
+    @State private var pickerOpen: Bool = false
+    @State private var iconQuery: String = ""
+    @FocusState private var iconQueryFocused: Bool
+    /// Filenames the most recent Generate run produced — pinned to the
+    /// top of the picker so freshly created icons are easy to choose.
+    @State private var generatedIcons: [String] = []
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             thumbnail
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Menu {
-                        // When the user picks the "default" entry we
-                        // unset `icon_name` — Munki resolves to
-                        // `<name>.png` automatically, so a value here
-                        // would be a no-op.
-                        Button("Use default") {
-                            iconName = nil
-                            customMode = false
-                            loadImage()
-                        }
-                        Divider()
-                        ForEach(availableIcons, id: \.self) { name in
-                            Button(name) {
-                                iconName = name
-                                customMode = false
-                                loadImage()
-                            }
-                        }
-                        Divider()
-                        Button("Custom…") {
-                            customMode = true
-                            if iconName == nil { iconName = "" }
-                        }
+                    Button {
+                        pickerOpen = true
                     } label: {
                         HStack(spacing: 4) {
                             // The label only shows what the user
@@ -63,9 +48,13 @@ struct IconNameField: View {
                                 .imageScale(.small)
                                 .foregroundStyle(.secondary)
                         }
+                        .contentShape(.rect)
                     }
-                    .menuStyle(.borderlessButton)
+                    .buttonStyle(.plain)
                     .fixedSize(horizontal: false, vertical: true)
+                    .popover(isPresented: $pickerOpen, arrowEdge: .top) {
+                        iconPickerPopover
+                    }
 
                     Button(action: generate) {
                         if generating {
@@ -132,6 +121,7 @@ struct IconNameField: View {
                 if let icons = try? await store.services.icons.load(in: repo) {
                     store.snapshot.icons = icons
                 }
+                generatedIcons = written
                 switch written.count {
                 case 0:
                     generateStatus = "No application icons found in the installer item."
@@ -149,6 +139,146 @@ struct IconNameField: View {
             generating = false
             loadImage()
         }
+    }
+
+    // MARK: Searchable icon picker
+
+    private var iconPickerPopover: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Filter icons", text: $iconQuery)
+                    .textFieldStyle(.plain)
+                    .focused($iconQueryFocused)
+                    .onSubmit(selectFirstMatch)
+                if !iconQuery.isEmpty {
+                    Button {
+                        iconQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(8)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    pickerRow(
+                        label: "Use default (\(packageName).png)",
+                        iconFile: "\(packageName).png",
+                        selected: iconName == nil
+                    ) {
+                        iconName = nil
+                        customMode = false
+                    }
+                    if !filteredGenerated.isEmpty {
+                        sectionHeader("Just generated")
+                        ForEach(filteredGenerated, id: \.self) { name in
+                            pickerRow(label: name, iconFile: name, selected: iconName == name) {
+                                iconName = name
+                                customMode = false
+                            }
+                        }
+                    }
+                    if !filteredOtherIcons.isEmpty {
+                        sectionHeader(generatedIcons.isEmpty ? "Icons" : "All icons")
+                        ForEach(filteredOtherIcons, id: \.self) { name in
+                            pickerRow(label: name, iconFile: name, selected: iconName == name) {
+                                iconName = name
+                                customMode = false
+                            }
+                        }
+                    }
+                    if !iconQuery.isEmpty, filteredGenerated.isEmpty, filteredOtherIcons.isEmpty {
+                        Text("No matching icons")
+                            .foregroundStyle(.secondary)
+                            .padding(8)
+                    }
+                    Divider().padding(.vertical, 2)
+                    pickerRow(label: "Custom\u{2026}", iconFile: nil, selected: false) {
+                        customMode = true
+                        if iconName == nil { iconName = "" }
+                    }
+                }
+            }
+            .frame(maxHeight: 300)
+        }
+        .frame(width: 320)
+        .onAppear { iconQueryFocused = true }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+    }
+
+    private func pickerRow(
+        label: String,
+        iconFile: String?,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+            pickerOpen = false
+            iconQuery = ""
+            loadImage()
+        } label: {
+            HStack(spacing: 8) {
+                IconThumbnail(url: iconURL(for: iconFile))
+                Text(label)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .imageScale(.small)
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func iconURL(for filename: String?) -> URL? {
+        guard let filename, let repo = store.repository else { return nil }
+        return repo.iconsURL.appending(path: filename)
+    }
+
+    private func matches(_ names: [String]) -> [String] {
+        guard !iconQuery.isEmpty else { return names }
+        let query = iconQuery.lowercased()
+        return names.filter { $0.lowercased().contains(query) }
+    }
+
+    private var filteredGenerated: [String] {
+        matches(generatedIcons)
+    }
+
+    /// Every repo icon except those already shown under "Just generated".
+    private var filteredOtherIcons: [String] {
+        let generated = Set(generatedIcons)
+        return matches(availableIcons.filter { !generated.contains($0) })
+    }
+
+    private func selectFirstMatch() {
+        guard let first = (filteredGenerated + filteredOtherIcons).first else { return }
+        iconName = first
+        customMode = false
+        pickerOpen = false
+        iconQuery = ""
+        loadImage()
     }
 
     private var thumbnail: some View {
@@ -183,5 +313,36 @@ struct IconNameField: View {
             return
         }
         nsImage = NSImage(data: data)
+    }
+}
+
+/// 32×32 preview of an icon file for a picker row. Loads lazily so a
+/// long list only reads the icons actually scrolled into view.
+private struct IconThumbnail: View {
+    let url: URL?
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else if url != nil {
+                Image(systemName: "photo")
+                    .foregroundStyle(.quaternary)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: 32, height: 32)
+        .task(id: url) {
+            guard let url, let data = try? Data(contentsOf: url) else {
+                image = nil
+                return
+            }
+            image = NSImage(data: data)
+        }
     }
 }
