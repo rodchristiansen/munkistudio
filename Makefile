@@ -13,10 +13,13 @@
 #   make run              build (debug) and launch
 #   make release          release build of the .app (ad-hoc signed)
 #
-# Signing credentials are read from a gitignored .env file. Copy
-# .env.example to .env and fill in the SIGNING_IDENTITY_* and
-# NOTARIZATION_* values. `make list-identities` prints the Developer ID
-# certificates in your keychain.
+# `make` builds and signs the release app, then hands it to munkipkg,
+# which builds, signs, notarizes, and staples the .pkg. Signing config
+# is read from a gitignored .env file — copy .env.example to .env and
+# fill in SIGNING_IDENTITY_APP, SIGNING_IDENTITY_INSTALLER, and
+# NOTARIZATION_PROFILE (a notarytool keychain profile, created once with
+# `xcrun notarytool store-credentials`). `make list-identities` prints
+# the Developer ID certificates in your keychain.
 #
 # The app icon is an Icon Composer .icon bundle at resources/MunkiStudio.icon;
 # when present it is compiled with actool into the bundle. Builds run fine
@@ -57,18 +60,20 @@ APP_BUNDLE    := $(BUILD_DIR)/$(APP_NAME).app
 APP_CONTENTS  := $(APP_BUNDLE)/Contents
 APP_MACOS     := $(APP_CONTENTS)/MacOS
 APP_RESOURCES := $(APP_CONTENTS)/Resources
-PKG_PAYLOAD   := $(BUILD_DIR)/pkg-payload
-COMPONENT     := $(BUILD_DIR)/component.plist
+PKG_PROJECT   := $(BUILD_DIR)/munkipkg
 PKG_OUTPUT    := $(BUILD_DIR)/$(APP_NAME)-$(VERSION).pkg
 BIN_PATH       = $(APP_PACKAGE)/.build/$(CONFIGURATION)/$(APP_NAME)
+
+# munkipkg builds, signs, notarizes, and staples the installer package.
+MUNKIPKG      ?= /usr/local/munki/munkipkg
 
 # Icon Composer (.icon) bundle — the macOS 26 Liquid Glass app icon.
 # Drop the artwork at $(ICON_SRC); builds without it ship iconless.
 ICON_SRC      := resources/$(APP_NAME).icon
 ICON_BUILD    := $(BUILD_DIR)/actool-out
 
-.PHONY: all app release run test clean dist sign-app build-pkg sign-pkg \
-        notarize-pkg notarize verify check-signing-config list-identities help
+.PHONY: all app release run test clean dist sign-app pkg verify \
+        check-signing-config list-identities help
 
 # Bare `make` builds the full signed + notarized release, matching the
 # other Munki tooling repos. Use `make app` for a quick dev build.
@@ -139,7 +144,7 @@ clean:
 
 # --- Release pipeline ----------------------------------------------------
 
-dist: notarize-pkg verify
+dist: pkg verify
 	@echo
 	@echo "Release package ready: $(PKG_OUTPUT)"
 	@echo "Import it into your Munki repo with munkiimport."
@@ -153,56 +158,35 @@ sign-app: check-signing-config release
 	    --sign "$(SIGNING_IDENTITY_APP)" \
 	    $(APP_BUNDLE)
 
-# Wrap the signed app in a component package that installs to
-# /Applications. Bundle relocation is disabled so an existing copy
-# elsewhere on disk cannot redirect the install.
-build-pkg: sign-app
-	@rm -rf $(PKG_PAYLOAD)
+# Assemble a munkipkg project around the signed app, then let munkipkg
+# build, sign, notarize, and staple the installer package. The project
+# is generated fresh under build/ each run; build-info carries the
+# installer identity and the notarytool keychain profile.
+pkg: sign-app
+	@rm -rf $(PKG_PROJECT)
 	@rm -f $(BUILD_DIR)/$(APP_NAME)-*.pkg
-	@mkdir -p $(PKG_PAYLOAD)
-	ditto $(APP_BUNDLE) $(PKG_PAYLOAD)/$(APP_NAME).app
-	pkgbuild --analyze --root $(PKG_PAYLOAD) $(COMPONENT)
-	/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" $(COMPONENT)
-	pkgbuild --root $(PKG_PAYLOAD) \
-	    --component-plist $(COMPONENT) \
-	    --install-location /Applications \
-	    --identifier $(PKG_ID) \
-	    --version $(VERSION) \
-	    $(PKG_OUTPUT)
-
-sign-pkg: build-pkg
-	@echo "Signing $(PKG_OUTPUT)"
-	productsign --sign "$(SIGNING_IDENTITY_INSTALLER)" --timestamp \
-	    $(PKG_OUTPUT) $(PKG_OUTPUT).signed
-	@mv $(PKG_OUTPUT).signed $(PKG_OUTPUT)
-
-# Full chain: build + sign the package, then notarize it.
-notarize-pkg: sign-pkg notarize
-
-# Notarize + staple an already-signed .pkg. No build prerequisites, so
-# this also serves as a retry after a transient notary failure —
-# `make notarize` resubmits the package already in build/. Resolves the
-# package by glob since the timestamp version differs between separate
-# make invocations. Uses a notarytool keychain profile when configured,
-# otherwise an Apple ID and app-specific password.
-notarize:
-	@pkg=$$(ls -t $(BUILD_DIR)/$(APP_NAME)-*.pkg 2>/dev/null | head -1); \
-	if [ -z "$$pkg" ]; then echo "No package in $(BUILD_DIR)/ — run 'make dist' first."; exit 1; fi; \
-	echo "Submitting $$pkg to Apple — this can take a few minutes."; \
-	if [ -n "$(NOTARIZATION_PROFILE)" ]; then \
-	    xcrun notarytool submit "$$pkg" \
-	        --keychain-profile "$(NOTARIZATION_PROFILE)" --wait; \
-	else \
-	    xcrun notarytool submit "$$pkg" \
-	        --apple-id "$(NOTARIZATION_APPLE_ID)" \
-	        --password "$(NOTARIZATION_PASSWORD)" \
-	        --team-id "$(TEAM_ID)" --wait; \
-	fi; \
-	xcrun stapler staple "$$pkg"
+	@mkdir -p $(PKG_PROJECT)/payload/Applications
+	ditto $(APP_BUNDLE) $(PKG_PROJECT)/payload/Applications/$(APP_NAME).app
+	@printf '%s\n' \
+	    "identifier: $(PKG_ID)" \
+	    "install_location: /" \
+	    "version: '$(VERSION)'" \
+	    "ownership: recommended" \
+	    "postinstall_action: none" \
+	    "suppress_bundle_relocation: true" \
+	    "signing_info:" \
+	    "  identity: '$(SIGNING_IDENTITY_INSTALLER)'" \
+	    "  timestamp: true" \
+	    "notarization_info:" \
+	    "  keychain_profile: $(NOTARIZATION_PROFILE)" \
+	    > $(PKG_PROJECT)/build-info.yaml
+	$(MUNKIPKG) --build --skip-import $(PKG_PROJECT)
+	@cp $(PKG_PROJECT)/build/*.pkg $(PKG_OUTPUT)
+	@echo "Built $(PKG_OUTPUT)"
 
 verify:
 	@pkg=$$(ls -t $(BUILD_DIR)/$(APP_NAME)-*.pkg 2>/dev/null | head -1); \
-	if [ -z "$$pkg" ]; then echo "No package in $(BUILD_DIR)/ — run 'make dist' first."; exit 1; fi; \
+	if [ -z "$$pkg" ]; then echo "No package in $(BUILD_DIR)/ — run 'make' first."; exit 1; fi; \
 	pkgutil --check-signature "$$pkg"; \
 	xcrun stapler validate "$$pkg"; \
 	spctl --assess --type install -vv "$$pkg"; \
@@ -211,7 +195,7 @@ verify:
 check-signing-config:
 	@test -n "$(SIGNING_IDENTITY_APP)" || { echo "SIGNING_IDENTITY_APP is not set — copy .env.example to .env and fill it in."; exit 1; }
 	@test -n "$(SIGNING_IDENTITY_INSTALLER)" || { echo "SIGNING_IDENTITY_INSTALLER is not set — copy .env.example to .env and fill it in."; exit 1; }
-	@test -n "$(NOTARIZATION_PROFILE)$(NOTARIZATION_APPLE_ID)" || { echo "Set NOTARIZATION_PROFILE, or NOTARIZATION_APPLE_ID + NOTARIZATION_PASSWORD + TEAM_ID, in .env."; exit 1; }
+	@test -n "$(NOTARIZATION_PROFILE)" || { echo "NOTARIZATION_PROFILE is not set — copy .env.example to .env and fill it in."; exit 1; }
 	@echo "Signing configuration OK."
 
 list-identities:
@@ -224,7 +208,6 @@ help:
 	@echo "  make run              build (debug) and launch"
 	@echo "  make release          release build of the .app"
 	@echo "  make test             run the Core and Infra unit tests"
-	@echo "  make notarize         re-notarize an already-built .pkg (retry)"
 	@echo "  make verify           re-check an existing package"
 	@echo "  make list-identities  show keychain signing identities"
 	@echo "  make clean            remove build artifacts"
