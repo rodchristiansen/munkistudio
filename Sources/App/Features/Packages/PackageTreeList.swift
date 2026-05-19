@@ -42,11 +42,17 @@ struct PackageTreeList: View {
               let record = records.first(where: { $0.fileURL == url }) else { return }
         store.expandedCategories.insert(groupKey(for: record))
         store.pendingRevealItemID = nil
-        // The leaf row only exists once the expansion above re-renders
-        // the list, so defer the scroll a tick.
+        // Two-pass scroll: a lazy List hasn't measured rows it has never
+        // drawn, so a single scrollTo to an off-screen row lands short.
+        // The first pass jumps roughly there and forces those rows to be
+        // realised; the second lands on the row precisely.
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(60))
-            withAnimation { proxy.scrollTo(url.path, anchor: .center) }
+            try? await Task.sleep(for: .milliseconds(50))
+            proxy.scrollTo(url.path, anchor: .center)
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(url.path, anchor: .center)
+            }
         }
     }
 

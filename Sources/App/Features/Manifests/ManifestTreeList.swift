@@ -123,12 +123,18 @@ struct ManifestTreeList: View {
               let record = records.first(where: { $0.fileURL == url }) else { return }
         expandAncestors(of: record)
         store.pendingRevealItemID = nil
-        // The leaf row only exists once the expansion above re-renders
-        // the list, so defer the scroll a tick.
+        // Two-pass scroll: a lazy List hasn't measured rows it has never
+        // drawn, so a single scrollTo to an off-screen row lands short.
+        // The first pass jumps roughly there and forces those rows to be
+        // realised; the second lands on the row precisely.
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(60))
+            try? await Task.sleep(for: .milliseconds(50))
             guard let rowID = leafRowID(for: record) else { return }
-            withAnimation { proxy.scrollTo(rowID, anchor: .center) }
+            proxy.scrollTo(rowID, anchor: .center)
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(rowID, anchor: .center)
+            }
         }
     }
 
