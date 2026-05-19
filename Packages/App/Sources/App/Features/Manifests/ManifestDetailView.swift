@@ -57,19 +57,18 @@ private struct ManifestEditor: View {
                 identityCard
                 catalogsCard
                 includedManifestsCard
-                ManifestItemListEditor(title: "Managed installs", kind: .managedInstalls, manifest: draft, availableNames: availablePackageNames)
-                ManifestItemListEditor(title: "Managed updates", kind: .managedUpdates, manifest: draft, availableNames: availablePackageNames)
-                ManifestItemListEditor(title: "Managed uninstalls", kind: .managedUninstalls, manifest: draft, availableNames: availablePackageNames)
-                ManifestItemListEditor(title: "Optional installs", kind: .optionalInstalls, manifest: draft, availableNames: availablePackageNames)
-                ManifestItemListEditor(title: "Featured items", kind: .featuredItems, manifest: draft, availableNames: availablePackageNames)
-                ManifestItemListEditor(title: "Default installs", kind: .defaultInstalls, manifest: draft, availableNames: availablePackageNames)
+                itemListCard("Managed installs", kind: .managedInstalls)
+                itemListCard("Managed updates", kind: .managedUpdates)
+                itemListCard("Managed uninstalls", kind: .managedUninstalls)
+                itemListCard("Optional installs", kind: .optionalInstalls)
+                itemListCard("Featured items", kind: .featuredItems)
+                itemListCard("Default installs", kind: .defaultInstalls)
                 conditionsCard
                 fileCard
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(16)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     // MARK: Cards
@@ -123,6 +122,15 @@ private struct ManifestEditor: View {
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .cardStyle()
+        }
+    }
+
+    private func itemListCard(_ title: String, kind: ManifestItemListEditor.Kind) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader(title)
+            ManifestItemListEditor(kind: kind, manifest: draft, availableNames: availablePackageNames)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
         }
     }
 
