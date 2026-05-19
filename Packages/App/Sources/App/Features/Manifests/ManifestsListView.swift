@@ -188,15 +188,27 @@ private struct NewManifestSheet: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// `nil` while the field is empty (show the neutral hint instead) or
+    /// when the name is valid; otherwise the reason it's rejected.
+    private var rejectionReason: String? {
+        name.isEmpty ? nil : Manifest.nameRejectionReason(name)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Manifest").font(.headline)
             VStack(alignment: .leading, spacing: 4) {
                 TextField("Manifest name", text: $name)
                     .textFieldStyle(.roundedBorder)
-                Text("Use slashes to nest, e.g. labs/imac-lab.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let rejectionReason {
+                    Text(rejectionReason)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("Use slashes to nest, e.g. labs/imac-lab.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Picker("Format", selection: $format) {
                 ForEach(RepoFormat.allCases, id: \.self) { fmt in
@@ -212,7 +224,7 @@ private struct NewManifestSheet: View {
                 Button("Create") { create() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(trimmedName.isEmpty)
+                    .disabled(Manifest.nameRejectionReason(name) != nil)
             }
         }
         .padding(20)
@@ -221,7 +233,7 @@ private struct NewManifestSheet: View {
     }
 
     private func create() {
-        guard !trimmedName.isEmpty else { return }
+        guard Manifest.nameRejectionReason(name) == nil else { return }
         let chosenName = trimmedName
         let chosenFormat = format
         dismiss()

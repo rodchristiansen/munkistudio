@@ -60,6 +60,9 @@ public actor FileManifestService: ManifestService {
         in repository: MunkiRepository,
         format: RepoFormat?
     ) async throws -> ManifestRecord {
+        if let reason = Manifest.nameRejectionReason(name) {
+            throw RepositoryError.invalidName(reason)
+        }
         let chosenFormat = format ?? repository.defaultFormat
         let filename = "\(name).\(chosenFormat.preferredExtension)"
         let url = repository.manifestsURL.appending(path: filename)
@@ -82,6 +85,9 @@ public actor FileManifestService: ManifestService {
         to newName: String,
         in repository: MunkiRepository
     ) async throws -> ManifestRecord {
+        if let reason = Manifest.nameRejectionReason(newName) {
+            throw RepositoryError.invalidName(reason)
+        }
         // Preserve the file's on-disk extension form — manifests may
         // legitimately live without an extension.
         let ext = record.fileURL.pathExtension

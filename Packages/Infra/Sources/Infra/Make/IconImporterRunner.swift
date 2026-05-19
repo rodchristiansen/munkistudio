@@ -3,7 +3,7 @@ import Core
 
 /// Concrete ``IconImporterService`` that shells out to the official
 /// `iconimporter` binary Munki ships under `/usr/local/munki/`.
-public actor IconImporterRunner: IconImporterService {
+public final class IconImporterRunner: IconImporterService {
     private let executableURL: URL
 
     public init(executableURL: URL = URL(fileURLWithPath: "/usr/local/munki/iconimporter")) {
@@ -20,24 +20,13 @@ public actor IconImporterRunner: IconImporterService {
         args.append(contentsOf: ["--item", itemName])
         args.append(repository.rootURL.path)
 
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let result = try await ProcessRunner.run(executableURL, arguments: args)
+        let output = result.stdout + result.stderr
 
-        try process.run()
-        // iconimporter for a single item emits only a few lines, well
-        // under the pipe buffer — safe to drain after the process exits.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let output = String(decoding: data, as: UTF8.self)
-
-        guard process.terminationStatus == 0 else {
+        guard result.exitCode == 0 else {
             throw RepositoryError.process(
                 name: "iconimporter",
-                exitCode: process.terminationStatus,
+                exitCode: result.exitCode,
                 output: output
             )
         }

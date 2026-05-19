@@ -131,7 +131,7 @@ struct IconNameField: View {
                     generateStatus = "Generated \(file)."
                 default:
                     iconName = written[0]
-                    generateStatus = "iconimporter found \(written.count) icons — pick one from the menu."
+                    generateStatus = "iconimporter found \(written.count) icons — pick one from the list."
                 }
             } catch {
                 generateError = error.localizedDescription

@@ -10,6 +10,7 @@ public enum RepositoryError: Error, Sendable, LocalizedError {
     case write(file: URL, message: String)
     case unsupportedFormat(String)
     case duplicateName(String)
+    case invalidName(String)
     case process(name: String, exitCode: Int32, output: String)
     case dirtyWorkingTree
 
@@ -27,6 +28,8 @@ public enum RepositoryError: Error, Sendable, LocalizedError {
             "Unsupported file format: \(ext)."
         case .duplicateName(let name):
             "Another item already uses the name \(name)."
+        case .invalidName(let reason):
+            reason
         case .process(let name, let exitCode, let output):
             "\(name) failed (exit \(exitCode)): \(output)"
         case .dirtyWorkingTree:
