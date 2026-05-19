@@ -1,0 +1,71 @@
+# Builds, signs, notarizes, and publishes the MunkiStudio .pkg.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   DEVELOPER_ID_P12_BASE64     base64 of a .p12 exporting both Developer ID
+#                               certificates (Application + Installer) with
+#                               their private keys — base64 -i certs.p12
+#   DEVELOPER_ID_P12_PASSWORD   password set when exporting the .p12
+#   SIGNING_IDENTITY_APP        e.g. Developer ID Application: Org (TEAMID)
+#   SIGNING_IDENTITY_INSTALLER  e.g. Developer ID Installer: Org (TEAMID)
+#   NOTARIZATION_APPLE_ID       Apple ID used for notarization
+#   NOTARIZATION_PASSWORD       app-specific password for that Apple ID
+#   TEAM_ID                     Apple Developer Team ID
+#
+# Triggered manually, or by pushing a tag like v2026.05.19.1430.
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    # MunkiStudio targets macOS 26 (Tahoe) — the runner needs the
+    # macOS 26 SDK / Xcode 26.
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Developer ID certificates
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certs.p12" -k "$keychain" -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm "$RUNNER_TEMP/certs.p12"
+
+      - name: Build, sign, and notarize
+        env:
+          SIGNING_IDENTITY_APP: ${{ secrets.SIGNING_IDENTITY_APP }}
+          SIGNING_IDENTITY_INSTALLER: ${{ secrets.SIGNING_IDENTITY_INSTALLER }}
+          NOTARIZATION_APPLE_ID: ${{ secrets.NOTARIZATION_APPLE_ID }}
+          NOTARIZATION_PASSWORD: ${{ secrets.NOTARIZATION_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: make dist
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MunkiStudio-pkg
+          path: build/MunkiStudio-*.pkg
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: gh release create "$TAG_NAME" build/MunkiStudio-*.pkg --generate-notes
