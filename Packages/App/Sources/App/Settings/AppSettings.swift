@@ -13,6 +13,12 @@ final class AppSettings {
         didSet { defaults.set(reopenLastRepositoryOnLaunch, forKey: Key.reopenLastRepository) }
     }
 
+    /// Whether the first-run onboarding wizard has been completed or
+    /// skipped. `false` on a fresh install shows the wizard once.
+    var hasCompletedOnboarding: Bool {
+        didSet { defaults.set(hasCompletedOnboarding, forKey: Key.hasCompletedOnboarding) }
+    }
+
     /// Overrides the auto-detected git hooks directory. Empty = auto.
     var gitHooksPathOverride: String {
         didSet { defaults.set(gitHooksPathOverride, forKey: Key.gitHooksPathOverride) }
@@ -41,6 +47,8 @@ final class AppSettings {
         self.defaults = defaults
         self.reopenLastRepositoryOnLaunch =
             defaults.object(forKey: Key.reopenLastRepository) as? Bool ?? true
+        self.hasCompletedOnboarding =
+            defaults.bool(forKey: Key.hasCompletedOnboarding)
         self.gitHooksPathOverride =
             defaults.string(forKey: Key.gitHooksPathOverride) ?? ""
         self.showGitSection =
@@ -53,6 +61,7 @@ final class AppSettings {
 
     private enum Key {
         static let reopenLastRepository = "MunkiStudio.settings.reopenLastRepositoryOnLaunch"
+        static let hasCompletedOnboarding = "MunkiStudio.settings.hasCompletedOnboarding"
         static let gitHooksPathOverride = "MunkiStudio.settings.gitHooksPathOverride"
         static let showGitSection = "MunkiStudio.settings.showGitSection"
         static let munkipkgProjectsPath = "MunkiStudio.settings.munkipkgProjectsPath"
