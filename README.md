@@ -14,11 +14,14 @@ for the design plan.
 
 ## Architecture
 
+A single Swift package with three module targets:
+
 ```
-Packages/
+Sources/
   Core/    # Pure-Swift domain layer (models, service protocols, predicate)
   Infra/   # Yams, SwiftGit2, SwiftData mirror, file I/O, makecatalogs shell
-App/         # SwiftUI app target (MunkiStudio executable; consumes Core + Infra)
+  App/     # SwiftUI app target (MunkiStudio executable; consumes Core + Infra)
+Tests/     # CoreTests, InfraTests
 ```
 
 ## Highlights
