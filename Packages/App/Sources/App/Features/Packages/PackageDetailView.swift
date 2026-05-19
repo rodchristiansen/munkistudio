@@ -136,11 +136,13 @@ private enum EditorTab: String, CaseIterable, Identifiable {
 // MARK: Basic Info
 
 private struct BasicInfoTab: View {
+    @Environment(RepositoryStore.self) private var store
     @Binding var draft: Pkginfo
     @Binding var format: RepoFormat
     let fileURL: URL
     let createdAt: Date?
     let modifiedAt: Date?
+    @State private var showSuspiciousPackagePrompt = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -227,9 +229,27 @@ private struct BasicInfoTab: View {
                     .labelsHidden()
                 }
                 LabelledField("Location") {
-                    TextField("", text: Bindings.optional($draft.installerItemLocation))
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.callout, design: .monospaced))
+                    HStack(spacing: 6) {
+                        TextField("", text: Bindings.optional($draft.installerItemLocation))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.callout, design: .monospaced))
+                        if let url = installerItemURL, SuspiciousPackage.canInspect(url) {
+                            Button {
+                                inspectInstaller()
+                            } label: {
+                                Image(nsImage: SuspiciousPackage.pkgFileIcon)
+                                    .resizable()
+                                    .frame(width: 18, height: 18)
+                                    .accessibilityHidden(true)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(!installerItemExists)
+                            .accessibilityLabel("Open with Suspicious Package")
+                            .help(installerItemExists
+                                ? "Inspect this package with Suspicious Package"
+                                : "Installer item not found under pkgs/")
+                        }
+                    }
                 }
                 LabelledField("Restart action") {
                     Picker("", selection: restartBinding) {
@@ -246,6 +266,12 @@ private struct BasicInfoTab: View {
                 }
             }
             .cardStyle()
+        }
+        .alert("Suspicious Package isn't installed", isPresented: $showSuspiciousPackagePrompt) {
+            Button("Get Suspicious Package\u{2026}") { SuspiciousPackage.openDownloadPage() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Suspicious Package is a free app for inspecting macOS installer packages. Download it from mothersruin.com, then try again.")
         }
     }
 
@@ -316,6 +342,37 @@ private struct BasicInfoTab: View {
 
     private var restartBinding: Binding<RestartAction?> {
         Binding(get: { draft.restartAction }, set: { draft.restartAction = $0 })
+    }
+
+    /// Absolute path of the installer item under the repo's `pkgs/`.
+    /// `installer_item_location` is repo data, so a stray `..` or an
+    /// absolute path is rejected rather than allowed to resolve outside
+    /// `pkgs/`.
+    private var installerItemURL: URL? {
+        guard let location = draft.installerItemLocation?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !location.isEmpty,
+              let repo = store.repository else { return nil }
+        let pkgsRoot = repo.pkgsURL.standardizedFileURL
+        let candidate = pkgsRoot.appending(path: location).standardizedFileURL
+        // Containment check: the resolved path must stay inside pkgs/.
+        guard candidate.path == pkgsRoot.path
+                || candidate.path.hasPrefix(pkgsRoot.path + "/") else { return nil }
+        return candidate
+    }
+
+    private var installerItemExists: Bool {
+        guard let url = installerItemURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// Open the installer item in Suspicious Package; if the app isn't
+    /// installed, prompt the user to download it.
+    private func inspectInstaller() {
+        guard let url = installerItemURL else { return }
+        if !SuspiciousPackage.open(url) {
+            showSuspiciousPackagePrompt = true
+        }
     }
 }
 
