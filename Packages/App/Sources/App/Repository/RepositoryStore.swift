@@ -126,6 +126,10 @@ final class RepositoryStore {
     /// Last error from a session save, surfaced as a toolbar banner.
     var sessionSaveError: String?
 
+    /// Last error from a manifest lifecycle action (create / rename /
+    /// duplicate / delete), surfaced as an alert in the Manifests list.
+    var manifestActionError: String?
+
     /// Most recently opened repositories, newest first.
     private(set) var recentRepositories: [URL]
 
@@ -330,6 +334,86 @@ final class RepositoryStore {
             snapshot.manifests[index] = record
         } else {
             snapshot.manifests.append(record)
+        }
+    }
+
+    // MARK: Manifest lifecycle
+
+    /// Create a new empty manifest and select it. `name` may contain
+    /// slashes to nest the file under `manifests/`.
+    @discardableResult
+    func createManifest(named name: String, format: RepoFormat?) async -> ManifestRecord? {
+        guard let repo = repository else { return nil }
+        do {
+            let record = try await services.manifests.create(
+                named: name,
+                body: Manifest(manifestName: name),
+                in: repo,
+                format: format
+            )
+            upsert(record)
+            selectedItemID = AnyHashable(record.id)
+            return record
+        } catch {
+            manifestActionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    func deleteManifest(_ record: ManifestRecord) async {
+        do {
+            try await services.manifests.delete(record)
+            snapshot.manifests.removeAll { $0.fileURL == record.fileURL }
+            manifestDrafts.removeValue(forKey: record.fileURL)
+            draftFormats.removeValue(forKey: record.fileURL)
+            if selectedItemID == AnyHashable(record.id) {
+                selectedItemID = nil
+            }
+        } catch {
+            manifestActionError = error.localizedDescription
+        }
+    }
+
+    /// Rename a manifest, carrying any unsaved draft edits to the new file.
+    @discardableResult
+    func renameManifest(_ record: ManifestRecord, to newName: String) async -> ManifestRecord? {
+        guard let repo = repository else { return nil }
+        let effective = ManifestRecord(
+            manifest: draftManifest(for: record),
+            fileURL: record.fileURL,
+            format: record.format
+        )
+        do {
+            let renamed = try await services.manifests.rename(effective, to: newName, in: repo)
+            snapshot.manifests.removeAll { $0.fileURL == record.fileURL }
+            manifestDrafts.removeValue(forKey: record.fileURL)
+            draftFormats.removeValue(forKey: record.fileURL)
+            upsert(renamed)
+            selectedItemID = AnyHashable(renamed.id)
+            return renamed
+        } catch {
+            manifestActionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Duplicate a manifest under `newName`, copying current draft edits.
+    @discardableResult
+    func duplicateManifest(_ record: ManifestRecord, as newName: String) async -> ManifestRecord? {
+        guard let repo = repository else { return nil }
+        let source = ManifestRecord(
+            manifest: draftManifest(for: record),
+            fileURL: record.fileURL,
+            format: record.format
+        )
+        do {
+            let copy = try await services.manifests.duplicate(source, as: newName, in: repo)
+            upsert(copy)
+            selectedItemID = AnyHashable(copy.id)
+            return copy
+        } catch {
+            manifestActionError = error.localizedDescription
+            return nil
         }
     }
 

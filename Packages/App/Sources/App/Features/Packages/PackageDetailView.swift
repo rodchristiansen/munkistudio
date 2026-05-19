@@ -434,6 +434,16 @@ private struct InstallationTab: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Installer environment")
+                InstallerEnvironmentEditor(environment: $draft.installerEnvironment)
+                    .cardStyle()
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Installer choices")
+                InstallerChoicesTable(choices: $draft.installerChoicesXml)
+                    .cardStyle()
+            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -479,6 +489,25 @@ private struct UninstallTab: View {
                         .labelsHidden()
                     }
                     Toggle("Uninstallable", isOn: Bindings.optionalBool($draft.uninstallable))
+                }
+                .cardStyle()
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Uninstaller item")
+                VStack(alignment: .leading, spacing: 10) {
+                    LabelledField("Location") {
+                        TextField("", text: Bindings.optional($draft.uninstallerItemLocation))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.callout, design: .monospaced))
+                    }
+                    LabelledField("Hash") {
+                        TextField("", text: Bindings.optional($draft.uninstallerItemHash))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.callout, design: .monospaced))
+                    }
+                    LabelledField("Size") {
+                        OptionalIntField(value: $draft.uninstallerItemSize, placeholder: "kilobytes")
+                    }
                 }
                 .cardStyle()
             }
@@ -946,6 +975,156 @@ private struct StringListEditor: View {
         guard !value.isEmpty else { return }
         values.append(value)
         pending = ""
+    }
+}
+
+/// Key/value editor for `installer_environment` — environment variables
+/// passed to `/usr/sbin/installer`. The dictionary is unordered, so rows
+/// are sorted by key when loaded.
+private struct InstallerEnvironmentEditor: View {
+    @Binding var environment: [String: String]?
+
+    private struct Row: Identifiable, Equatable {
+        let id = UUID()
+        var key: String
+        var value: String
+    }
+    @State private var rows: [Row] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach($rows) { $row in
+                HStack(spacing: 6) {
+                    TextField("KEY", text: $row.key)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                    TextField("value", text: $row.value)
+                        .textFieldStyle(.roundedBorder)
+                    Button(role: .destructive) {
+                        rows.removeAll { $0.id == row.id }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Button {
+                rows.append(Row(key: "", value: ""))
+            } label: {
+                Label("Add variable", systemImage: "plus")
+            }
+            .buttonStyle(.plain)
+        }
+        .onAppear {
+            rows = (environment ?? [:])
+                .map { Row(key: $0.key, value: $0.value) }
+                .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+        }
+        .onChange(of: rows) { _, _ in commit() }
+    }
+
+    private func commit() {
+        var dict: [String: String] = [:]
+        for row in rows {
+            let key = row.key.trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { continue }
+            dict[key] = row.value
+        }
+        environment = dict.isEmpty ? nil : dict
+    }
+}
+
+/// One row of an ``InstallerChoicesTable``. Keys other than the three the
+/// table edits are kept in `extras` so the choice dict round-trips intact.
+private struct InstallerChoice: Identifiable, Equatable {
+    let id = UUID()
+    var identifier: String
+    var attribute: String
+    var setting: Int
+    var extras: [String: PlistValue]
+
+    static func from(_ value: PlistValue) -> InstallerChoice? {
+        guard case .dictionary(var dict) = value else { return nil }
+        var identifier = ""
+        if case .string(let s)? = dict["choiceIdentifier"] { identifier = s }
+        var attribute = "selected"
+        if case .string(let s)? = dict["choiceAttribute"] { attribute = s }
+        var setting = 0
+        switch dict["attributeSetting"] {
+        case .integer(let i)?: setting = i
+        case .bool(let b)?: setting = b ? 1 : 0
+        default: break
+        }
+        for key in ["choiceIdentifier", "choiceAttribute", "attributeSetting"] {
+            dict.removeValue(forKey: key)
+        }
+        return InstallerChoice(identifier: identifier, attribute: attribute, setting: setting, extras: dict)
+    }
+
+    var plistValue: PlistValue {
+        var dict = extras
+        dict["choiceIdentifier"] = .string(identifier)
+        dict["choiceAttribute"] = .string(attribute)
+        dict["attributeSetting"] = .integer(setting)
+        return .dictionary(dict)
+    }
+}
+
+/// Structured table for `installer_choices_xml` — the choice changes a
+/// distribution package's installer applies. One row per choice with the
+/// identifier / attribute / setting columns, matching MunkiAdmin.
+private struct InstallerChoicesTable: View {
+    @Binding var choices: [PlistValue]?
+    @State private var rows: [InstallerChoice] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !rows.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Choice identifier").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Attribute").frame(width: 110, alignment: .leading)
+                    Text("Setting").frame(width: 64, alignment: .leading)
+                    Color.clear.frame(width: 20)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            ForEach($rows) { $row in
+                HStack(spacing: 6) {
+                    TextField("com.example.choice", text: $row.identifier)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                    TextField("selected", text: $row.attribute)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 110)
+                    TextField("0", value: $row.setting, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 64)
+                    Button(role: .destructive) {
+                        rows.removeAll { $0.id == row.id }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Button {
+                rows.append(InstallerChoice(identifier: "", attribute: "selected", setting: 0, extras: [:]))
+            } label: {
+                Label("Add choice", systemImage: "plus")
+            }
+            .buttonStyle(.plain)
+        }
+        .onAppear { rows = (choices ?? []).compactMap(InstallerChoice.from) }
+        .onChange(of: rows) { _, _ in commit() }
+    }
+
+    private func commit() {
+        let mapped = rows
+            .filter { !$0.identifier.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map(\.plistValue)
+        choices = mapped.isEmpty ? nil : mapped
     }
 }
 

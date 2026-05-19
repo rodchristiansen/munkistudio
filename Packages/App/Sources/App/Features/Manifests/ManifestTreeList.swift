@@ -14,6 +14,12 @@ struct ManifestTreeList: View {
     let sort: PackageSort
     var forceExpandAll: Bool = false
 
+    @State private var renameTarget: ManifestRecord?
+    @State private var renameText = ""
+    @State private var duplicateTarget: ManifestRecord?
+    @State private var duplicateText = ""
+    @State private var deleteTarget: ManifestRecord?
+
     var body: some View {
         @Bindable var bindableStore = store
         List(selection: $bindableStore.selectedItemID) {
@@ -23,6 +29,7 @@ struct ManifestTreeList: View {
                         .tag(tag)
                         .listRowSeparator(.hidden)
                         .accessibilityLabel(row.accessibilityLabel)
+                        .contextMenu { leafMenu(for: row) }
                 } else {
                     ManifestRow(row: row, folderIcon: grouping.folderIcon)
                         .listRowSeparator(.hidden)
@@ -33,6 +40,72 @@ struct ManifestTreeList: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color(nsColor: .windowBackgroundColor))
+        .alert("Rename Manifest", isPresented: renamePresented) {
+            TextField("Name", text: $renameText)
+            Button("Rename", action: commitRename)
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+        } message: {
+            Text("Names may include slashes to nest the file under manifests/.")
+        }
+        .alert("Duplicate Manifest", isPresented: duplicatePresented) {
+            TextField("Name", text: $duplicateText)
+            Button("Duplicate", action: commitDuplicate)
+            Button("Cancel", role: .cancel) { duplicateTarget = nil }
+        } message: {
+            Text("Creates a copy of this manifest's contents under a new name.")
+        }
+        .alert("Delete Manifest", isPresented: deletePresented, presenting: deleteTarget) { record in
+            Button("Delete", role: .destructive) {
+                Task { await store.deleteManifest(record) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { record in
+            Text("Delete \u{201c}\(record.manifest.manifestName)\u{201d}? This removes the file from manifests/ and can't be undone.")
+        }
+    }
+
+    @ViewBuilder
+    private func leafMenu(for row: ManifestFlatRow) -> some View {
+        if case .leaf(let record, _) = row.kind {
+            Button("Rename\u{2026}") {
+                renameText = record.manifest.manifestName
+                renameTarget = record
+            }
+            Button("Duplicate\u{2026}") {
+                duplicateText = record.manifest.manifestName + " copy"
+                duplicateTarget = record
+            }
+            Divider()
+            Button("Delete\u{2026}", role: .destructive) {
+                deleteTarget = record
+            }
+        }
+    }
+
+    private var renamePresented: Binding<Bool> {
+        Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })
+    }
+    private var duplicatePresented: Binding<Bool> {
+        Binding(get: { duplicateTarget != nil }, set: { if !$0 { duplicateTarget = nil } })
+    }
+    private var deletePresented: Binding<Bool> {
+        Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
+    }
+
+    private func commitRename() {
+        guard let target = renameTarget else { return }
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        renameTarget = nil
+        guard !name.isEmpty, name != target.manifest.manifestName else { return }
+        Task { await store.renameManifest(target, to: name) }
+    }
+
+    private func commitDuplicate() {
+        guard let target = duplicateTarget else { return }
+        let name = duplicateText.trimmingCharacters(in: .whitespacesAndNewlines)
+        duplicateTarget = nil
+        guard !name.isEmpty else { return }
+        Task { await store.duplicateManifest(target, as: name) }
     }
 
     private var rows: [ManifestFlatRow] {

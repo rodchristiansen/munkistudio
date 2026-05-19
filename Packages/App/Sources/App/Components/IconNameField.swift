@@ -15,6 +15,8 @@ struct IconNameField: View {
 
     @State private var nsImage: NSImage?
     @State private var customMode: Bool = false
+    @State private var generating: Bool = false
+    @State private var generateError: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -63,6 +65,20 @@ struct IconNameField: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize(horizontal: false, vertical: true)
+
+                    Button(action: generate) {
+                        if generating {
+                            HStack(spacing: 4) {
+                                ProgressView().controlSize(.small)
+                                Text("Generating\u{2026}")
+                            }
+                        } else {
+                            Label("Generate", systemImage: "wand.and.stars")
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(generating || store.repository == nil || packageName.isEmpty)
+                    .help("Generate an icon from the installer item with iconimporter")
                 }
                 if customMode {
                     TextField("filename.png", text: Binding(
@@ -79,6 +95,33 @@ struct IconNameField: View {
         .onAppear(perform: loadImage)
         .onChange(of: iconName) { _, _ in loadImage() }
         .onChange(of: packageName) { _, _ in loadImage() }
+        .alert("Icon Generation Failed", isPresented: Binding(
+            get: { generateError != nil },
+            set: { if !$0 { generateError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(generateError ?? "")
+        }
+    }
+
+    /// Run `iconimporter` for this package, then refresh the thumbnail.
+    private func generate() {
+        guard let repo = store.repository, !packageName.isEmpty else { return }
+        generating = true
+        Task {
+            do {
+                try await store.services.iconImporter.generateIcon(
+                    forItem: packageName,
+                    force: true,
+                    in: repo
+                )
+            } catch {
+                generateError = error.localizedDescription
+            }
+            generating = false
+            loadImage()
+        }
     }
 
     private var thumbnail: some View {
