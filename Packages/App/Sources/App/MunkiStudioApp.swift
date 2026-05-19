@@ -32,7 +32,9 @@ struct MunkiStudioApp: SwiftUI.App {
             makecatalogs: MakecatalogsRunner(),
             munkiimport: MunkiimportRunner(),
             munkipkg: MunkipkgRunner(),
-            iconImporter: IconImporterRunner()
+            iconImporter: IconImporterRunner(),
+            repoClean: RepoCleanRunner(),
+            repoCleanHistory: RepoCleanHistoryStore()
         )
         _store = State(wrappedValue: RepositoryStore(services: services))
     }
@@ -70,4 +72,6 @@ struct AppServices: Sendable {
     let munkiimport: any MunkiimportService
     let munkipkg: any MunkipkgService
     let iconImporter: any IconImporterService
+    let repoClean: any RepoCleanService
+    let repoCleanHistory: any RepoCleanHistoryService
 }
