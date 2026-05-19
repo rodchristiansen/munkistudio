@@ -240,9 +240,11 @@ private struct BasicInfoTab: View {
                                 Image(nsImage: SuspiciousPackage.pkgFileIcon)
                                     .resizable()
                                     .frame(width: 18, height: 18)
+                                    .accessibilityHidden(true)
                             }
                             .buttonStyle(.borderless)
                             .disabled(!installerItemExists)
+                            .accessibilityLabel("Open with Suspicious Package")
                             .help(installerItemExists
                                 ? "Inspect this package with Suspicious Package"
                                 : "Installer item not found under pkgs/")
@@ -343,12 +345,20 @@ private struct BasicInfoTab: View {
     }
 
     /// Absolute path of the installer item under the repo's `pkgs/`.
+    /// `installer_item_location` is repo data, so a stray `..` or an
+    /// absolute path is rejected rather than allowed to resolve outside
+    /// `pkgs/`.
     private var installerItemURL: URL? {
         guard let location = draft.installerItemLocation?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !location.isEmpty,
               let repo = store.repository else { return nil }
-        return repo.pkgsURL.appending(path: location)
+        let pkgsRoot = repo.pkgsURL.standardizedFileURL
+        let candidate = pkgsRoot.appending(path: location).standardizedFileURL
+        // Containment check: the resolved path must stay inside pkgs/.
+        guard candidate.path == pkgsRoot.path
+                || candidate.path.hasPrefix(pkgsRoot.path + "/") else { return nil }
+        return candidate
     }
 
     private var installerItemExists: Bool {
