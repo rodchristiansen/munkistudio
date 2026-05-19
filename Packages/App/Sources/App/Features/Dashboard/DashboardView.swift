@@ -21,7 +21,6 @@ struct DashboardView: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Dashboard")
         .task(id: store.gitInfo?.workTreeRoot) { await loadCommits() }
     }
@@ -89,7 +88,7 @@ struct DashboardView: View {
     private var recentManifestsCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Image(systemName: "doc.text")
+                Image(systemName: "list.bullet.rectangle")
                     .foregroundStyle(.tint)
                 Text("Recently Modified Manifests").font(.headline)
                 Spacer()
@@ -185,21 +184,21 @@ struct DashboardView: View {
             StatTile(
                 label: "Categories",
                 value: "\(uniqueCategories.count)",
-                icon: "folder",
+                icon: "square.grid.2x2",
                 color: .teal,
                 action: nil
             )
             StatTile(
                 label: "Developers",
                 value: "\(uniqueDevelopers.count)",
-                icon: "person.2",
+                icon: "person",
                 color: .pink,
                 action: nil
             )
             StatTile(
                 label: "Uncommitted",
                 value: "\(store.gitDirtyCount)",
-                icon: "circle.fill",
+                icon: "arrow.triangle.branch",
                 color: store.gitDirtyCount > 0 ? .orange : .secondary
             ) { store.selectedSection = .git }
             if !store.pkginfoDrafts.isEmpty || !store.manifestDrafts.isEmpty {
@@ -327,7 +326,7 @@ private struct StatTile: View {
         .background(.regularMaterial, in: .rect(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(color.opacity(interactive ? 0.18 : 0.1), lineWidth: 1)
+                .strokeBorder(.secondary.opacity(interactive ? 0.22 : 0.14), lineWidth: 1)
         )
     }
 }

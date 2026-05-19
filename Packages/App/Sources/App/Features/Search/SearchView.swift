@@ -332,7 +332,7 @@ struct SearchResultsPanel: View {
                                 open(file: file)
                             } label: {
                                 HStack(spacing: 6) {
-                                    Image(systemName: file.kind == .pkginfo ? "shippingbox" : "doc.text")
+                                    Image(systemName: file.kind == .pkginfo ? "shippingbox" : "list.bullet.rectangle")
                                         .foregroundStyle(file.kind == .pkginfo ? AnyShapeStyle(Color.munkiStudioBrand) : AnyShapeStyle(TintShapeStyle.tint))
                                     Text(file.displayPath)
                                         .font(.callout.weight(.semibold))

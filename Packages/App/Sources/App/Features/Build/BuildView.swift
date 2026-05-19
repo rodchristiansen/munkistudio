@@ -111,10 +111,7 @@ struct BuildView: View {
                         .contextMenu { projectContextMenu(project) }
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder

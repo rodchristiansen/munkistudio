@@ -34,11 +34,21 @@ private struct CardStyleModifier: ViewModifier {
     let cornerRadius: CGFloat
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Card fill. In light mode the opaque `controlBackgroundColor`
+    /// reads brighter than the window. In dark mode that colour is now
+    /// darker than the translucent split-view panes, so a faint white
+    /// tint is used instead to keep the card lifted above the backdrop.
+    private var fill: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.06)
+            : Color(nsColor: .controlBackgroundColor)
+    }
+
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
             .padding(padding)
-            .background(shape.fill(Color(nsColor: .controlBackgroundColor)))
+            .background(shape.fill(fill))
             // Dark mode: bright top-edge highlight gives the card a
             // visible upper rim that reads as elevation in the absence
             // of a usable drop shadow.

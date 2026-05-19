@@ -37,9 +37,6 @@ struct ManifestTreeList: View {
                 }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Color(nsColor: .windowBackgroundColor))
         .alert("Rename Manifest", isPresented: renamePresented) {
             TextField("Name", text: $renameText)
             Button("Rename", action: commitRename)
@@ -255,7 +252,7 @@ struct ManifestRow: View {
             HStack(spacing: 6) {
                 indentSpacer
                 Color.clear.frame(width: 14, height: 1)
-                Image(systemName: "doc.text")
+                Image(systemName: "list.bullet.rectangle")
                     .foregroundStyle(.secondary)
                     .imageScale(.small)
                 Text(label)
