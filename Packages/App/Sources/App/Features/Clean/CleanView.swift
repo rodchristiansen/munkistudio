@@ -32,7 +32,10 @@ struct CleanView: View {
                 repoPath: repo.rootURL.path,
                 historyService: store.services.repoCleanHistory
             )
-            if model.phase == .idle { runPreview() }
+            // Run unconditionally: the task re-fires when the open repo
+            // changes, and the new repo needs its own preview even though
+            // the model still carries the previous repo's phase.
+            runPreview()
         }
         .onDisappear { model.cancel() }
         .onChange(of: model.keep) { rescanIfPossible() }

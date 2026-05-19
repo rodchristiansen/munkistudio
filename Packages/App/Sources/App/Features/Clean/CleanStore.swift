@@ -141,6 +141,10 @@ final class CleanStore {
                 case .finished(let result): outcome = result
                 }
             }
+        } catch is CancellationError {
+            // Cancellation is routine — leaving the tab or starting a new
+            // scan. Leave phase/plan untouched; the new run sets them.
+            return
         } catch {
             errorMessage = error.localizedDescription
             output += "\u{2716} \(error.localizedDescription)\n"
