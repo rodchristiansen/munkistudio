@@ -158,13 +158,22 @@ struct RepositoryWorkspace: View {
 private struct SidebarView: View {
     @Binding var selection: SidebarSection
     @Environment(AppSettings.self) private var settings
+    @Environment(RepositoryStore.self) private var store
 
-    /// The Build section only appears once a munkipkg projects folder is
-    /// configured — there's nothing to show without one.
+    /// Not every section is always shown:
+    /// - Build appears once a munkipkg projects folder is configured.
+    /// - Git appears when the open repo is a git working tree, unless the
+    ///   user has hidden it in Settings.
     private var sections: [SidebarSection] {
         SidebarSection.allCases.filter { section in
-            section != .build
-                || !settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces).isEmpty
+            switch section {
+            case .build:
+                return !settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces).isEmpty
+            case .git:
+                return store.gitInfo != nil && settings.showGitSection
+            default:
+                return true
+            }
         }
     }
 
@@ -177,14 +186,11 @@ private struct SidebarView: View {
                 .tag(section)
         }
         .navigationTitle("Repository")
-        // Clearing the projects path removes the Build row; if it was
-        // selected, fall back to the dashboard so the detail column
-        // doesn't keep rendering an orphaned section.
-        .onChange(of: settings.munkipkgProjectsPath) {
-            if selection == .build,
-               settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces).isEmpty {
-                selection = .dashboard
-            }
+        // If the selected section is no longer available (Build folder
+        // cleared, Git tab hidden or repo isn't a git tree), fall back to
+        // the dashboard so the detail column doesn't render an orphan.
+        .onChange(of: sections) { _, current in
+            if !current.contains(selection) { selection = .dashboard }
         }
     }
 }
