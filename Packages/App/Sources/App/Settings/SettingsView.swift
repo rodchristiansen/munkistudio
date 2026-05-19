@@ -160,6 +160,16 @@ private struct GitSettingsView: View {
         @Bindable var settings = settings
         Form {
             Section {
+                Toggle("Show the Git tab", isOn: $settings.showGitSection)
+            } header: {
+                Text("Git Tab")
+            } footer: {
+                Text("The Git tab appears automatically when the open repository is a git working tree. Turn this off to hide it even then.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 TextField("Hooks directory", text: $settings.gitHooksPathOverride,
                           prompt: Text("Auto-detect"))
             } header: {

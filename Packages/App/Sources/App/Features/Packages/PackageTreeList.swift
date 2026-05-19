@@ -27,9 +27,6 @@ struct PackageTreeList: View {
                 }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var rows: [PackageFlatRow] {

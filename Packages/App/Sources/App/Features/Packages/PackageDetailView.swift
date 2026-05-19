@@ -70,12 +70,6 @@ private struct PackageEditor: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .padding(16)
             }
-            // `windowBackgroundColor` is the standard macOS panel
-            // backdrop — sits one step below the cards' brighter
-            // `controlBackgroundColor` fill so the cards read as
-            // floating. `underPageBackgroundColor` was a heavier grey
-            // that buried the cards.
-            .background(Color(nsColor: .windowBackgroundColor))
         }
     }
 

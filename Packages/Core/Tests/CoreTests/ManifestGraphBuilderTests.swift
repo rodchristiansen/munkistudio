@@ -4,9 +4,14 @@ import Testing
 
 @Suite("Manifest graph builder")
 struct ManifestGraphBuilderTests {
-    private func manifest(_ name: String, includes: [String]? = nil) -> Manifest {
+    private func manifest(
+        _ name: String,
+        includes: [String]? = nil,
+        conditionals: [ConditionalItem]? = nil
+    ) -> Manifest {
         var manifest = Manifest(manifestName: name)
         manifest.includedManifests = includes
+        manifest.conditionalItems = conditionals
         return manifest
     }
 
@@ -72,5 +77,49 @@ struct ManifestGraphBuilderTests {
         #expect(graph.edges.count == 3)
         #expect(Set(graph.edges.map(\.to)) == ["labs", "staff", "kiosk"])
         #expect(graph.edges.allSatisfy { $0.kind == .manifestInclusion })
+    }
+
+    @Test("builds a conditional inclusion edge from a conditional_items block")
+    func conditionalInclusionEdge() {
+        let graph = ManifestGraphBuilder.build(manifests: [
+            manifest("site-default", conditionals: [
+                ConditionalItem(condition: "machine_type == \"laptop\"",
+                                includedManifests: ["laptops"]),
+            ]),
+            manifest("laptops"),
+        ])
+        let edge = graph.edges.first { $0.to == "laptops" }
+        #expect(edge?.kind == .conditionalInclusion)
+        #expect(edge?.from == "site-default")
+        #expect(edge?.condition == "machine_type == \"laptop\"")
+    }
+
+    @Test("an unconditional include wins over a conditional one for the same pair")
+    func unconditionalWinsOverConditional() {
+        let graph = ManifestGraphBuilder.build(manifests: [
+            manifest("site-default", includes: ["labs"], conditionals: [
+                ConditionalItem(condition: "x == 1", includedManifests: ["labs"]),
+            ]),
+            manifest("labs"),
+        ])
+        let labsEdges = graph.edges.filter { $0.to == "labs" }
+        #expect(labsEdges.count == 1)
+        #expect(labsEdges.first?.kind == .manifestInclusion)
+        #expect(labsEdges.first?.condition == nil)
+    }
+
+    @Test("recurses into nested conditional_items")
+    func nestedConditionalInclusion() {
+        let graph = ManifestGraphBuilder.build(manifests: [
+            manifest("root", conditionals: [
+                ConditionalItem(condition: "outer", conditionalItems: [
+                    ConditionalItem(condition: "inner", includedManifests: ["deep"]),
+                ]),
+            ]),
+            manifest("deep"),
+        ])
+        let edge = graph.edges.first { $0.to == "deep" }
+        #expect(edge?.kind == .conditionalInclusion)
+        #expect(edge?.condition == "inner")
     }
 }

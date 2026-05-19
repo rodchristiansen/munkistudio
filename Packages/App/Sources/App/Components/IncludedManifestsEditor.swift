@@ -59,7 +59,7 @@ private struct IncludedManifestRow: View {
                 .foregroundStyle(.tertiary)
                 .frame(width: 14)
                 .accessibilityHidden(true)
-            Image(systemName: "doc.text")
+            Image(systemName: "list.bullet.rectangle")
                 .foregroundStyle(.secondary)
                 .imageScale(.small)
                 .accessibilityHidden(true)

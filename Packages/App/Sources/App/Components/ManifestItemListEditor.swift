@@ -16,7 +16,6 @@ import UniformTypeIdentifiers
 /// Mirrors Cimian's `ContextualChipList` in shape, including the
 /// "Conditionals" column header.
 struct ManifestItemListEditor: View {
-    let title: String
     let kind: Kind
     @Binding var manifest: Manifest
     /// Valid package names available in the repo. The add menu only
@@ -45,7 +44,7 @@ struct ManifestItemListEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            header
+            if conditionsExist { header }
             ForEach(entries) { entry in
                 ManifestItemRow(
                     entry: entry,
@@ -66,22 +65,19 @@ struct ManifestItemListEditor: View {
             }
             addRow
         }
-        .padding(8)
-        .background(Color.secondary.opacity(0.06), in: .rect(cornerRadius: 8))
     }
 
     // MARK: Layout
 
+    /// Column header — only shown when a conditional picker column is
+    /// present. The list's title is supplied by the enclosing card.
     private var header: some View {
         HStack {
-            Text(title).font(.headline)
             Spacer()
-            if conditionsExist {
-                Text("Conditional")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: conditionalColumnWidth, alignment: .leading)
-            }
+            Text("Conditional")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: conditionalColumnWidth, alignment: .leading)
             // spacer column to align with delete button
             Color.clear.frame(width: 24)
         }
