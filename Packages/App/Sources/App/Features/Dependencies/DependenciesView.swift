@@ -215,6 +215,7 @@ struct DependenciesView: View {
             legendItem(color: .orange, dashed: true, label: "update_for")
         case .manifests:
             legendItem(color: .purple, dashed: false, label: "includes")
+            legendItem(color: .purple, dashed: true, label: "conditional include")
         }
     }
 
@@ -540,9 +541,10 @@ struct DependenciesView: View {
         case .requires: baseColor = .blue
         case .updateFor: baseColor = .orange
         case .manifestInclusion: baseColor = .purple
+        case .conditionalInclusion: baseColor = .purple
         }
         let color: Color = isProblem ? .red : baseColor
-        let dash: [CGFloat] = kind == .updateFor ? [5, 4] : []
+        let dash: [CGFloat] = (kind == .updateFor || kind == .conditionalInclusion) ? [5, 4] : []
         let opacity: Double = isProblem ? 0.95 : 0.7
         let lineWidth: CGFloat = isProblem ? 2.5 : 1.5
 
