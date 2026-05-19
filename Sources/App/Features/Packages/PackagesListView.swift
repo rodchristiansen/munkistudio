@@ -46,6 +46,18 @@ struct PackagesListView: View {
         .navigationTitle("Packages")
         .navigationSubtitle(packagesSubtitle)
         .onAppear { searchFocused = false }
+        .alert("Couldn't Complete Action", isPresented: errorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(store.packageActionError ?? "")
+        }
+    }
+
+    private var errorPresented: Binding<Bool> {
+        Binding(
+            get: { store.packageActionError != nil },
+            set: { if !$0 { store.packageActionError = nil } }
+        )
     }
 
     /// Pkginfo count, shown as the column's title-bar subtitle.

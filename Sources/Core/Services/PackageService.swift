@@ -32,6 +32,24 @@ public protocol PackageService: Sendable {
     /// installer item under `pkgs/` — callers decide whether to cascade.
     func delete(_ record: PkginfoRecord) async throws
 
+    /// Rename a pkginfo *file* on disk. `newName` is a base filename
+    /// (no extension); the on-disk extension is preserved and the file
+    /// stays in its current directory. The pkginfo's `name` key — and
+    /// every manifest / catalog reference to it — is left untouched.
+    func rename(
+        _ record: PkginfoRecord,
+        to newName: String,
+        in repository: MunkiRepository
+    ) async throws -> PkginfoRecord
+
+    /// Duplicate a pkginfo file under `newName` (a base filename) in the
+    /// same directory, copying its contents verbatim.
+    func duplicate(
+        _ record: PkginfoRecord,
+        as newName: String,
+        in repository: MunkiRepository
+    ) async throws -> PkginfoRecord
+
     /// Convert a pkginfo file's on-disk format in place (plist↔YAML). Useful
     /// during a repo migration; preserves all keys including unknown ones.
     func convertFormat(
