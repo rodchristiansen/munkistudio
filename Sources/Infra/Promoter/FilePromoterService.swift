@@ -79,13 +79,18 @@ public struct FilePromoterService: PromoterService {
     ) async throws -> PromoterSnapshot {
         let config = try await loadConfig(at: deploymentRoot)
         let candidates = Self.candidates(from: pkginfos, config: config, now: now())
-        let history = try await gitHistory(in: repository, limit: 50)
-        let imports = try await autopkgImports(in: repository, pkginfos: pkginfos, limit: 50)
+        // Imports + history happen in parallel — each is its own bounded
+        // pipeline. History is the slow path (computing per-pkginfo
+        // catalog deltas means calling `git show` per touched file), so
+        // letting it overlap with imports halves the wait when the user
+        // first lands on the Promoter tab.
+        async let history = gitHistory(in: repository, limit: 25)
+        async let imports = autopkgImports(in: repository, pkginfos: pkginfos, limit: 50)
         return PromoterSnapshot(
             config: config,
-            imports: imports,
+            imports: try await imports,
             candidates: candidates,
-            history: history
+            history: try await history
         )
     }
 
@@ -238,21 +243,45 @@ public struct FilePromoterService: PromoterService {
         ]
         let output = try await ProcessRunner.run(gitURL, arguments: args, in: repository.rootURL)
         guard output.exitCode == 0 else { return [] }
-        var entries: [PromotionHistoryEntry] = []
+
+        // Two-pass: parse the cheap metadata sequentially, then fan
+        // out per-commit delta computation in parallel. Sequential
+        // deltas were measuring 25+ seconds on real-size repos because
+        // each touched file fires two `git show` invocations.
+        struct CommitInfo: Sendable {
+            let hash: String
+            let date: Date
+            let subject: String
+        }
+        var commits: [CommitInfo] = []
         for line in output.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
             let parts = line.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init)
             guard parts.count >= 3 else { continue }
             let subject = parts[2]
             guard subject.lowercased().hasPrefix("promoter") else { continue }
             guard let date = Self.parseISO8601(parts[1]) else { continue }
-            let touched = await affectedFiles(in: repository, commit: parts[0])
-            let deltas = await deltas(in: repository, commit: parts[0], paths: touched)
-            entries.append(PromotionHistoryEntry(
-                commitHash: parts[0],
-                date: date,
-                subject: subject,
-                deltas: deltas
-            ))
+            commits.append(CommitInfo(hash: parts[0], date: date, subject: subject))
+        }
+        guard !commits.isEmpty else { return [] }
+
+        let captured = self
+        let entries = await withTaskGroup(of: (Int, PromotionHistoryEntry).self) { group in
+            for (index, info) in commits.enumerated() {
+                group.addTask {
+                    let touched = await captured.affectedFiles(in: repository, commit: info.hash)
+                    let deltas = await captured.deltas(in: repository, commit: info.hash, paths: touched)
+                    return (index, PromotionHistoryEntry(
+                        commitHash: info.hash,
+                        date: info.date,
+                        subject: info.subject,
+                        deltas: deltas
+                    ))
+                }
+            }
+            var result: [(Int, PromotionHistoryEntry)] = []
+            for await pair in group { result.append(pair) }
+            result.sort { $0.0 < $1.0 }
+            return result.map(\.1)
         }
         return entries
     }
@@ -328,7 +357,7 @@ public struct FilePromoterService: PromoterService {
         return imports
     }
 
-    private func affectedFiles(in repository: MunkiRepository, commit: String) async -> [URL] {
+    fileprivate func affectedFiles(in repository: MunkiRepository, commit: String) async -> [URL] {
         let args = ["show", "--no-color", "--name-only", "--pretty=format:", commit]
         guard let output = try? await ProcessRunner.run(gitURL, arguments: args, in: repository.rootURL),
               output.exitCode == 0 else {
@@ -346,7 +375,7 @@ public struct FilePromoterService: PromoterService {
     /// Read pkginfo data at a specific commit (`git show <commit>:<path>`)
     /// and return the catalog/name/version triple. `nil` when the path
     /// doesn't exist in that commit (added, deleted, or renamed).
-    private func pkginfoSnapshotAtCommit(
+    fileprivate func pkginfoSnapshotAtCommit(
         in repository: MunkiRepository,
         commit: String,
         path: String
@@ -360,35 +389,51 @@ public struct FilePromoterService: PromoterService {
     }
 
     /// Compute the catalog deltas for every pkginfo touched by a single
-    /// commit. Sequentially walks the file list because the
-    /// `Self`-isolation makes a `withTaskGroup` little gain here and the
-    /// list is typically small (a couple of files).
-    private func deltas(
+    /// commit. Files-per-commit is capped (large promoter runs occasionally
+    /// touch dozens of files) to keep per-commit work bounded; the UI
+    /// surfaces the total count separately so the user knows when only a
+    /// subset is detailed.
+    fileprivate static let maxFilesPerCommit = 20
+
+    fileprivate func deltas(
         in repository: MunkiRepository,
         commit: String,
         paths: [URL]
     ) async -> [PromotionDelta] {
-        var deltas: [PromotionDelta] = []
-        for url in paths {
-            let rel = relativePath(url, base: repository.rootURL) ?? url.lastPathComponent
-            // Skip files outside the pkgsinfo subtree just in case a
-            // promoter commit touched something else (e.g. a tracking
-            // log alongside the pkginfo).
-            let pkgsinfoRel = relativePath(repository.pkgsinfoURL, base: repository.rootURL) ?? "pkgsinfo"
-            guard rel.hasPrefix(pkgsinfoRel) else { continue }
-            async let after = pkginfoSnapshotAtCommit(in: repository, commit: commit, path: rel)
-            async let before = pkginfoSnapshotAtCommit(in: repository, commit: "\(commit)~1", path: rel)
-            let (afterSnap, beforeSnap) = await (after, before)
-            let name = afterSnap?.name ?? beforeSnap?.name ?? url.deletingPathExtension().lastPathComponent
-            deltas.append(PromotionDelta(
-                pkginfoURL: url,
-                pkgName: name,
-                version: afterSnap?.version ?? beforeSnap?.version,
-                before: beforeSnap?.catalogs ?? [],
-                after: afterSnap?.catalogs ?? []
-            ))
+        let pkgsinfoRel = relativePath(repository.pkgsinfoURL, base: repository.rootURL) ?? "pkgsinfo"
+        let candidates = paths
+            .filter { url in
+                (relativePath(url, base: repository.rootURL) ?? url.lastPathComponent)
+                    .hasPrefix(pkgsinfoRel)
+            }
+            .prefix(Self.maxFilesPerCommit)
+        guard !candidates.isEmpty else { return [] }
+        let repo = repository
+        let captured = self
+        return await withTaskGroup(of: (Int, PromotionDelta?).self) { group in
+            for (index, url) in candidates.enumerated() {
+                group.addTask {
+                    let rel = captured.relativePath(url, base: repo.rootURL) ?? url.lastPathComponent
+                    async let after = captured.pkginfoSnapshotAtCommit(in: repo, commit: commit, path: rel)
+                    async let before = captured.pkginfoSnapshotAtCommit(in: repo, commit: "\(commit)~1", path: rel)
+                    let (afterSnap, beforeSnap) = await (after, before)
+                    let name = afterSnap?.name ?? beforeSnap?.name ?? url.deletingPathExtension().lastPathComponent
+                    return (index, PromotionDelta(
+                        pkginfoURL: url,
+                        pkgName: name,
+                        version: afterSnap?.version ?? beforeSnap?.version,
+                        before: beforeSnap?.catalogs ?? [],
+                        after: afterSnap?.catalogs ?? []
+                    ))
+                }
+            }
+            var collected: [(Int, PromotionDelta)] = []
+            for await (index, delta) in group {
+                if let delta { collected.append((index, delta)) }
+            }
+            collected.sort { $0.0 < $1.0 }
+            return collected.map(\.1)
         }
-        return deltas
     }
 
     /// Tuple-ish snapshot of just the fields the Promoter UI needs from
@@ -437,7 +482,7 @@ public struct FilePromoterService: PromoterService {
         return nil
     }
 
-    private func relativePath(_ url: URL, base: URL) -> String? {
+    fileprivate func relativePath(_ url: URL, base: URL) -> String? {
         let urlComponents = url.standardizedFileURL.pathComponents
         let baseComponents = base.standardizedFileURL.pathComponents
         guard urlComponents.starts(with: baseComponents) else { return nil }

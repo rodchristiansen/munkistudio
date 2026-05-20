@@ -89,6 +89,18 @@ struct PromoterView: View {
             .labelsHidden()
             sectionContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    if model.loading {
+                        Label("Loading promoter data…", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color(nsColor: .controlBackgroundColor), in: .capsule)
+                            .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1))
+                            .padding(.top, 6)
+                    }
+                }
         }
         .padding(16)
     }
@@ -102,6 +114,7 @@ struct PromoterView: View {
                     candidates: model.snapshot.candidates,
                     busyURL: model.busyURL,
                     hiddenCatalogs: hiddenCatalogs,
+                    pkginfoCount: store.snapshot.pkginfos.count,
                     onPromote: handlePromote,
                     onDefer: { candidate in
                         Task { await model.apply(.defer_(candidate), store: store) }

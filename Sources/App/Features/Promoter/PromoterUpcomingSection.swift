@@ -7,6 +7,7 @@ struct PromoterUpcomingSection: View {
     let candidates: [PromotionCandidate]
     let busyURL: URL?
     let hiddenCatalogs: Set<String>
+    let pkginfoCount: Int
     let onPromote: (PromotionCandidate) -> Void
     let onDefer: (PromotionCandidate) -> Void
 
@@ -50,13 +51,34 @@ struct PromoterUpcomingSection: View {
         .padding(.bottom, 8)
     }
 
+    @ViewBuilder
     private var emptyState: some View {
-        HStack {
+        diagnosticPanel
+    }
+
+    /// Pinpoint why the list is empty so the user doesn't have to guess.
+    /// Three reasons are common: the repo's pkginfo set is empty (open
+    /// the wrong folder, or still loading), `promoter.yml` has no rules,
+    /// or rules exist but no pkginfo's catalog set matches a rule's
+    /// `promote_from`.
+    private var diagnosticPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text("No pkginfos match any current promoter rule.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Spacer()
+            if pkginfoCount == 0 {
+                Label("0 pkginfos loaded from the open repository — open the folder containing pkgsinfo/ to populate the candidate list.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .labelStyle(.titleAndIcon)
+            } else {
+                Label("\(pkginfoCount) pkginfo\(pkginfoCount == 1 ? "" : "s") loaded but none match any rule's `promote_from` set.", systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .labelStyle(.titleAndIcon)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
     }
 }
