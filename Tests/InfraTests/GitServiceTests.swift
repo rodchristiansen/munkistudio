@@ -40,6 +40,34 @@ struct GitServiceTests {
         #expect(log.first?.subject == "initial")
     }
 
+    @Test("untracked files appear once in status output, not duplicated")
+    func untrackedFilesNotDuplicated() async throws {
+        let scratch = try await GitScratch.make()
+        defer { scratch.cleanup() }
+        let service = ShellGitService()
+        let info = try #require(await service.discover(at: scratch.url))
+
+        // Two distinct untracked files — neither should appear twice.
+        try "one".write(
+            to: scratch.url.appending(path: "untracked-a.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "two".write(
+            to: scratch.url.appending(path: "untracked-b.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let entries = try await service.status(in: info)
+        let untracked = entries.filter { entry in
+            if case .untracked = entry.kind { return true } else { return false }
+        }
+        let counts = Dictionary(grouping: untracked, by: \.relativePath).mapValues(\.count)
+        #expect(counts["untracked-a.txt"] == 1)
+        #expect(counts["untracked-b.txt"] == 1)
+    }
+
     @Test("stage + commit produces a SHA via the streaming API")
     func stageAndCommit() async throws {
         let scratch = try await GitScratch.make()
