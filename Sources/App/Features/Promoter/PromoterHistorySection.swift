@@ -8,6 +8,9 @@ import Core
 struct PromoterHistorySection: View {
     let entries: [PromotionHistoryEntry]
     let hiddenCatalogs: Set<String>
+    /// Wired to double-click on a per-pkginfo delta row → open in
+    /// Packages tab. The commit-level row stays informational.
+    var onOpenPackage: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -17,7 +20,11 @@ struct PromoterHistorySection: View {
                     emptyState
                 } else {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                        HistoryRow(entry: entry, hiddenCatalogs: hiddenCatalogs)
+                        HistoryRow(
+                            entry: entry,
+                            hiddenCatalogs: hiddenCatalogs,
+                            onOpenPackage: onOpenPackage
+                        )
                         if index < entries.count - 1 { Divider() }
                     }
                 }
@@ -57,6 +64,7 @@ struct PromoterHistorySection: View {
 private struct HistoryRow: View {
     let entry: PromotionHistoryEntry
     let hiddenCatalogs: Set<String>
+    var onOpenPackage: ((String) -> Void)? = nil
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -94,7 +102,11 @@ private struct HistoryRow: View {
             if !entry.deltas.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(entry.deltas.prefix(8)) { delta in
-                        DeltaRow(delta: delta, hiddenCatalogs: hiddenCatalogs)
+                        DeltaRow(
+                            delta: delta,
+                            hiddenCatalogs: hiddenCatalogs,
+                            onOpenPackage: { onOpenPackage?(delta.pkgName) }
+                        )
                     }
                     if entry.deltas.count > 8 {
                         Text("…and \(entry.deltas.count - 8) more")
@@ -113,6 +125,7 @@ private struct HistoryRow: View {
 private struct DeltaRow: View {
     let delta: PromotionDelta
     let hiddenCatalogs: Set<String>
+    let onOpenPackage: () -> Void
 
     private var before: [String] {
         filteringHidden(delta.before, hidden: hiddenCatalogs)
@@ -140,6 +153,8 @@ private struct DeltaRow: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
+        .contentShape(.rect)
+        .onTapGesture(count: 2, perform: onOpenPackage)
     }
 
     /// Render the transition. `[]` on either side is omitted gracefully —

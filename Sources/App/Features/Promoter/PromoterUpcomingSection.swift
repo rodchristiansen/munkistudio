@@ -17,6 +17,8 @@ struct PromoterUpcomingSection: View {
     let repositoryPath: String?
     let onPromote: (PromotionCandidate) -> Void
     let onDefer: (PromotionCandidate) -> Void
+    /// Wired to double-click on a candidate row → open in Packages tab.
+    var onOpenPackage: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -31,7 +33,8 @@ struct PromoterUpcomingSection: View {
                             busy: busyURL == candidate.pkginfoURL,
                             hiddenCatalogs: hiddenCatalogs,
                             onPromote: { onPromote(candidate) },
-                            onDefer: { onDefer(candidate) }
+                            onDefer: { onDefer(candidate) },
+                            onOpenPackage: { onOpenPackage?(candidate.pkgName) }
                         )
                         if index < candidates.count - 1 { Divider() }
                     }
@@ -121,6 +124,7 @@ private struct PromoterCandidateRow: View {
     let hiddenCatalogs: Set<String>
     let onPromote: () -> Void
     let onDefer: () -> Void
+    let onOpenPackage: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -152,6 +156,8 @@ private struct PromoterCandidateRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .contentShape(.rect)
+        .onTapGesture(count: 2, perform: onOpenPackage)
     }
 
     private var statusBadge: some View {

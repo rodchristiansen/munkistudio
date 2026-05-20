@@ -125,15 +125,16 @@ struct PromoterView: View {
                     .padding(.top, 8)
             }
             HSplitView {
-                column(title: "Imports", systemImage: "square.and.arrow.down", count: promoterStore.snapshot.imports.count) {
+                columnScroll {
                     PromoterImportsSection(
                         imports: promoterStore.snapshot.imports,
-                        hiddenCatalogs: hiddenCatalogs
+                        hiddenCatalogs: hiddenCatalogs,
+                        onOpenPackage: openInPackagesTab
                     )
                 }
-                column(title: "Upcoming", systemImage: "calendar.badge.clock", count: promoterStore.snapshot.candidates.count) {
+                columnScroll {
                     PromoterUpcomingSection(
-                        candidates: promoterStore.snapshot.candidates,
+                        candidates: liveCandidates,
                         busyURL: promoterStore.busyURL,
                         hiddenCatalogs: hiddenCatalogs,
                         pkginfoCount: store.snapshot.pkginfos.count,
@@ -143,49 +144,61 @@ struct PromoterView: View {
                         onPromote: handlePromote,
                         onDefer: { candidate in
                             Task { await promoterStore.apply(.defer_(candidate), store: store) }
-                        }
+                        },
+                        onOpenPackage: openInPackagesTab
                     )
                 }
-                column(title: "History", systemImage: "clock.arrow.circlepath", count: promoterStore.snapshot.history.count) {
+                columnScroll {
                     PromoterHistorySection(
                         entries: promoterStore.snapshot.history,
-                        hiddenCatalogs: hiddenCatalogs
+                        hiddenCatalogs: hiddenCatalogs,
+                        onOpenPackage: openInPackagesTab
                     )
                 }
             }
         }
     }
 
-    /// One scrollable column wrapped in a header strip. Each column is
-    /// independently resizable via the `HSplitView` divider so the user
-    /// can give whichever column they're focused on more room.
+    /// Plain scroll wrapper for one column. The title + count live
+    /// *inside* each section view (e.g. "Recent AutoPkg Imports 51"),
+    /// so the column itself stays chrome-free — no double headings.
     @ViewBuilder
-    private func column<Content: View>(
-        title: String,
-        systemImage: String,
-        count: Int,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.tint)
-                Text(title).font(.headline)
-                Text("\(count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
-            ScrollView {
-                content()
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-            }
+    private func columnScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ScrollView {
+            content()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
         }
         .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Compute candidates live against the current pkginfo snapshot.
+    /// Going through `store.snapshot.pkginfos` directly (instead of the
+    /// PromoterStore's cached `snapshot.candidates`) sidesteps any
+    /// staleness when the user lands on the tab before the async
+    /// snapshot pipeline has rerun — the matching logic is pure /
+    /// cheap, so we can recompute on every render without cost.
+    private var liveCandidates: [PromotionCandidate] {
+        FilePromoterService.candidates(
+            from: store.snapshot.pkginfos,
+            config: promoterStore.snapshot.config,
+            now: Date()
+        )
+    }
+
+    /// Jump to the Packages tab and select the matching pkginfo by
+    /// name. Used by row double-clicks in every column so the user
+    /// can pivot from "what got promoted" to "the actual package".
+    private func openInPackagesTab(named pkgName: String) {
+        guard let record = store.snapshot.pkginfos.first(where: {
+            $0.pkginfo.name.caseInsensitiveCompare(pkgName) == .orderedSame
+        }) else { return }
+        store.selectedSection = .packages
+        store.selectedItemID = AnyHashable(record.id)
+        let category = (record.pkginfo.category?.trimmingCharacters(in: .whitespaces)).flatMap {
+            $0.isEmpty ? nil : $0
+        } ?? "Uncategorized"
+        store.expandedCategories.insert(category)
     }
 
     /// Modal sheet chrome shared by both editors.

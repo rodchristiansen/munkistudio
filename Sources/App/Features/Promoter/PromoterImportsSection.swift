@@ -6,6 +6,9 @@ import Core
 struct PromoterImportsSection: View {
     let imports: [AutoPkgImport]
     let hiddenCatalogs: Set<String>
+    /// Optional row-tap handler. Wired to "double-click → jump to
+    /// Packages detail" when set; nil leaves the rows display-only.
+    var onOpenPackage: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,7 +18,11 @@ struct PromoterImportsSection: View {
                     emptyState
                 } else {
                     ForEach(Array(imports.enumerated()), id: \.element.id) { index, entry in
-                        ImportRow(entry: entry, hiddenCatalogs: hiddenCatalogs)
+                        ImportRow(
+                            entry: entry,
+                            hiddenCatalogs: hiddenCatalogs,
+                            onOpenPackage: onOpenPackage
+                        )
                         if index < imports.count - 1 { Divider() }
                     }
                 }
@@ -55,6 +62,7 @@ struct PromoterImportsSection: View {
 private struct ImportRow: View {
     let entry: AutoPkgImport
     let hiddenCatalogs: Set<String>
+    var onOpenPackage: ((String) -> Void)? = nil
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -100,5 +108,9 @@ private struct ImportRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .contentShape(.rect)
+        .onTapGesture(count: 2) {
+            onOpenPackage?(entry.pkgName)
+        }
     }
 }
