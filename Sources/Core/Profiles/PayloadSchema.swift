@@ -45,9 +45,12 @@ public struct PayloadDefinition: Sendable, Hashable {
     }
 
     /// Index `properties` by name for O(1) lookup from the
-    /// validator's hot loop.
+    /// validator's hot loop. The upstream YAML occasionally lists
+    /// the same property twice (different platforms / availability
+    /// blocks) — keep the later definition so deprecation flags from
+    /// the newest entry win, and never trap on collision.
     public var propertyIndex: [String: PayloadProperty] {
-        Dictionary(uniqueKeysWithValues: properties.map { ($0.name, $0) })
+        Dictionary(properties.map { ($0.name, $0) }, uniquingKeysWith: { _, new in new })
     }
 }
 
