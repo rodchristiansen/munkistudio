@@ -583,7 +583,7 @@ private extension GitView {
             }
             await refresh()
         } catch {
-            note("Stage failed: \(error.localizedDescription)", kind: .error)
+            await handleGitError(error, action: "Stage", info: info, retry: { await toggleStageSelected() })
         }
     }
 
@@ -600,7 +600,7 @@ private extension GitView {
             }
             await refresh()
         } catch {
-            note("Stage-all failed: \(error.localizedDescription)", kind: .error)
+            await handleGitError(error, action: "Stage-all", info: info, retry: { await toggleStageAll() })
         }
     }
 
@@ -615,7 +615,33 @@ private extension GitView {
             try await store.services.git.unstage(in: info, relativePaths: stagedPaths)
             await refresh()
         } catch {
-            note("Unstage-all failed: \(error.localizedDescription)", kind: .error)
+            await handleGitError(error, action: "Unstage-all", info: info, retry: { await unstageAll() })
+        }
+    }
+
+    /// Common git-error path: route index.lock failures into the
+    /// recovery alert and retry on success; surface anything else
+    /// inline.
+    @MainActor
+    private func handleGitError(
+        _ error: Error,
+        action: String,
+        info: GitRepositoryInfo,
+        retry: @escaping () async -> Void
+    ) async {
+        let message = error.localizedDescription
+        guard IndexLockRecovery.matches(message: message) else {
+            note("\(action) failed: \(message)", kind: .error)
+            return
+        }
+        switch IndexLockRecovery.present(workTreeRoot: info.workTreeRoot, message: message) {
+        case .deleted:
+            note("Removed .git/index.lock — retrying \(action.lowercased())…", kind: .info)
+            await retry()
+        case .cancelled:
+            note("\(action) failed: \(message)", kind: .error)
+        case .failed(let why):
+            note(why, kind: .error)
         }
     }
 
