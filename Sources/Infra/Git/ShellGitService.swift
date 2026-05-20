@@ -99,6 +99,19 @@ public final class ShellGitService: GitService {
                 renamedFrom = nil
             }
 
+            // Untracked (`??`) and ignored (`!!`) repeat the same character
+            // in both XY columns — git's convention, not a real index /
+            // working-tree split. Emit a single entry instead of two so
+            // these files don't appear duplicated in the Git pane.
+            if staged == "?" && unstaged == "?" {
+                entries.append(GitStatusEntry(relativePath: path, kind: .untracked, staged: false))
+                continue
+            }
+            if staged == "!" && unstaged == "!" {
+                entries.append(GitStatusEntry(relativePath: path, kind: .ignored, staged: false))
+                continue
+            }
+
             if let stagedKind, staged != " " {
                 let kind = renamedFrom.map(GitStatusEntry.Kind.renamed(from:)) ?? stagedKind
                 entries.append(GitStatusEntry(relativePath: path, kind: kind, staged: true))
