@@ -205,7 +205,7 @@ private struct OverviewTab: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
                     .textCase(.uppercase)
-                FlowLayout(spacing: 18) {
+                FlowLayout(spacing: 32) {
                     ForEach(metadata.keys.sorted(), id: \.self) { key in
                         if let value = metadata[key],
                            let display = Self.displayString(for: value) {
