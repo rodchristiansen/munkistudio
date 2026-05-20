@@ -185,6 +185,8 @@ private struct SidebarView: View {
                 return !settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces).isEmpty
             case .git:
                 return store.gitInfo != nil && settings.showGitSection
+            case .promoter:
+                return settings.enablePromoterTab
             case .profiles:
                 return settings.enableProfilesTab
             default:
@@ -226,6 +228,7 @@ private struct ContentColumn: View {
         case .build: EmptyView()
         case .clean: EmptyView()
         case .importer: EmptyView()
+        case .promoter: EmptyView()
         case .git: GitView()
         }
     }
@@ -246,6 +249,7 @@ private struct DetailColumn: View {
         case .build: EmptyView()
         case .clean: EmptyView()
         case .importer: EmptyView()
+        case .promoter: EmptyView()
         case .git: GitDetailView()
         }
     }
@@ -263,6 +267,7 @@ private struct FullWidthColumn: View {
             case .dependencies: DependenciesView()
             case .build: BuildView()
             case .clean: CleanView()
+            case .promoter: PromoterView()
             default: EmptyView()
             }
         }

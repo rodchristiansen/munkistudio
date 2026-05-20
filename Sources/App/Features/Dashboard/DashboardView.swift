@@ -6,6 +6,8 @@ import Core
 /// entry point so users start in a hub and dive out from there.
 struct DashboardView: View {
     @Environment(RepositoryStore.self) private var store
+    @Environment(AppSettings.self) private var settings
+    @Environment(PromoterStore.self) private var promoterStore
     @State private var recentCommits: [GitCommit] = []
     @ScaledMetric(relativeTo: .caption) private var shaColumnWidth: CGFloat = 70
 
@@ -209,6 +211,27 @@ struct DashboardView: View {
                     color: .yellow,
                     action: nil
                 )
+            }
+            if settings.enablePromoterTab {
+                let eligible = promoterStore.snapshot.candidates.filter { $0.isEligible() }.count
+                StatTile(
+                    label: "Eligible now",
+                    value: "\(eligible)",
+                    icon: "checkmark.seal.fill",
+                    color: .green
+                ) { store.selectedSection = .promoter }
+                StatTile(
+                    label: "Tracked",
+                    value: "\(promoterStore.snapshot.candidates.count)",
+                    icon: "clock.arrow.circlepath",
+                    color: .blue
+                ) { store.selectedSection = .promoter }
+                StatTile(
+                    label: "Recent imports",
+                    value: "\(promoterStore.snapshot.imports.count)",
+                    icon: "square.and.arrow.down",
+                    color: .indigo
+                ) { store.selectedSection = .promoter }
             }
         }
     }

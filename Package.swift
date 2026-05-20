@@ -36,7 +36,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "App",
-            dependencies: ["Core", "Infra"],
+            dependencies: ["Core", "Infra", "Yams"],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .enableUpcomingFeature("ExistentialAny"),
