@@ -42,10 +42,8 @@ struct DashboardView: View {
                     recentCommitsCard(info: info)
                 }
                 recentlyModifiedRow
-                insightsRow
-                if !orphanPackages.isEmpty {
-                    orphanPackagesCard
-                }
+                orphansAndLargestRow
+                topPeopleRow
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -237,20 +235,48 @@ struct DashboardView: View {
 
     // MARK: Insights row
 
-    /// Three side-by-side info cards: largest packages, top developers,
-    /// top categories. Hidden when there's nothing meaningful to show.
+    /// Two paired side-by-side rows in the lower dashboard:
+    /// orphans + largest packages on top, top developers + top
+    /// categories below. Each row is hidden when both halves are
+    /// empty, and a row with only one populated half still renders
+    /// — the populated card takes its column, the other stays empty.
+
     @ViewBuilder
-    private var insightsRow: some View {
-        if !largestPackages.isEmpty || !topDevelopers.isEmpty || !topCategories.isEmpty {
-            let columns = [
-                GridItem(.flexible(), spacing: 14),
-                GridItem(.flexible(), spacing: 14),
-                GridItem(.flexible(), spacing: 14)
-            ]
-            LazyVGrid(columns: columns, spacing: 14) {
-                if !largestPackages.isEmpty { largestPackagesCard }
-                if !topDevelopers.isEmpty { topDevelopersCard }
-                if !topCategories.isEmpty { topCategoriesCard }
+    private var orphansAndLargestRow: some View {
+        if !orphanPackages.isEmpty || !largestPackages.isEmpty {
+            HStack(alignment: .top, spacing: 14) {
+                if !orphanPackages.isEmpty {
+                    orphanPackagesCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                } else {
+                    Color.clear.frame(maxWidth: .infinity)
+                }
+                if !largestPackages.isEmpty {
+                    largestPackagesCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                } else {
+                    Color.clear.frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var topPeopleRow: some View {
+        if !topDevelopers.isEmpty || !topCategories.isEmpty {
+            HStack(alignment: .top, spacing: 14) {
+                if !topDevelopers.isEmpty {
+                    topDevelopersCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                } else {
+                    Color.clear.frame(maxWidth: .infinity)
+                }
+                if !topCategories.isEmpty {
+                    topCategoriesCard
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                } else {
+                    Color.clear.frame(maxWidth: .infinity)
+                }
             }
         }
     }
