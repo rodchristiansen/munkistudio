@@ -80,9 +80,16 @@ private struct ProfileEditor: View {
     }
 
     // MARK: Header
+    //
+    // .center alignment instead of .firstTextBaseline — a Menu inside
+    // an HStack with .firstTextBaseline was collapsing the entire row
+    // to zero height in earlier renders, hiding the profile title and
+    // the Save/Revert/Reveal buttons completely. Explicit background +
+    // fixedSize on the vertical axis also pins the row's height so it
+    // can't be squeezed by the TextEditor below.
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(record.listLabel)
@@ -103,7 +110,7 @@ private struct ProfileEditor: View {
                         .truncationMode(.middle)
                 }
             }
-            Spacer()
+            Spacer(minLength: 12)
             if let modifiedAt = record.modifiedAt {
                 Text(Self.timestampFormatter.string(from: modifiedAt))
                     .font(.caption)
@@ -133,6 +140,9 @@ private struct ProfileEditor: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .frame(minHeight: 48)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: Open With menu
@@ -237,6 +247,7 @@ private struct ProfileEditor: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
@@ -292,6 +303,7 @@ private struct ProfileEditor: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: Editor
