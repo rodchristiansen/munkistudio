@@ -166,9 +166,19 @@ private struct DeltaRow: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
+        // Rounded, inset selection — sits cleanly inside the
+        // commit's padding without bleeding to the edges.
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+        )
         .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onOpenPackage)
         .onTapGesture(count: 1, perform: onSelect)
