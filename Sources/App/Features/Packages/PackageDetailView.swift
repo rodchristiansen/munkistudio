@@ -2,14 +2,18 @@ import SwiftUI
 import AppKit
 import Core
 
-/// Tabbed pkginfo editor with eight panels:
-/// Basic Info / Contents / Requirements / Installation / Uninstall /
-/// Scripts / Alerts / Advanced.
-///
-/// Each tab is a `Form` so we get free LabeledContent alignment and
-/// consistent macOS chrome. The selected tab survives across selection
-/// changes (kept in store state) so the user lands back on the tab they
-/// were last using.
+/// Tabbed pkginfo editor with five panels, each telling one story:
+///   - Overview: what is this thing — identity, MSC fields, catalogs,
+///     requirements, installer metadata, file metadata.
+///   - Detection: how Munki recognizes the item is (or isn't) installed
+///     — installs, installcheck_script, version_script, receipts,
+///     uninstallcheck_script.
+///   - Install: how the item gets onto disk — items_to_copy,
+///     blocking_applications, installer_environment, installer_choices,
+///     preinstall_script, postinstall_script.
+///   - Uninstall: parallel to Install — method, uninstaller item,
+///     uninstall_script, preuninstall_script, postuninstall_script.
+///   - Advanced: flags, alerts, sizes & paths.
 struct PackageDetailView: View {
     @Environment(RepositoryStore.self) private var store
 
@@ -35,7 +39,7 @@ struct PackageDetailView: View {
 private struct PackageEditor: View {
     @Environment(RepositoryStore.self) private var store
     let record: PkginfoRecord
-    @State private var activeTab: EditorTab = .basicInfo
+    @State private var activeTab: EditorTab = .overview
 
     private var draftBinding: Binding<Pkginfo> {
         Binding(
@@ -57,13 +61,10 @@ private struct PackageEditor: View {
             ScrollView {
                 Group {
                     switch activeTab {
-                    case .basicInfo: BasicInfoTab(draft: draftBinding, format: formatBinding, fileURL: record.fileURL, createdAt: record.createdAt, modifiedAt: record.modifiedAt)
-                    case .contents: ContentsTab(draft: draftBinding)
-                    case .requirements: RequirementsTab(draft: draftBinding)
-                    case .installation: InstallationTab(draft: draftBinding)
+                    case .overview: OverviewTab(draft: draftBinding, format: formatBinding, fileURL: record.fileURL, createdAt: record.createdAt, modifiedAt: record.modifiedAt)
+                    case .detection: DetectionTab(draft: draftBinding)
+                    case .install: InstallTab(draft: draftBinding)
                     case .uninstall: UninstallTab(draft: draftBinding)
-                    case .scripts: ScriptsTab(draft: draftBinding)
-                    case .alerts: AlertsTab(draft: draftBinding)
                     case .advanced: AdvancedTab(draft: draftBinding)
                     }
                 }
@@ -109,28 +110,27 @@ private struct PackageEditor: View {
 }
 
 private enum EditorTab: String, CaseIterable, Identifiable {
-    case basicInfo, contents, requirements, installation
-    case uninstall, scripts, alerts, advanced
+    case overview, detection, install, uninstall, advanced
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .basicInfo: "Basic Info"
-        case .contents: "Contents"
-        case .requirements: "Requirements"
-        case .installation: "Installation"
+        case .overview: "Overview"
+        case .detection: "Detection"
+        case .install: "Install"
         case .uninstall: "Uninstall"
-        case .scripts: "Scripts"
-        case .alerts: "Alerts"
         case .advanced: "Advanced"
         }
     }
 }
 
-// MARK: Basic Info
+// MARK: Overview
 
-private struct BasicInfoTab: View {
+/// What is this thing — identity, MSC fields, catalogs, requirements,
+/// installer metadata, and on-disk file metadata. Admin notes sit
+/// next to Description on purpose: they're both prose about the item.
+private struct OverviewTab: View {
     @Environment(RepositoryStore.self) private var store
     @Binding var draft: Pkginfo
     @Binding var format: RepoFormat
@@ -143,13 +143,14 @@ private struct BasicInfoTab: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 16) {
                 identityCard
+                descriptionCard
+                adminNotesCard
                 catalogsCard
-                behaviorCard
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             VStack(alignment: .leading, spacing: 16) {
                 installerCard
-                descriptionCard
+                requirementsCard
                 fileCard
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -183,26 +184,41 @@ private struct BasicInfoTab: View {
         }
     }
 
+    private var descriptionCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Description")
+            TextEditor(text: Bindings.optional($draft.description))
+                .frame(minHeight: 120)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+                .cardStyle()
+        }
+    }
+
+    private var adminNotesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Admin notes")
+            TextEditor(text: Bindings.optional($draft.notes))
+                .frame(minHeight: 120)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+                .cardStyle()
+        }
+    }
+
     private var catalogsCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             CardSectionHeader("Catalogs")
             CatalogChecklist(selected: Bindings.bindArray($draft.catalogs))
                 .cardStyle()
-        }
-    }
-
-    private var behaviorCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CardSectionHeader("Behavior")
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle("Autoremove", isOn: Bindings.optionalBool($draft.autoremove))
-                Toggle("Uninstallable", isOn: Bindings.optionalBool($draft.uninstallable))
-                Toggle("Unattended install", isOn: Bindings.optionalBool($draft.unattendedInstall))
-                Toggle("Unattended uninstall", isOn: Bindings.optionalBool($draft.unattendedUninstall))
-                Toggle("Featured", isOn: Bindings.optionalBool($draft.featured))
-                Toggle("On demand", isOn: Bindings.optionalBool($draft.onDemand))
-            }
-            .cardStyle()
         }
     }
 
@@ -256,9 +272,6 @@ private struct BasicInfoTab: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                 }
-                LabelledField("Force install after", alignment: .center) {
-                    ForceInstallDateField(date: $draft.forceInstallAfterDate)
-                }
             }
             .cardStyle()
         }
@@ -270,18 +283,50 @@ private struct BasicInfoTab: View {
         }
     }
 
-    private var descriptionCard: some View {
+    private var requirementsCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            CardSectionHeader("Description")
-            TextEditor(text: Bindings.optional($draft.description))
-                .frame(minHeight: 140)
-                .padding(8)
-                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
-                .cardStyle()
+            CardSectionHeader("Requirements")
+            VStack(alignment: .leading, spacing: 12) {
+                LabelledField("Requires", alignment: .top) {
+                    StringListEditor(
+                        values: Bindings.bindArray($draft.requires),
+                        placeholder: "Add required item"
+                    )
+                }
+                LabelledField("Update for", alignment: .top) {
+                    StringListEditor(
+                        values: Bindings.bindArray($draft.updateFor),
+                        placeholder: "Add target"
+                    )
+                }
+                LabelledField("Min macOS") {
+                    TextField("", text: Bindings.optional($draft.minimumOSVersion))
+                        .textFieldStyle(.roundedBorder)
+                }
+                LabelledField("Max macOS") {
+                    TextField("", text: Bindings.optional($draft.maximumOSVersion))
+                        .textFieldStyle(.roundedBorder)
+                }
+                LabelledField("Min munki") {
+                    TextField("", text: Bindings.optional($draft.minimumMunkiVersion))
+                        .textFieldStyle(.roundedBorder)
+                }
+                LabelledField("Architectures", alignment: .top) {
+                    ArchitecturePicker(selected: $draft.supportedArchitectures)
+                }
+                LabelledField("Installable condition", alignment: .top) {
+                    TextEditor(text: Bindings.optional($draft.installableCondition))
+                        .frame(minHeight: 80)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                        )
+                        .font(.system(.callout, design: .monospaced))
+                }
+            }
+            .cardStyle()
         }
     }
 
@@ -371,9 +416,14 @@ private struct BasicInfoTab: View {
     }
 }
 
-// MARK: Contents
+// MARK: Detection
 
-private struct ContentsTab: View {
+/// All the ways Munki recognizes whether this item is installed.
+/// `installs` / `installcheck_script` / `version_script` answer
+/// "is the right version present?". `receipts` answers it from
+/// Apple installer history. `uninstallcheck_script` answers "is it
+/// still installed enough to need removing?".
+private struct DetectionTab: View {
     @Binding var draft: Pkginfo
 
     var body: some View {
@@ -384,83 +434,48 @@ private struct ContentsTab: View {
                     .cardStyle()
             }
             VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Install check script")
+                hint("When set, overrides the installs/receipts check.")
+                ScriptEditor(label: "", text: Bindings.optional($draft.installcheckScript))
+                    .cardStyle()
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Version script")
+                hint("Reports the installed version; Munki compares the output to the pkginfo's version field.")
+                ScriptEditor(label: "", text: Bindings.optional($draft.versionScript))
+                    .cardStyle()
+            }
+            VStack(alignment: .leading, spacing: 0) {
                 CardSectionHeader("Receipts")
                 ReceiptsTable(items: Bindings.bindArray($draft.receipts))
+                    .cardStyle()
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Uninstall check script")
+                hint("Exit 0 if the item still needs to be uninstalled, non-zero otherwise.")
+                ScriptEditor(label: "", text: Bindings.optional($draft.uninstallcheckScript))
                     .cardStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
-}
 
-// MARK: Requirements
-
-private struct RequirementsTab: View {
-    @Binding var draft: Pkginfo
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 0) {
-                    CardSectionHeader("Requires")
-                    StringListEditor(
-                        values: Bindings.bindArray($draft.requires),
-                        placeholder: "Add required item"
-                    )
-                    .cardStyle()
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    CardSectionHeader("Update for")
-                    StringListEditor(
-                        values: Bindings.bindArray($draft.updateFor),
-                        placeholder: "Add target"
-                    )
-                    .cardStyle()
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 0) {
-                    CardSectionHeader("Versions")
-                    VStack(alignment: .leading, spacing: 10) {
-                        LabelledField("Min macOS") {
-                            TextField("", text: Bindings.optional($draft.minimumOSVersion))
-                                .textFieldStyle(.roundedBorder)
-                        }
-                        LabelledField("Max macOS") {
-                            TextField("", text: Bindings.optional($draft.maximumOSVersion))
-                                .textFieldStyle(.roundedBorder)
-                        }
-                        LabelledField("Min munki") {
-                            TextField("", text: Bindings.optional($draft.minimumMunkiVersion))
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
-                    .cardStyle()
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    CardSectionHeader("Installable condition")
-                    TextEditor(text: Bindings.optional($draft.installableCondition))
-                        .frame(minHeight: 100)
-                        .padding(8)
-                        .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                        )
-                        .font(.system(.callout, design: .monospaced))
-                        .cardStyle()
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 4)
     }
 }
 
-// MARK: Installation
+// MARK: Install
 
-private struct InstallationTab: View {
+private struct InstallTab: View {
     @Binding var draft: Pkginfo
+
+    /// Side-by-side script editors share this height so the pair
+    /// claims as much vertical room as two stacked editors would.
+    private static let pairedScriptHeight: CGFloat = 320
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -480,21 +495,38 @@ private struct InstallationTab: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 VStack(alignment: .leading, spacing: 0) {
-                    CardSectionHeader("Supported architectures")
-                    ArchitecturePicker(selected: $draft.supportedArchitectures)
+                    CardSectionHeader("Installer environment")
+                    InstallerEnvironmentEditor(environment: $draft.installerEnvironment)
                         .cardStyle()
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             VStack(alignment: .leading, spacing: 0) {
-                CardSectionHeader("Installer environment")
-                InstallerEnvironmentEditor(environment: $draft.installerEnvironment)
-                    .cardStyle()
-            }
-            VStack(alignment: .leading, spacing: 0) {
                 CardSectionHeader("Installer choices")
                 InstallerChoicesTable(choices: $draft.installerChoicesXml)
                     .cardStyle()
+            }
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 0) {
+                    CardSectionHeader("Pre-install script")
+                    ScriptEditor(
+                        label: "",
+                        text: Bindings.optional($draft.preinstallScript),
+                        editorHeight: Self.pairedScriptHeight
+                    )
+                    .cardStyle()
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 0) {
+                    CardSectionHeader("Post-install script")
+                    ScriptEditor(
+                        label: "",
+                        text: Bindings.optional($draft.postinstallScript),
+                        editorHeight: Self.pairedScriptHeight
+                    )
+                    .cardStyle()
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -521,6 +553,8 @@ private struct UninstallTab: View {
         "removepackages", "remove_copied_items", "uninstall_script",
         "remove_app", "remove_profile", "uninstall_package",
     ]
+
+    private static let pairedScriptHeight: CGFloat = 320
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -571,76 +605,34 @@ private struct UninstallTab: View {
                 )
                 .cardStyle()
             }
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 0) {
+                    CardSectionHeader("Pre-uninstall script")
+                    ScriptEditor(
+                        label: "",
+                        text: Bindings.optional($draft.preuninstallScript),
+                        editorHeight: Self.pairedScriptHeight
+                    )
+                    .cardStyle()
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 0) {
+                    CardSectionHeader("Post-uninstall script")
+                    ScriptEditor(
+                        label: "",
+                        text: Bindings.optional($draft.postuninstallScript),
+                        editorHeight: Self.pairedScriptHeight
+                    )
+                    .cardStyle()
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var methodBinding: Binding<String?> {
         Binding(get: { draft.uninstallMethod }, set: { draft.uninstallMethod = $0 })
-    }
-}
-
-// MARK: Scripts
-
-private struct ScriptsTab: View {
-    @Binding var draft: Pkginfo
-
-    /// Default inline editor height for a single full-width card.
-    private static let singleHeight: CGFloat = 200
-    /// Paired side-by-side cards get double height so the pair claims
-    /// the same vertical real estate as two stacked single cards —
-    /// the user gets twice the script-editing area, not half.
-    private static let pairedHeight: CGFloat = 400
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            scriptCard("Install check", text: Bindings.optional($draft.installcheckScript), height: Self.singleHeight)
-            HStack(alignment: .top, spacing: 16) {
-                scriptCard("Pre-install", text: Bindings.optional($draft.preinstallScript), height: Self.pairedHeight)
-                scriptCard("Post-install", text: Bindings.optional($draft.postinstallScript), height: Self.pairedHeight)
-            }
-            scriptCard("Uninstall check", text: Bindings.optional($draft.uninstallcheckScript), height: Self.singleHeight)
-            HStack(alignment: .top, spacing: 16) {
-                scriptCard("Pre-uninstall", text: Bindings.optional($draft.preuninstallScript), height: Self.pairedHeight)
-                scriptCard("Post-uninstall", text: Bindings.optional($draft.postuninstallScript), height: Self.pairedHeight)
-            }
-            scriptCard("Version script", text: Bindings.optional($draft.versionScript), height: Self.singleHeight)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private func scriptCard(_ title: String, text: Binding<String>, height: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CardSectionHeader(title)
-            ScriptEditor(label: "", text: text, editorHeight: height)
-                .frame(maxWidth: .infinity)
-                .cardStyle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-// MARK: Alerts
-
-private struct AlertsTab: View {
-    @Binding var draft: Pkginfo
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 0) {
-                CardSectionHeader("Pre-install alert")
-                AlertEditor(title: "Pre-install alert", alert: $draft.preinstallAlert)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardStyle()
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                CardSectionHeader("Pre-uninstall alert")
-                AlertEditor(title: "Pre-uninstall alert", alert: $draft.preuninstallAlert)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardStyle()
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
@@ -708,53 +700,82 @@ private struct AdvancedTab: View {
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 0) {
-                    CardSectionHeader("Advanced options")
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Autoremove", isOn: Bindings.optionalBool($draft.autoremove))
-                        Toggle("Apple update item", isOn: Bindings.optionalBool($draft.appleItem))
-                        Toggle("Suppress bundle relocation", isOn: Bindings.optionalBool($draft.suppressBundleRelocation))
-                        Toggle("Allow untrusted package signature", isOn: Bindings.optionalBool($draft.allowUntrusted))
-                        Toggle("Precache", isOn: Bindings.optionalBool($draft.precache))
-                        Toggle("Featured", isOn: Bindings.optionalBool($draft.featured))
-                    }
-                    .cardStyle()
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    CardSectionHeader("Sizes & paths")
-                    VStack(alignment: .leading, spacing: 10) {
-                        LabelledField("Installer item hash") {
-                            TextField("", text: Bindings.optional($draft.installerItemHash))
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.callout, design: .monospaced))
-                        }
-                        LabelledField("Installer item size") {
-                            OptionalIntField(value: $draft.installerItemSize, placeholder: "kilobytes")
-                        }
-                        LabelledField("Package path") {
-                            TextField("", text: Bindings.optional($draft.packagePath))
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
-                    .cardStyle()
-                }
+                flagsCard
+                timingCard
+                sizesCard
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            VStack(alignment: .leading, spacing: 0) {
-                CardSectionHeader("Admin notes")
-                TextEditor(text: Bindings.optional($draft.notes))
-                    .frame(minHeight: 280)
-                    .padding(8)
-                    .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                    )
-                    .cardStyle()
+            VStack(alignment: .leading, spacing: 16) {
+                alertCard(title: "Pre-install alert", alert: $draft.preinstallAlert)
+                alertCard(title: "Pre-uninstall alert", alert: $draft.preuninstallAlert)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Two-column toggle grid so the flag list stays visually tight
+    /// instead of giving each toggle its own row.
+    private var flagsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Flags")
+            let columns = [
+                GridItem(.flexible(), alignment: .leading),
+                GridItem(.flexible(), alignment: .leading)
+            ]
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                Toggle("Autoremove", isOn: Bindings.optionalBool($draft.autoremove))
+                Toggle("Apple update item", isOn: Bindings.optionalBool($draft.appleItem))
+                Toggle("Suppress bundle relocation", isOn: Bindings.optionalBool($draft.suppressBundleRelocation))
+                Toggle("Allow untrusted signature", isOn: Bindings.optionalBool($draft.allowUntrusted))
+                Toggle("Precache", isOn: Bindings.optionalBool($draft.precache))
+                Toggle("Featured", isOn: Bindings.optionalBool($draft.featured))
+                Toggle("Unattended install", isOn: Bindings.optionalBool($draft.unattendedInstall))
+                Toggle("Unattended uninstall", isOn: Bindings.optionalBool($draft.unattendedUninstall))
+                Toggle("On demand", isOn: Bindings.optionalBool($draft.onDemand))
+            }
+            .cardStyle()
+        }
+    }
+
+    private var timingCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Timing")
+            LabelledField("Force install after", alignment: .center) {
+                ForceInstallDateField(date: $draft.forceInstallAfterDate)
+            }
+            .cardStyle()
+        }
+    }
+
+    private var sizesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader("Sizes & paths")
+            VStack(alignment: .leading, spacing: 10) {
+                LabelledField("Installer item hash") {
+                    TextField("", text: Bindings.optional($draft.installerItemHash))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.callout, design: .monospaced))
+                }
+                LabelledField("Installer item size") {
+                    OptionalIntField(value: $draft.installerItemSize, placeholder: "kilobytes")
+                }
+                LabelledField("Package path") {
+                    TextField("", text: Bindings.optional($draft.packagePath))
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            .cardStyle()
+        }
+    }
+
+    private func alertCard(title: String, alert: Binding<PreinstallAlert?>) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CardSectionHeader(title)
+            AlertEditor(title: title, alert: alert)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
+        }
     }
 }
 
