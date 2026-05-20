@@ -34,8 +34,10 @@ struct DashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                statsGrid
+            VStack(alignment: .leading, spacing: 22) {
+                repositorySection
+                healthCheckSection
+                activitySection
                 if let info = store.gitInfo {
                     recentCommitsCard(info: info)
                 }
@@ -522,196 +524,214 @@ struct DashboardView: View {
         store.selectedItemID = AnyHashable(record.id)
     }
 
-    // MARK: Stats grid
+    // MARK: Stat sections
 
-    /// Single 5-column grid of every stat tile we surface. Conditional
-    /// tiles drop in or out as their underlying signals fire, so the
-    /// grid naturally grows from a base set to roughly 5×4.
-    private var statsGrid: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 5)
-        return LazyVGrid(columns: columns, spacing: 14) {
-            // Repository + Storage — the basic shape of the repo.
-            StatTile(
-                label: "Packages",
-                value: "\(store.snapshot.pkginfos.count)",
-                icon: "shippingbox",
-                color: .munkiStudioBrand
-            ) { store.selectedSection = .packages }
-            StatTile(
-                label: "Manifests",
-                value: "\(store.snapshot.manifests.count)",
-                icon: "list.bullet.rectangle",
-                color: .indigo
-            ) { store.selectedSection = .manifests }
-            StatTile(
-                label: "Catalogs",
-                value: "\(store.snapshot.catalogs.count)",
-                icon: "books.vertical",
-                color: .purple
-            ) { store.selectedSection = .catalogs }
-            StatTile(
-                label: "Categories",
-                value: "\(uniqueCategories.count)",
-                icon: "square.grid.2x2",
-                color: .teal,
-                action: nil
-            )
-            StatTile(
-                label: "Developers",
-                value: "\(uniqueDevelopers.count)",
-                icon: "person",
-                color: .pink,
-                action: nil
-            )
-            if settings.enableProfilesTab {
+    /// Three labeled sections — Repository, Health Check, Activity —
+    /// each with its own 5-column tile grid. Section headers are
+    /// plain icon + title (no vertical accent bar) to keep the page
+    /// quiet but still readable as three short stories.
+
+    private static let gridColumns = Array(
+        repeating: GridItem(.flexible(), spacing: 14), count: 5
+    )
+
+    private var repositorySection: some View {
+        StatSection(title: "Repository", icon: "shippingbox.fill", accent: .munkiStudioBrand) {
+            LazyVGrid(columns: Self.gridColumns, spacing: 14) {
                 StatTile(
-                    label: "Profiles",
-                    value: "\(profileStore.records.count)",
-                    icon: "doc.text",
-                    color: .cyan
-                ) { store.selectedSection = .profiles }
-            }
-            StatTile(
-                label: "Repo size",
-                value: Self.formatBytes(repoBytes),
-                icon: "internaldrive",
-                color: .blue,
-                action: nil
-            )
-            if reclaimableBytes > 0 {
+                    label: "Packages",
+                    value: "\(store.snapshot.pkginfos.count)",
+                    icon: "shippingbox",
+                    color: .munkiStudioBrand
+                ) { store.selectedSection = .packages }
                 StatTile(
-                    label: "Reclaimable",
-                    value: Self.formatBytes(reclaimableBytes),
-                    icon: "trash.slash",
-                    color: .orange,
+                    label: "Manifests",
+                    value: "\(store.snapshot.manifests.count)",
+                    icon: "list.bullet.rectangle",
+                    color: .indigo
+                ) { store.selectedSection = .manifests }
+                StatTile(
+                    label: "Catalogs",
+                    value: "\(store.snapshot.catalogs.count)",
+                    icon: "books.vertical",
+                    color: .purple
+                ) { store.selectedSection = .catalogs }
+                StatTile(
+                    label: "Categories",
+                    value: "\(uniqueCategories.count)",
+                    icon: "square.grid.2x2",
+                    color: .teal,
                     action: nil
                 )
-            }
-            if !orphanPackages.isEmpty {
                 StatTile(
-                    label: "Orphan packages",
-                    value: "\(orphanPackages.count)",
-                    icon: "questionmark.folder",
-                    color: .orange
-                ) { store.selectedSection = .packages }
-            }
-            if let biggest = largestPackages.first {
-                StatTile(
-                    label: "Largest single",
-                    value: Self.formatBytes(Self.sizeBytes(biggest)),
-                    icon: "scalemass",
-                    color: .blue
-                ) { openPackage(biggest) }
-            }
-            // Munki-wiki quality signals.
-            if missingDescriptionCount > 0 {
-                StatTile(
-                    label: "No description",
-                    value: "\(missingDescriptionCount)",
-                    icon: "text.badge.xmark",
-                    color: .red
-                ) { store.selectedSection = .packages }
-            }
-            if missingCategoryCount > 0 {
-                StatTile(
-                    label: "No category",
-                    value: "\(missingCategoryCount)",
-                    icon: "tray.2",
-                    color: .orange
-                ) { store.selectedSection = .packages }
-            }
-            if missingDeveloperCount > 0 {
-                StatTile(
-                    label: "No developer",
-                    value: "\(missingDeveloperCount)",
-                    icon: "person.crop.circle.badge.questionmark",
-                    color: .yellow
-                ) { store.selectedSection = .packages }
-            }
-            if unhashedCount > 0 {
-                StatTile(
-                    label: "Unhashed",
-                    value: "\(unhashedCount)",
-                    icon: "lock.open.trianglebadge.exclamationmark",
-                    color: .red
-                ) { store.selectedSection = .packages }
-            }
-            if dependencyIssueCount > 0 {
-                StatTile(
-                    label: "Dependency issues",
-                    value: "\(dependencyIssueCount)",
-                    icon: "exclamationmark.triangle",
-                    color: .yellow
-                ) { store.selectedSection = .dependencies }
-            }
-            if settings.enableProfilesTab, profileErrorCount > 0 {
-                StatTile(
-                    label: "Profile errors",
-                    value: "\(profileErrorCount)",
-                    icon: "exclamationmark.triangle.fill",
-                    color: .red
-                ) { store.selectedSection = .profiles }
-            }
-            // Activity.
-            StatTile(
-                label: "Uncommitted",
-                value: "\(store.gitDirtyCount)",
-                icon: "arrow.triangle.branch",
-                color: store.gitDirtyCount > 0 ? .orange : .secondary
-            ) { store.selectedSection = .git }
-            if !store.pkginfoDrafts.isEmpty || !store.manifestDrafts.isEmpty {
-                StatTile(
-                    label: "Unsaved edits",
-                    value: "\(store.dirtyDraftCount)",
-                    icon: "pencil",
-                    color: .yellow,
+                    label: "Developers",
+                    value: "\(uniqueDevelopers.count)",
+                    icon: "person",
+                    color: .pink,
                     action: nil
                 )
-            }
-            if settings.enablePromoterTab {
-                let eligible = cachedCandidates.filter { $0.isEligible() }.count
-                StatTile(
-                    label: "Eligible now",
-                    value: "\(eligible)",
-                    icon: "checkmark.seal.fill",
-                    color: .green
-                ) { store.selectedSection = .promoter }
-                StatTile(
-                    label: "Tracked",
-                    value: "\(cachedCandidates.count)",
-                    icon: "clock.arrow.circlepath",
-                    color: .blue
-                ) { store.selectedSection = .promoter }
-                if todayImportCount > 0 {
+                if settings.enableProfilesTab {
                     StatTile(
-                        label: "Imports (24h)",
-                        value: "\(todayImportCount)",
-                        icon: "clock.badge.checkmark",
-                        color: .green
-                    ) { store.selectedSection = .promoter }
+                        label: "Profiles",
+                        value: "\(profileStore.records.count)",
+                        icon: "doc.text",
+                        color: .cyan
+                    ) { store.selectedSection = .profiles }
                 }
                 StatTile(
-                    label: "Recent imports",
-                    value: "\(promoterStore.snapshot.imports.count)",
-                    icon: "square.and.arrow.down",
-                    color: .indigo
-                ) { store.selectedSection = .promoter }
+                    label: "Repo size",
+                    value: Self.formatBytes(repoBytes),
+                    icon: "internaldrive",
+                    color: .blue,
+                    action: nil
+                )
+                if reclaimableBytes > 0 {
+                    StatTile(
+                        label: "Reclaimable",
+                        value: Self.formatBytes(reclaimableBytes),
+                        icon: "trash.slash",
+                        color: .orange,
+                        action: nil
+                    )
+                }
+                if !orphanPackages.isEmpty {
+                    StatTile(
+                        label: "Orphan packages",
+                        value: "\(orphanPackages.count)",
+                        icon: "questionmark.folder",
+                        color: .orange
+                    ) { store.selectedSection = .packages }
+                }
+                if let biggest = largestPackages.first {
+                    StatTile(
+                        label: "Largest single",
+                        value: Self.formatBytes(Self.sizeBytes(biggest)),
+                        icon: "scalemass",
+                        color: .blue
+                    ) { openPackage(biggest) }
+                }
             }
-            if unattendedCount > 0 {
-                StatTile(
-                    label: "Unattended",
-                    value: "\(unattendedCount)",
-                    icon: "wand.and.stars",
-                    color: .purple
-                ) { store.selectedSection = .packages }
+        }
+    }
+
+    private var healthCheckSection: some View {
+        StatSection(title: "Health Check", icon: "stethoscope", accent: .red) {
+            LazyVGrid(columns: Self.gridColumns, spacing: 14) {
+                if missingDescriptionCount > 0 {
+                    StatTile(
+                        label: "No description",
+                        value: "\(missingDescriptionCount)",
+                        icon: "text.badge.xmark",
+                        color: .red
+                    ) { store.selectedSection = .packages }
+                }
+                if missingCategoryCount > 0 {
+                    StatTile(
+                        label: "No category",
+                        value: "\(missingCategoryCount)",
+                        icon: "tray.2",
+                        color: .orange
+                    ) { store.selectedSection = .packages }
+                }
+                if missingDeveloperCount > 0 {
+                    StatTile(
+                        label: "No developer",
+                        value: "\(missingDeveloperCount)",
+                        icon: "person.crop.circle.badge.questionmark",
+                        color: .yellow
+                    ) { store.selectedSection = .packages }
+                }
+                if unhashedCount > 0 {
+                    StatTile(
+                        label: "Unhashed",
+                        value: "\(unhashedCount)",
+                        icon: "lock.open.trianglebadge.exclamationmark",
+                        color: .red
+                    ) { store.selectedSection = .packages }
+                }
+                if dependencyIssueCount > 0 {
+                    StatTile(
+                        label: "Dependency issues",
+                        value: "\(dependencyIssueCount)",
+                        icon: "exclamationmark.triangle",
+                        color: .yellow
+                    ) { store.selectedSection = .dependencies }
+                }
+                if settings.enableProfilesTab, profileErrorCount > 0 {
+                    StatTile(
+                        label: "Profile errors",
+                        value: "\(profileErrorCount)",
+                        icon: "exclamationmark.triangle.fill",
+                        color: .red
+                    ) { store.selectedSection = .profiles }
+                }
             }
-            if forcedInstallCount > 0 {
+        }
+    }
+
+    private var activitySection: some View {
+        StatSection(title: "Activity", icon: "bolt.horizontal", accent: .green) {
+            LazyVGrid(columns: Self.gridColumns, spacing: 14) {
                 StatTile(
-                    label: "Forced installs",
-                    value: "\(forcedInstallCount)",
-                    icon: "calendar.badge.exclamationmark",
-                    color: .orange
-                ) { store.selectedSection = .packages }
+                    label: "Uncommitted",
+                    value: "\(store.gitDirtyCount)",
+                    icon: "arrow.triangle.branch",
+                    color: store.gitDirtyCount > 0 ? .orange : .secondary
+                ) { store.selectedSection = .git }
+                if !store.pkginfoDrafts.isEmpty || !store.manifestDrafts.isEmpty {
+                    StatTile(
+                        label: "Unsaved edits",
+                        value: "\(store.dirtyDraftCount)",
+                        icon: "pencil",
+                        color: .yellow,
+                        action: nil
+                    )
+                }
+                if settings.enablePromoterTab {
+                    let eligible = cachedCandidates.filter { $0.isEligible() }.count
+                    StatTile(
+                        label: "Eligible now",
+                        value: "\(eligible)",
+                        icon: "checkmark.seal.fill",
+                        color: .green
+                    ) { store.selectedSection = .promoter }
+                    StatTile(
+                        label: "Tracked",
+                        value: "\(cachedCandidates.count)",
+                        icon: "clock.arrow.circlepath",
+                        color: .blue
+                    ) { store.selectedSection = .promoter }
+                    if todayImportCount > 0 {
+                        StatTile(
+                            label: "Imports (24h)",
+                            value: "\(todayImportCount)",
+                            icon: "clock.badge.checkmark",
+                            color: .green
+                        ) { store.selectedSection = .promoter }
+                    }
+                    StatTile(
+                        label: "Recent imports",
+                        value: "\(promoterStore.snapshot.imports.count)",
+                        icon: "square.and.arrow.down",
+                        color: .indigo
+                    ) { store.selectedSection = .promoter }
+                }
+                if unattendedCount > 0 {
+                    StatTile(
+                        label: "Unattended",
+                        value: "\(unattendedCount)",
+                        icon: "wand.and.stars",
+                        color: .purple
+                    ) { store.selectedSection = .packages }
+                }
+                if forcedInstallCount > 0 {
+                    StatTile(
+                        label: "Forced installs",
+                        value: "\(forcedInstallCount)",
+                        icon: "calendar.badge.exclamationmark",
+                        color: .orange
+                    ) { store.selectedSection = .packages }
+                }
             }
         }
     }
@@ -791,6 +811,29 @@ struct DashboardView: View {
         if hours < 24 { return "\(hours)h" }
         let days = hours / 24
         return "\(days)d"
+    }
+}
+
+/// Labeled section wrapper for a band of related stat tiles. Icon +
+/// title only — no left accent bar — so the page reads as three short
+/// stories without extra chrome.
+private struct StatSection<Content: View>: View {
+    let title: String
+    let icon: String
+    let accent: Color
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(accent)
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                Spacer()
+            }
+            content()
+        }
     }
 }
 
