@@ -1,5 +1,6 @@
 import SwiftUI
 import Core
+import Infra
 
 /// Repo-overview home view. Inspired by CimianAdmin's Dashboard tile
 /// page — at-a-glance counts, recent commits, and a global search
@@ -213,7 +214,8 @@ struct DashboardView: View {
                 )
             }
             if settings.enablePromoterTab {
-                let eligible = promoterStore.snapshot.candidates.filter { $0.isEligible() }.count
+                let candidates = liveCandidates
+                let eligible = candidates.filter { $0.isEligible() }.count
                 StatTile(
                     label: "Eligible now",
                     value: "\(eligible)",
@@ -222,7 +224,7 @@ struct DashboardView: View {
                 ) { store.selectedSection = .promoter }
                 StatTile(
                     label: "Tracked",
-                    value: "\(promoterStore.snapshot.candidates.count)",
+                    value: "\(candidates.count)",
                     icon: "clock.arrow.circlepath",
                     color: .blue
                 ) { store.selectedSection = .promoter }
@@ -234,6 +236,19 @@ struct DashboardView: View {
                 ) { store.selectedSection = .promoter }
             }
         }
+    }
+
+    /// Compute candidates live against the current pkginfo snapshot.
+    /// Mirrors PromoterView's approach — the snapshot's cached
+    /// `.candidates` can land empty when the async pipeline fires
+    /// before pkginfos finish loading, so the tile counts are
+    /// recomputed each render against the up-to-date state.
+    private var liveCandidates: [PromotionCandidate] {
+        FilePromoterService.candidates(
+            from: store.snapshot.pkginfos,
+            config: promoterStore.snapshot.config,
+            now: Date()
+        )
     }
 
     private var uniqueCategories: Set<String> {
