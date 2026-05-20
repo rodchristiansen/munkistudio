@@ -5,15 +5,21 @@ import Darwin
 /// async-process library so Infra stays dependency-light. The
 /// non-streaming `run` variant collects all output; the streaming variant
 /// hands lines to an `AsyncThrowingStream` as they arrive.
-enum ProcessRunner {
-    struct Output: Sendable {
-        let exitCode: Int32
-        let stdout: String
-        let stderr: String
+public enum ProcessRunner {
+    public struct Output: Sendable {
+        public let exitCode: Int32
+        public let stdout: String
+        public let stderr: String
+
+        public init(exitCode: Int32, stdout: String, stderr: String) {
+            self.exitCode = exitCode
+            self.stdout = stdout
+            self.stderr = stderr
+        }
     }
 
     /// Run a command to completion, capturing its full stdout / stderr.
-    static func run(
+    public static func run(
         _ executable: URL,
         arguments: [String],
         in workingDirectory: URL? = nil,
@@ -54,12 +60,12 @@ enum ProcessRunner {
 
     /// Run a command and stream merged stdout+stderr lines as they arrive,
     /// finishing with the process exit code in `.terminated`.
-    enum StreamEvent: Sendable {
+    public enum StreamEvent: Sendable {
         case line(String)
         case terminated(Int32)
     }
 
-    static func stream(
+    public static func stream(
         _ executable: URL,
         arguments: [String],
         in workingDirectory: URL? = nil,
