@@ -19,11 +19,23 @@ struct GitFilesPanel: View {
             .padding()
         } else {
             List(state.filteredFiles, id: \.relativePath, selection: $state.fileSelection) { entry in
+                let isStaged = state.files.first { $0.relativePath == entry.relativePath }?.staged == true
                 HStack(spacing: 8) {
-                    Text(state.files.first { $0.relativePath == entry.relativePath }?.staged == true ? "●" : "○")
-                        .font(.callout.monospaced())
-                        .foregroundStyle(state.files.first { $0.relativePath == entry.relativePath }?.staged == true ? Color.green : .secondary)
-                        .frame(width: 12)
+                    Toggle("", isOn: Binding(
+                        get: { isStaged },
+                        set: { newValue in
+                            Task {
+                                if newValue {
+                                    await stage(relativePath: entry.relativePath)
+                                } else {
+                                    await unstage(relativePath: entry.relativePath)
+                                }
+                            }
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .help(isStaged ? "Unstage \(entry.relativePath)" : "Stage \(entry.relativePath)")
                     Text(letter(for: entry.kind))
                         .font(.caption.monospaced())
                         .frame(width: 22)
@@ -161,14 +173,53 @@ struct GitFilesPanel: View {
 
     private func stage(relativePath: String) async {
         guard let info = state.info else { return }
-        try? await store.services.git.stage(in: info, relativePaths: [relativePath])
-        await refresh()
+        do {
+            try await store.services.git.stage(in: info, relativePaths: [relativePath])
+            await refresh()
+        } catch {
+            handle(error: error, action: "Stage", info: info, retry: { await stage(relativePath: relativePath) })
+        }
     }
 
     private func unstage(relativePath: String) async {
         guard let info = state.info else { return }
-        try? await store.services.git.unstage(in: info, relativePaths: [relativePath])
-        await refresh()
+        do {
+            try await store.services.git.unstage(in: info, relativePaths: [relativePath])
+            await refresh()
+        } catch {
+            handle(error: error, action: "Unstage", info: info, retry: { await unstage(relativePath: relativePath) })
+        }
+    }
+
+    /// Common error path: if git failed because of an index.lock,
+    /// offer the recovery flow and retry the action on success.
+    /// Otherwise surface the error in the status bar so the user
+    /// sees something happened.
+    @MainActor
+    private func handle(
+        error: Error,
+        action: String,
+        info: GitRepositoryInfo,
+        retry: @escaping () async -> Void
+    ) {
+        let message = error.localizedDescription
+        guard IndexLockRecovery.matches(message: message) else {
+            state.statusMessage = "\(action) failed: \(message)"
+            state.statusKind = .error
+            return
+        }
+        switch IndexLockRecovery.present(workTreeRoot: info.workTreeRoot, message: message) {
+        case .deleted:
+            state.statusMessage = "Removed .git/index.lock — retrying \(action.lowercased())…"
+            state.statusKind = .info
+            Task { await retry() }
+        case .cancelled:
+            state.statusMessage = "\(action) failed: \(message)"
+            state.statusKind = .error
+        case .failed(let why):
+            state.statusMessage = why
+            state.statusKind = .error
+        }
     }
 
     private func discard(relativePath: String) async {
