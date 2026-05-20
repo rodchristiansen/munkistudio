@@ -313,11 +313,8 @@ private struct ProfileEditor: View {
     // MARK: Editor
 
     private var editor: some View {
-        TextEditor(text: xmlBinding)
-            .font(.system(.body, design: .monospaced))
-            .scrollContentBackground(.hidden)
+        XMLEditor(text: xmlBinding)
             .background(Color(nsColor: .textBackgroundColor))
-            .padding(10)
     }
 
     private var saveErrorPresented: Binding<Bool> {
