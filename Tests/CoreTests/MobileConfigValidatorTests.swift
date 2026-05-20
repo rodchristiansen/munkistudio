@@ -123,6 +123,52 @@ struct MobileConfigValidatorTests {
         }
     }
 
+    @Test("schema flags unknown properties as warnings, except identity keys")
+    func unknownPropertyWarning() {
+        let schema = PayloadSchema(definitions: [
+            "com.example.Test": PayloadDefinition(
+                name: "Test",
+                properties: [
+                    PayloadProperty(name: "KnownKey", typeName: "boolean")
+                ]
+            )
+        ])
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+            <key>PayloadType</key><string>Configuration</string>
+            <key>PayloadIdentifier</key><string>com.example.outer</string>
+            <key>PayloadUUID</key><string>4F3F8E7C-7A24-4F0E-92E1-0F0E0C0B0A09</string>
+            <key>PayloadVersion</key><integer>1</integer>
+            <key>PayloadDisplayName</key><string>Test</string>
+            <key>PayloadContent</key>
+            <array>
+                <dict>
+                    <key>PayloadType</key><string>com.example.Test</string>
+                    <key>PayloadIdentifier</key><string>com.example.inner</string>
+                    <key>PayloadUUID</key><string>00000000-0000-0000-0000-000000000001</string>
+                    <key>PayloadVersion</key><integer>1</integer>
+                    <key>KnownKey</key><true/>
+                    <key>MysteryKey</key><false/>
+                </dict>
+            </array>
+        </dict>
+        </plist>
+        """
+        let issues = MobileConfigValidator.validate(xml, schema: schema)
+        // MysteryKey gets flagged.
+        #expect(issues.contains { $0.severity == .warning && $0.message.contains("MysteryKey") && $0.message.contains("isn't a documented property") })
+        // PayloadType / Identifier / UUID / Version don't, even
+        // though they're not in the schema's property list — they're
+        // standard identity keys.
+        for identityKey in ["PayloadType", "PayloadIdentifier", "PayloadUUID", "PayloadVersion"] {
+            #expect(!issues.contains { $0.message.contains(identityKey) && $0.message.contains("isn't a documented property") })
+        }
+        // KnownKey is fine — no warning at all.
+        #expect(!issues.contains { $0.message.contains("KnownKey") })
+    }
+
     @Test("schema flags deprecated payload properties as warnings")
     func deprecatedPropertyWarning() {
         // Hand-built schema with one deprecated property on a fake

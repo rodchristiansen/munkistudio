@@ -54,12 +54,20 @@ public enum MobileConfigValidator {
 
     // MARK: Schema-driven warnings
 
-    /// Walk every payload in `PayloadContent` and flag deprecated
-    /// properties against the catalogue vendored from
-    /// ninxsoft/LowProfile. Unknown PayloadTypes degrade silently —
-    /// the YAML only catalogues Apple-defined payloads, and vendor
-    /// payloads (`com.example.mdm.foo`) routinely have keys we have
-    /// no way to model.
+    /// Walk every payload in `PayloadContent` and surface two kinds
+    /// of schema-aware warnings against the catalogue vendored from
+    /// ninxsoft/LowProfile:
+    ///
+    ///   - **Deprecated**: the schema marks the property
+    ///     `deprecated: true`.
+    ///   - **Unknown**: the key isn't in the schema and isn't one of
+    ///     the standard cross-payload identity keys (PayloadType,
+    ///     PayloadIdentifier, etc.).
+    ///
+    /// Unknown PayloadTypes degrade silently — the YAML only
+    /// catalogues Apple-defined payloads, and vendor payloads
+    /// (`com.example.mdm.foo`) routinely have keys we have no way
+    /// to model. Better to miss a warning than spray false positives.
     private static func schemaIssues(data: Data, schema: PayloadSchema) -> [ValidationIssue] {
         guard let object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
               let dict = object as? [String: Any],
@@ -70,18 +78,41 @@ public enum MobileConfigValidator {
         for (index, payload) in payloads.enumerated() {
             guard let payloadType = payload["PayloadType"] as? String,
                   let definition = schema.definition(for: payloadType) else { continue }
-            let index2 = definition.propertyIndex
-            for key in payload.keys {
-                if let property = index2[key], property.deprecated {
+            let propertyIndex = definition.propertyIndex
+            let known = Set(propertyIndex.keys).union(payloadIdentityKeys)
+            for key in payload.keys.sorted() {
+                if let property = propertyIndex[key], property.deprecated {
                     issues.append(ValidationIssue(
                         severity: .warning,
                         message: "PayloadContent[\(index)]: \"\(key)\" is deprecated for \(payloadType)."
+                    ))
+                } else if !known.contains(key) {
+                    issues.append(ValidationIssue(
+                        severity: .warning,
+                        message: "PayloadContent[\(index)]: \"\(key)\" isn't a documented property of \(payloadType)."
                     ))
                 }
             }
         }
         return issues
     }
+
+    /// Standard cross-payload keys defined by Apple. The schema
+    /// usually omits them per-payload-type because they're inherited
+    /// — adding them to the known set keeps the unknown-key check
+    /// from flagging every payload's identity tuple.
+    private static let payloadIdentityKeys: Set<String> = [
+        "PayloadType",
+        "PayloadIdentifier",
+        "PayloadUUID",
+        "PayloadVersion",
+        "PayloadDisplayName",
+        "PayloadDescription",
+        "PayloadOrganization",
+        "PayloadEnabled",
+        "PayloadScope",
+        "PayloadRemovalDisallowed"
+    ]
 
     // MARK: Bracket heuristics
 
