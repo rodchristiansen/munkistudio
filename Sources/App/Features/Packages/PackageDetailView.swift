@@ -40,6 +40,7 @@ private struct PackageEditor: View {
     @Environment(RepositoryStore.self) private var store
     let record: PkginfoRecord
     @State private var activeTab: EditorTab = .overview
+    @State private var hoveredTab: EditorTab? = nil
 
     private var draftBinding: Binding<Pkginfo> {
         Binding(
@@ -94,20 +95,29 @@ private struct PackageEditor: View {
         }
     }
 
-    /// Underlined-tab style — bigger, bolder labels with a continuous
-    /// gray baseline rule under every tab. The active tab paints an
-    /// accent rule on top with a soft glow for depth.
+    /// Underlined-tab style. Every tab reads as a real clickable
+    /// element — full primary text colour, hover tint, weight bump
+    /// on the active one — and only the accent underline plus a soft
+    /// glow distinguishes the active tab from its peers.
     private func tabButton(_ tab: EditorTab) -> some View {
         let isActive = activeTab == tab
+        let isHovered = hoveredTab == tab
         return Button {
             activeTab = tab
         } label: {
             VStack(spacing: 0) {
                 Text(tab.title)
                     .font(.title3.weight(isActive ? .bold : .semibold))
-                    .foregroundStyle(isActive ? Color.primary : Color.secondary)
+                    .foregroundStyle(.primary)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        (isHovered && !isActive)
+                            ? Color.primary.opacity(0.06)
+                            : Color.clear,
+                        in: .rect(cornerRadius: 6)
+                    )
                 Rectangle()
                     .fill(isActive ? Color.accentColor : Color.clear)
                     .frame(height: 2)
@@ -120,6 +130,13 @@ private struct PackageEditor: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering {
+                hoveredTab = tab
+            } else if hoveredTab == tab {
+                hoveredTab = nil
+            }
+        }
     }
 
 }
