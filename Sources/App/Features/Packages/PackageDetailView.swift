@@ -172,20 +172,86 @@ private struct OverviewTab: View {
     @State private var showSuspiciousPackagePrompt = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 16) {
-                identityCard
-                catalogsCard
-                descriptionCard
-                adminNotesCard
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
+                    identityCard
+                    catalogsCard
+                    descriptionCard
+                    adminNotesCard
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 16) {
+                    installerCard
+                    requirementsCard
+                    fileCard
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            VStack(alignment: .leading, spacing: 16) {
-                installerCard
-                requirementsCard
-                fileCard
+            metadataFooter
+        }
+    }
+
+    /// `_metadata` footer — info Munki tools embed when they create or
+    /// touch the pkginfo (created_by, creation_date, munki_version,
+    /// os_version, …). Rendered at the bottom with no card chrome and
+    /// caption-sized tertiary text so it reads as provenance, not data
+    /// the admin is meant to edit.
+    @ViewBuilder
+    private var metadataFooter: some View {
+        if let metadata = draft.metadata, !metadata.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Metadata")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+                FlowLayout(spacing: 18) {
+                    ForEach(metadata.keys.sorted(), id: \.self) { key in
+                        if let value = metadata[key],
+                           let display = Self.displayString(for: value) {
+                            HStack(spacing: 5) {
+                                Text(key)
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.tertiary)
+                                Text(display)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private static let metadataDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    /// Best-effort string rendering of a PlistValue scalar for the
+    /// metadata footer. Containers (array, dictionary, data) are
+    /// suppressed — the footer is for at-a-glance provenance, not a
+    /// nested plist browser.
+    private static func displayString(for value: PlistValue) -> String? {
+        switch value {
+        case .string(let s):
+            return s.isEmpty ? nil : s
+        case .integer(let i):
+            return String(i)
+        case .double(let d):
+            return String(d)
+        case .bool(let b):
+            return b ? "true" : "false"
+        case .date(let d):
+            return metadataDateFormatter.string(from: d)
+        case .data, .array, .dictionary:
+            return nil
         }
     }
 
