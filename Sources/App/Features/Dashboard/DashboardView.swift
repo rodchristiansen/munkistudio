@@ -30,22 +30,15 @@ struct DashboardView: View {
     @State private var unhashedCount: Int = 0
     @State private var unattendedCount: Int = 0
     @State private var forcedInstallCount: Int = 0
-    @State private var catalogDistribution: [(String, Int)] = []
     @ScaledMetric(relativeTo: .caption) private var shaColumnWidth: CGFloat = 70
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
+                statsGrid
                 if let info = store.gitInfo {
                     recentCommitsCard(info: info)
                 }
-                repositoryBand
-                storageBand
-                if !catalogDistribution.isEmpty {
-                    catalogDistributionCard
-                }
-                healthBand
-                activityBand
                 recentlyModifiedRow
                 insightsRow
                 if !orphanPackages.isEmpty {
@@ -168,26 +161,6 @@ struct DashboardView: View {
         forcedInstallCount = pkginfos.filter {
             ($0.pkginfo.forceInstallAfterDate ?? .distantPast) > now
         }.count
-
-        // Catalog distribution — counts every catalog membership, so a
-        // pkginfo in both Testing and Production contributes one to
-        // each. Sorted desc; truncated to a few entries so the bar
-        // stays readable.
-        var catalogCounts: [String: Int] = [:]
-        for record in pkginfos {
-            for catalog in record.pkginfo.catalogs ?? [] {
-                let trimmed = catalog.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty else { continue }
-                catalogCounts[trimmed, default: 0] += 1
-            }
-        }
-        catalogDistribution = catalogCounts
-            .sorted { lhs, rhs in
-                if lhs.value != rhs.value { return lhs.value > rhs.value }
-                return lhs.key < rhs.key
-            }
-            .prefix(6)
-            .map { ($0.key, $0.value) }
     }
 
     /// Walk a manifest's install / uninstall / featured / default /
@@ -549,290 +522,198 @@ struct DashboardView: View {
         store.selectedItemID = AnyHashable(record.id)
     }
 
-    // MARK: Stat bands
+    // MARK: Stats grid
 
-    /// Each band groups related signals under a labeled section header
-    /// so the dashboard reads as a few short stories instead of one
-    /// long undifferentiated grid.
-
-    private static let gridColumns = Array(
-        repeating: GridItem(.flexible(), spacing: 14), count: 5
-    )
-
-    private var repositoryBand: some View {
-        StatBand(title: "Repository", icon: "shippingbox.fill", accent: .munkiStudioBrand) {
-            LazyVGrid(columns: Self.gridColumns, spacing: 14) {
+    /// Single 5-column grid of every stat tile we surface. Conditional
+    /// tiles drop in or out as their underlying signals fire, so the
+    /// grid naturally grows from a base set to roughly 5×4.
+    private var statsGrid: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 5)
+        return LazyVGrid(columns: columns, spacing: 14) {
+            // Repository + Storage — the basic shape of the repo.
+            StatTile(
+                label: "Packages",
+                value: "\(store.snapshot.pkginfos.count)",
+                icon: "shippingbox",
+                color: .munkiStudioBrand
+            ) { store.selectedSection = .packages }
+            StatTile(
+                label: "Manifests",
+                value: "\(store.snapshot.manifests.count)",
+                icon: "list.bullet.rectangle",
+                color: .indigo
+            ) { store.selectedSection = .manifests }
+            StatTile(
+                label: "Catalogs",
+                value: "\(store.snapshot.catalogs.count)",
+                icon: "books.vertical",
+                color: .purple
+            ) { store.selectedSection = .catalogs }
+            StatTile(
+                label: "Categories",
+                value: "\(uniqueCategories.count)",
+                icon: "square.grid.2x2",
+                color: .teal,
+                action: nil
+            )
+            StatTile(
+                label: "Developers",
+                value: "\(uniqueDevelopers.count)",
+                icon: "person",
+                color: .pink,
+                action: nil
+            )
+            if settings.enableProfilesTab {
                 StatTile(
-                    label: "Packages",
-                    value: "\(store.snapshot.pkginfos.count)",
-                    icon: "shippingbox",
-                    color: .munkiStudioBrand
+                    label: "Profiles",
+                    value: "\(profileStore.records.count)",
+                    icon: "doc.text",
+                    color: .cyan
+                ) { store.selectedSection = .profiles }
+            }
+            StatTile(
+                label: "Repo size",
+                value: Self.formatBytes(repoBytes),
+                icon: "internaldrive",
+                color: .blue,
+                action: nil
+            )
+            if reclaimableBytes > 0 {
+                StatTile(
+                    label: "Reclaimable",
+                    value: Self.formatBytes(reclaimableBytes),
+                    icon: "trash.slash",
+                    color: .orange,
+                    action: nil
+                )
+            }
+            if !orphanPackages.isEmpty {
+                StatTile(
+                    label: "Orphan packages",
+                    value: "\(orphanPackages.count)",
+                    icon: "questionmark.folder",
+                    color: .orange
                 ) { store.selectedSection = .packages }
+            }
+            if let biggest = largestPackages.first {
                 StatTile(
-                    label: "Manifests",
-                    value: "\(store.snapshot.manifests.count)",
-                    icon: "list.bullet.rectangle",
-                    color: .indigo
-                ) { store.selectedSection = .manifests }
+                    label: "Largest single",
+                    value: Self.formatBytes(Self.sizeBytes(biggest)),
+                    icon: "scalemass",
+                    color: .blue
+                ) { openPackage(biggest) }
+            }
+            // Munki-wiki quality signals.
+            if missingDescriptionCount > 0 {
                 StatTile(
-                    label: "Catalogs",
-                    value: "\(store.snapshot.catalogs.count)",
-                    icon: "books.vertical",
-                    color: .purple
-                ) { store.selectedSection = .catalogs }
+                    label: "No description",
+                    value: "\(missingDescriptionCount)",
+                    icon: "text.badge.xmark",
+                    color: .red
+                ) { store.selectedSection = .packages }
+            }
+            if missingCategoryCount > 0 {
                 StatTile(
-                    label: "Categories",
-                    value: "\(uniqueCategories.count)",
-                    icon: "square.grid.2x2",
-                    color: .teal,
+                    label: "No category",
+                    value: "\(missingCategoryCount)",
+                    icon: "tray.2",
+                    color: .orange
+                ) { store.selectedSection = .packages }
+            }
+            if missingDeveloperCount > 0 {
+                StatTile(
+                    label: "No developer",
+                    value: "\(missingDeveloperCount)",
+                    icon: "person.crop.circle.badge.questionmark",
+                    color: .yellow
+                ) { store.selectedSection = .packages }
+            }
+            if unhashedCount > 0 {
+                StatTile(
+                    label: "Unhashed",
+                    value: "\(unhashedCount)",
+                    icon: "lock.open.trianglebadge.exclamationmark",
+                    color: .red
+                ) { store.selectedSection = .packages }
+            }
+            if dependencyIssueCount > 0 {
+                StatTile(
+                    label: "Dependency issues",
+                    value: "\(dependencyIssueCount)",
+                    icon: "exclamationmark.triangle",
+                    color: .yellow
+                ) { store.selectedSection = .dependencies }
+            }
+            if settings.enableProfilesTab, profileErrorCount > 0 {
+                StatTile(
+                    label: "Profile errors",
+                    value: "\(profileErrorCount)",
+                    icon: "exclamationmark.triangle.fill",
+                    color: .red
+                ) { store.selectedSection = .profiles }
+            }
+            // Activity.
+            StatTile(
+                label: "Uncommitted",
+                value: "\(store.gitDirtyCount)",
+                icon: "arrow.triangle.branch",
+                color: store.gitDirtyCount > 0 ? .orange : .secondary
+            ) { store.selectedSection = .git }
+            if !store.pkginfoDrafts.isEmpty || !store.manifestDrafts.isEmpty {
+                StatTile(
+                    label: "Unsaved edits",
+                    value: "\(store.dirtyDraftCount)",
+                    icon: "pencil",
+                    color: .yellow,
                     action: nil
                 )
-                StatTile(
-                    label: "Developers",
-                    value: "\(uniqueDevelopers.count)",
-                    icon: "person",
-                    color: .pink,
-                    action: nil
-                )
-                if settings.enableProfilesTab {
-                    StatTile(
-                        label: "Profiles",
-                        value: "\(profileStore.records.count)",
-                        icon: "doc.text",
-                        color: .cyan
-                    ) { store.selectedSection = .profiles }
-                }
             }
-        }
-    }
-
-    private var storageBand: some View {
-        StatBand(title: "Storage", icon: "internaldrive", accent: .blue) {
-            LazyVGrid(columns: Self.gridColumns, spacing: 14) {
+            if settings.enablePromoterTab {
+                let eligible = cachedCandidates.filter { $0.isEligible() }.count
                 StatTile(
-                    label: "Repo size",
-                    value: Self.formatBytes(repoBytes),
-                    icon: "internaldrive",
-                    color: .blue,
-                    action: nil
-                )
-                if reclaimableBytes > 0 {
-                    StatTile(
-                        label: "Reclaimable",
-                        value: Self.formatBytes(reclaimableBytes),
-                        icon: "trash.slash",
-                        color: .orange,
-                        action: nil
-                    )
-                }
-                if !orphanPackages.isEmpty {
-                    StatTile(
-                        label: "Orphan packages",
-                        value: "\(orphanPackages.count)",
-                        icon: "questionmark.folder",
-                        color: .orange
-                    ) { store.selectedSection = .packages }
-                }
-                if let biggest = largestPackages.first {
-                    StatTile(
-                        label: "Largest single",
-                        value: Self.formatBytes(Self.sizeBytes(biggest)),
-                        icon: "scalemass",
-                        color: .blue
-                    ) { openPackage(biggest) }
-                }
-            }
-        }
-    }
-
-    /// Munki-wiki quality signals: things the Munki docs call out as
-    /// expectations for a pkginfo that behaves well in production —
-    /// description / category / developer for Managed Software Center,
-    /// installer_item_hash for integrity, plus the validator outputs.
-    private var healthBand: some View {
-        StatBand(title: "Health & Quality", icon: "stethoscope", accent: .red) {
-            LazyVGrid(columns: Self.gridColumns, spacing: 14) {
-                if missingDescriptionCount > 0 {
-                    StatTile(
-                        label: "No description",
-                        value: "\(missingDescriptionCount)",
-                        icon: "text.badge.xmark",
-                        color: .red
-                    ) { store.selectedSection = .packages }
-                }
-                if missingCategoryCount > 0 {
-                    StatTile(
-                        label: "No category",
-                        value: "\(missingCategoryCount)",
-                        icon: "tray.2",
-                        color: .orange
-                    ) { store.selectedSection = .packages }
-                }
-                if missingDeveloperCount > 0 {
-                    StatTile(
-                        label: "No developer",
-                        value: "\(missingDeveloperCount)",
-                        icon: "person.crop.circle.badge.questionmark",
-                        color: .yellow
-                    ) { store.selectedSection = .packages }
-                }
-                if unhashedCount > 0 {
-                    StatTile(
-                        label: "Unhashed",
-                        value: "\(unhashedCount)",
-                        icon: "lock.open.trianglebadge.exclamationmark",
-                        color: .red
-                    ) { store.selectedSection = .packages }
-                }
-                if dependencyIssueCount > 0 {
-                    StatTile(
-                        label: "Dependency issues",
-                        value: "\(dependencyIssueCount)",
-                        icon: "exclamationmark.triangle",
-                        color: .yellow
-                    ) { store.selectedSection = .dependencies }
-                }
-                if settings.enableProfilesTab, profileErrorCount > 0 {
-                    StatTile(
-                        label: "Profile errors",
-                        value: "\(profileErrorCount)",
-                        icon: "exclamationmark.triangle.fill",
-                        color: .red
-                    ) { store.selectedSection = .profiles }
-                }
-                if healthSignalCount == 0 {
-                    HealthyTile()
-                }
-            }
-        }
-    }
-
-    private var activityBand: some View {
-        StatBand(title: "Activity", icon: "bolt.horizontal", accent: .green) {
-            LazyVGrid(columns: Self.gridColumns, spacing: 14) {
+                    label: "Eligible now",
+                    value: "\(eligible)",
+                    icon: "checkmark.seal.fill",
+                    color: .green
+                ) { store.selectedSection = .promoter }
                 StatTile(
-                    label: "Uncommitted",
-                    value: "\(store.gitDirtyCount)",
-                    icon: "arrow.triangle.branch",
-                    color: store.gitDirtyCount > 0 ? .orange : .secondary
-                ) { store.selectedSection = .git }
-                if !store.pkginfoDrafts.isEmpty || !store.manifestDrafts.isEmpty {
+                    label: "Tracked",
+                    value: "\(cachedCandidates.count)",
+                    icon: "clock.arrow.circlepath",
+                    color: .blue
+                ) { store.selectedSection = .promoter }
+                if todayImportCount > 0 {
                     StatTile(
-                        label: "Unsaved edits",
-                        value: "\(store.dirtyDraftCount)",
-                        icon: "pencil",
-                        color: .yellow,
-                        action: nil
-                    )
-                }
-                if settings.enablePromoterTab {
-                    let eligible = cachedCandidates.filter { $0.isEligible() }.count
-                    StatTile(
-                        label: "Eligible now",
-                        value: "\(eligible)",
-                        icon: "checkmark.seal.fill",
+                        label: "Imports (24h)",
+                        value: "\(todayImportCount)",
+                        icon: "clock.badge.checkmark",
                         color: .green
                     ) { store.selectedSection = .promoter }
-                    StatTile(
-                        label: "Tracked",
-                        value: "\(cachedCandidates.count)",
-                        icon: "clock.arrow.circlepath",
-                        color: .blue
-                    ) { store.selectedSection = .promoter }
-                    if todayImportCount > 0 {
-                        StatTile(
-                            label: "Imports (24h)",
-                            value: "\(todayImportCount)",
-                            icon: "clock.badge.checkmark",
-                            color: .green
-                        ) { store.selectedSection = .promoter }
-                    }
-                    StatTile(
-                        label: "Recent imports",
-                        value: "\(promoterStore.snapshot.imports.count)",
-                        icon: "square.and.arrow.down",
-                        color: .indigo
-                    ) { store.selectedSection = .promoter }
                 }
-                if unattendedCount > 0 {
-                    StatTile(
-                        label: "Unattended",
-                        value: "\(unattendedCount)",
-                        icon: "wand.and.stars",
-                        color: .purple
-                    ) { store.selectedSection = .packages }
-                }
-                if forcedInstallCount > 0 {
-                    StatTile(
-                        label: "Forced installs",
-                        value: "\(forcedInstallCount)",
-                        icon: "calendar.badge.exclamationmark",
-                        color: .orange
-                    ) { store.selectedSection = .packages }
-                }
+                StatTile(
+                    label: "Recent imports",
+                    value: "\(promoterStore.snapshot.imports.count)",
+                    icon: "square.and.arrow.down",
+                    color: .indigo
+                ) { store.selectedSection = .promoter }
+            }
+            if unattendedCount > 0 {
+                StatTile(
+                    label: "Unattended",
+                    value: "\(unattendedCount)",
+                    icon: "wand.and.stars",
+                    color: .purple
+                ) { store.selectedSection = .packages }
+            }
+            if forcedInstallCount > 0 {
+                StatTile(
+                    label: "Forced installs",
+                    value: "\(forcedInstallCount)",
+                    icon: "calendar.badge.exclamationmark",
+                    color: .orange
+                ) { store.selectedSection = .packages }
             }
         }
-    }
-
-    private var healthSignalCount: Int {
-        var n = missingDescriptionCount > 0 ? 1 : 0
-        n += missingCategoryCount > 0 ? 1 : 0
-        n += missingDeveloperCount > 0 ? 1 : 0
-        n += unhashedCount > 0 ? 1 : 0
-        n += dependencyIssueCount > 0 ? 1 : 0
-        n += (settings.enableProfilesTab && profileErrorCount > 0) ? 1 : 0
-        return n
-    }
-
-    // MARK: Catalog distribution
-
-    /// A horizontal stacked bar showing how packages distribute across
-    /// catalogs. Munki's promotion flow is catalog-driven and this is
-    /// the one chart that's worth showing at a glance — it tells the
-    /// user whether the bulk of the repo is in Production, Testing,
-    /// or somewhere stale.
-    private var catalogDistributionCard: some View {
-        let total = max(catalogDistribution.reduce(0) { $0 + $1.1 }, 1)
-        let palette: [Color] = [.green, .blue, .orange, .purple, .pink, .teal]
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "chart.bar.xaxis")
-                    .foregroundStyle(.purple)
-                Text("Catalog Distribution").font(.headline)
-                Spacer()
-                Text("memberships across all pkginfos")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            GeometryReader { geo in
-                HStack(spacing: 2) {
-                    ForEach(Array(catalogDistribution.enumerated()), id: \.element.0) { idx, entry in
-                        let width = geo.size.width * CGFloat(entry.1) / CGFloat(total)
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(palette[idx % palette.count])
-                            .frame(width: max(width - 2, 0))
-                            .help("\(entry.0): \(entry.1)")
-                    }
-                }
-            }
-            .frame(height: 14)
-            HStack(spacing: 14) {
-                ForEach(Array(catalogDistribution.enumerated()), id: \.element.0) { idx, entry in
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(palette[idx % palette.count])
-                            .frame(width: 8, height: 8)
-                        Text(entry.0).font(.caption)
-                        Text("\(entry.1)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
     }
 
     private func branchSummary(info: GitRepositoryInfo) -> String {
@@ -910,61 +791,6 @@ struct DashboardView: View {
         if hours < 24 { return "\(hours)h" }
         let days = hours / 24
         return "\(days)d"
-    }
-}
-
-/// Section wrapper for a band of related stat tiles — gives the
-/// dashboard its rhythm so users see "Repository … Storage … Health …"
-/// instead of one undifferentiated wall of numbers.
-private struct StatBand<Content: View>: View {
-    let title: String
-    let icon: String
-    let accent: Color
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(accent)
-                    .frame(width: 3, height: 16)
-                Image(systemName: icon)
-                    .foregroundStyle(accent)
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                Spacer()
-            }
-            content()
-        }
-    }
-}
-
-/// Filler tile shown in the Health band when every signal is clean —
-/// keeps the band from collapsing to an empty grid and gives the user
-/// a small positive confirmation.
-private struct HealthyTile: View {
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.title2)
-                .foregroundStyle(.green)
-                .frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("All clear")
-                    .font(.title.weight(.semibold))
-                Text("No quality signals")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.08), in: .rect(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color.green.opacity(0.25), lineWidth: 1)
-        )
     }
 }
 
