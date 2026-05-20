@@ -15,6 +15,15 @@ struct DashboardView: View {
     /// tab so the dashboard tiles don't trigger 1366×rules set
     /// comparisons on every render.
     @State private var cachedCandidates: [PromotionCandidate] = []
+    @State private var repoBytes: Int64 = 0
+    @State private var reclaimableBytes: Int64 = 0
+    @State private var orphanPackages: [PkginfoRecord] = []
+    @State private var todayImportCount: Int = 0
+    @State private var profileErrorCount: Int = 0
+    @State private var dependencyIssueCount: Int = 0
+    @State private var largestPackages: [PkginfoRecord] = []
+    @State private var topDevelopers: [(String, Int)] = []
+    @State private var topCategories: [(String, Int)] = []
     @ScaledMetric(relativeTo: .caption) private var shaColumnWidth: CGFloat = 70
 
     var body: some View {
@@ -22,6 +31,10 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 18) {
                 statsGrid
                 recentlyModifiedRow
+                insightsRow
+                if !orphanPackages.isEmpty {
+                    orphanPackagesCard
+                }
                 if let info = store.gitInfo {
                     recentCommitsCard(info: info)
                 }
@@ -31,8 +44,17 @@ struct DashboardView: View {
         }
         .navigationTitle("Dashboard")
         .task(id: store.gitInfo?.workTreeRoot) { await loadCommits() }
-        .onAppear { recomputeCandidates() }
-        .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCandidates() }
+        .onAppear {
+            recomputeCandidates()
+            recomputeMetrics()
+        }
+        .onChange(of: store.snapshot.pkginfos.count) { _, _ in
+            recomputeCandidates()
+            recomputeMetrics()
+        }
+        .onChange(of: store.snapshot.manifests.count) { _, _ in recomputeMetrics() }
+        .onChange(of: profileStore.records.count) { _, _ in recomputeMetrics() }
+        .onChange(of: promoterStore.snapshot.imports.count) { _, _ in recomputeMetrics() }
         .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCandidates() }
         // Invalidate after every promote/defer round-trip — busyURL
         // returns to nil once the action commits, signalling that a
@@ -48,6 +70,283 @@ struct DashboardView: View {
             config: promoterStore.snapshot.config,
             now: Date()
         )
+    }
+
+    private func recomputeMetrics() {
+        let pkginfos = store.snapshot.pkginfos
+        let manifests = store.snapshot.manifests
+
+        repoBytes = pkginfos.reduce(Int64(0)) { acc, record in
+            acc + Int64(record.pkginfo.installerItemSize ?? 0)
+        }
+
+        var byName: [String: [PkginfoRecord]] = [:]
+        for record in pkginfos { byName[record.pkginfo.name, default: []].append(record) }
+        reclaimableBytes = byName.values.reduce(Int64(0)) { acc, group in
+            guard group.count > 1 else { return acc }
+            // Treat the highest-version record (by simple version sort)
+            // as current; everything else is reclaimable.
+            let sorted = group.sorted { lhs, rhs in
+                (lhs.pkginfo.version ?? "") < (rhs.pkginfo.version ?? "")
+            }
+            let older = sorted.dropLast()
+            return acc + older.reduce(Int64(0)) { sum, r in
+                sum + Int64(r.pkginfo.installerItemSize ?? 0)
+            }
+        }
+
+        let referenced = Self.allReferencedPackageNames(manifests: manifests)
+        orphanPackages = pkginfos
+            .filter { !referenced.contains($0.pkginfo.name) }
+            .sorted { ($0.pkginfo.installerItemSize ?? 0) > ($1.pkginfo.installerItemSize ?? 0) }
+
+        let dayAgo = Date().addingTimeInterval(-24 * 60 * 60)
+        todayImportCount = promoterStore.snapshot.imports.filter { $0.date >= dayAgo }.count
+
+        profileErrorCount = profileStore.records.reduce(0) { acc, record in
+            let issues = MobileConfigValidator.validate(
+                record.xmlString,
+                schema: profileStore.payloadSchema
+            )
+            return acc + (issues.contains(where: { $0.severity == .error }) ? 1 : 0)
+        }
+
+        let graph = DependencyGraphBuilder.build(pkginfos: pkginfos.map(\.pkginfo))
+        dependencyIssueCount = DependencyLinter.analyze(graph).count
+
+        largestPackages = pkginfos
+            .filter { ($0.pkginfo.installerItemSize ?? 0) > 0 }
+            .sorted { ($0.pkginfo.installerItemSize ?? 0) > ($1.pkginfo.installerItemSize ?? 0) }
+            .prefix(5)
+            .map { $0 }
+
+        topDevelopers = Self.topGroups(pkginfos) { $0.pkginfo.developer }
+        topCategories = Self.topGroups(pkginfos) { $0.pkginfo.category }
+    }
+
+    /// Walk a manifest's install / uninstall / featured / default /
+    /// optional lists plus every nested `conditional_items` block,
+    /// returning every package name referenced anywhere. Used by the
+    /// orphan-packages computation. `included_manifests` entries are
+    /// intentionally skipped — those reference other manifests, not
+    /// pkginfos.
+    private static func allReferencedPackageNames(manifests: [ManifestRecord]) -> Set<String> {
+        var names: Set<String> = []
+
+        func collect(_ list: [String]?) {
+            guard let list else { return }
+            for entry in list { names.insert(entry) }
+        }
+
+        func walk(_ items: [ConditionalItem]?) {
+            guard let items else { return }
+            for item in items {
+                collect(item.managedInstalls)
+                collect(item.managedUninstalls)
+                collect(item.managedUpdates)
+                collect(item.optionalInstalls)
+                collect(item.featuredItems)
+                walk(item.conditionalItems)
+            }
+        }
+
+        for record in manifests {
+            let m = record.manifest
+            collect(m.managedInstalls)
+            collect(m.managedUninstalls)
+            collect(m.managedUpdates)
+            collect(m.optionalInstalls)
+            collect(m.featuredItems)
+            collect(m.defaultInstalls)
+            walk(m.conditionalItems)
+        }
+        return names
+    }
+
+    private static func topGroups(
+        _ pkginfos: [PkginfoRecord],
+        by key: (PkginfoRecord) -> String?
+    ) -> [(String, Int)] {
+        var counts: [String: Int] = [:]
+        for record in pkginfos {
+            guard let raw = key(record)?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { continue }
+            counts[raw, default: 0] += 1
+        }
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value { return lhs.value > rhs.value }
+                return lhs.key < rhs.key
+            }
+            .prefix(5)
+            .map { ($0.key, $0.value) }
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useMB, .useGB, .useTB]
+        formatter.zeroPadsFractionDigits = false
+        return formatter
+    }()
+
+    private static func formatBytes(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "—" }
+        return byteFormatter.string(fromByteCount: bytes)
+    }
+
+    // MARK: Insights row
+
+    /// Three side-by-side info cards: largest packages, top developers,
+    /// top categories. Hidden when there's nothing meaningful to show.
+    @ViewBuilder
+    private var insightsRow: some View {
+        if !largestPackages.isEmpty || !topDevelopers.isEmpty || !topCategories.isEmpty {
+            let columns = [
+                GridItem(.flexible(), spacing: 14),
+                GridItem(.flexible(), spacing: 14),
+                GridItem(.flexible(), spacing: 14)
+            ]
+            LazyVGrid(columns: columns, spacing: 14) {
+                if !largestPackages.isEmpty { largestPackagesCard }
+                if !topDevelopers.isEmpty { topDevelopersCard }
+                if !topCategories.isEmpty { topCategoriesCard }
+            }
+        }
+    }
+
+    private var largestPackagesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "scalemass")
+                    .foregroundStyle(.blue)
+                Text("Largest Packages").font(.headline)
+                Spacer()
+            }
+            .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(largestPackages, id: \.id) { record in
+                    Button {
+                        openPackage(record)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(record.pkginfo.name)
+                                .font(.callout)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(Self.formatBytes(Int64(record.pkginfo.installerItemSize ?? 0)))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
+    }
+
+    private var topDevelopersCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.2")
+                    .foregroundStyle(.pink)
+                Text("Top Developers").font(.headline)
+                Spacer()
+            }
+            .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(topDevelopers, id: \.0) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(entry.0).font(.callout).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text("\(entry.1)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
+    }
+
+    private var topCategoriesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "square.grid.2x2")
+                    .foregroundStyle(.teal)
+                Text("Top Categories").font(.headline)
+                Spacer()
+            }
+            .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(topCategories, id: \.0) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(entry.0).font(.callout).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text("\(entry.1)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
+    }
+
+    private var orphanPackagesCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.folder")
+                    .foregroundStyle(.orange)
+                Text("Orphan Packages").font(.headline)
+                Text("\(orphanPackages.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.bottom, 6)
+            Text("Not referenced by any manifest's install / uninstall / featured / default / optional list.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(orphanPackages.prefix(8), id: \.id) { record in
+                    Button {
+                        openPackage(record)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(record.pkginfo.name)
+                                .font(.callout)
+                                .lineLimit(1)
+                            if let version = record.pkginfo.version {
+                                Text(version)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                            if let size = record.pkginfo.installerItemSize, size > 0 {
+                                Text(Self.formatBytes(Int64(size)))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if orphanPackages.count > 8 {
+                    Text("…and \(orphanPackages.count - 8) more")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
     }
 
     // MARK: Recently modified
@@ -265,8 +564,78 @@ struct DashboardView: View {
                     icon: "doc.text",
                     color: .cyan
                 ) { store.selectedSection = .profiles }
+                if profileErrorCount > 0 {
+                    StatTile(
+                        label: "Profile errors",
+                        value: "\(profileErrorCount)",
+                        icon: "exclamationmark.triangle.fill",
+                        color: .red
+                    ) { store.selectedSection = .profiles }
+                }
+            }
+            StatTile(
+                label: "Repo size",
+                value: Self.formatBytes(repoBytes),
+                icon: "internaldrive",
+                color: .blue,
+                action: nil
+            )
+            if reclaimableBytes > 0 {
+                StatTile(
+                    label: "Reclaimable",
+                    value: Self.formatBytes(reclaimableBytes),
+                    icon: "trash.slash",
+                    color: .orange,
+                    action: nil
+                )
+            }
+            if !orphanPackages.isEmpty {
+                StatTile(
+                    label: "Orphan packages",
+                    value: "\(orphanPackages.count)",
+                    icon: "questionmark.folder",
+                    color: .orange
+                ) { store.selectedSection = .packages }
+            }
+            if dependencyIssueCount > 0 {
+                StatTile(
+                    label: "Dependency issues",
+                    value: "\(dependencyIssueCount)",
+                    icon: "exclamationmark.triangle",
+                    color: .yellow
+                ) { store.selectedSection = .dependencies }
+            }
+            if settings.enablePromoterTab, todayImportCount > 0 {
+                StatTile(
+                    label: "Imports (24h)",
+                    value: "\(todayImportCount)",
+                    icon: "clock.badge.checkmark",
+                    color: .green
+                ) { store.selectedSection = .promoter }
+            }
+            if let info = store.gitInfo {
+                StatTile(
+                    label: "Branch",
+                    value: branchSummary(info: info),
+                    icon: "arrow.triangle.branch",
+                    color: .indigo
+                ) { store.selectedSection = .git }
+            }
+            if let first = recentCommits.first {
+                StatTile(
+                    label: "Latest commit",
+                    value: relative(first.date),
+                    icon: "clock.arrow.2.circlepath",
+                    color: .secondary
+                ) { store.selectedSection = .git }
             }
         }
+    }
+
+    private func branchSummary(info: GitRepositoryInfo) -> String {
+        let name = info.currentBranch ?? "(detached)"
+        if info.aheadCount == 0, info.behindCount == 0 { return name }
+        return "\(name) +\(info.aheadCount)/-\(info.behindCount)"
     }
 
     private var uniqueCategories: Set<String> {
