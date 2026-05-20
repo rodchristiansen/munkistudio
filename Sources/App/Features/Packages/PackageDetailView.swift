@@ -75,24 +75,42 @@ private struct PackageEditor: View {
     }
 
     private var tabStrip: some View {
-        HStack(spacing: 12) {
-            Picker("", selection: $activeTab) {
-                ForEach(EditorTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
+        HStack(spacing: 0) {
+            ForEach(EditorTab.allCases) { tab in
+                tabButton(tab)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            Spacer()
             RecordActionMenu(record: .package(record))
+                .padding(.trailing, 14)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
         .background(.thinMaterial)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.black.opacity(0.08))
                 .frame(height: 0.5)
         }
+    }
+
+    /// Underlined-tab style — plain label, accent underline for the
+    /// active tab. Xcode debug bar / Safari favorites bar aesthetic;
+    /// no chrome, just typography and a 2pt rule.
+    private func tabButton(_ tab: EditorTab) -> some View {
+        Button {
+            activeTab = tab
+        } label: {
+            VStack(spacing: 0) {
+                Text(tab.title)
+                    .font(.callout.weight(activeTab == tab ? .semibold : .regular))
+                    .foregroundStyle(activeTab == tab ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                Rectangle()
+                    .fill(activeTab == tab ? Color.accentColor : Color.clear)
+                    .frame(height: 2)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
     }
 
 }
