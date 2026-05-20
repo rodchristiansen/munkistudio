@@ -29,6 +29,11 @@ struct GitView: View {
     private var state: GitPaneState { store.gitPaneState }
     @FocusState private var paneFocused: Bool
     @FocusState private var commitSubjectFocused: Bool
+    /// Tracks whether Option is currently held. Drives the Stage All ↔
+    /// Unstage All label/action flip so the user can deliberately
+    /// unstage everything without first hunting for the "all staged"
+    /// state that the plain Stage All button toggles around.
+    @State private var optionHeld: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +47,9 @@ struct GitView: View {
         .focused($paneFocused)
         .focusEffectDisabled()
         .onKeyPress { press in handleKey(press) }
+        .onModifierKeysChanged(mask: .option) { _, new in
+            optionHeld = new.contains(.option)
+        }
         .onAppear { paneFocused = true }
         // SwiftUI's List(selection:) binding fires when the user clicks
         // a row, but the GitView only re-syncs the diff from key
@@ -363,9 +371,20 @@ struct GitView: View {
 
     private var commitActionRow: some View {
         HStack {
-            Button("Stage All") { Task { await toggleStageAll() } }
-                .buttonStyle(.bordered)
-                .disabled(state.files.isEmpty)
+            Button(optionHeld ? "Unstage All" : "Stage All") {
+                Task {
+                    if optionHeld {
+                        await unstageAll()
+                    } else {
+                        await toggleStageAll()
+                    }
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(optionHeld ? !state.files.contains(where: \.staged) : state.files.isEmpty)
+            .help(optionHeld
+                  ? "Unstage every staged file (hold Option)"
+                  : "Stage every change in the working tree — hold Option to Unstage All")
             Spacer()
             Button("Commit") { Task { await runCommit() } }
                 .buttonStyle(.borderedProminent)
@@ -582,6 +601,21 @@ private extension GitView {
             await refresh()
         } catch {
             note("Stage-all failed: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
+    /// Unstage every currently-staged file. Bound to Option-clicking the
+    /// Stage All button so the user doesn't have to first reach the
+    /// "everything staged" toggle state.
+    func unstageAll() async {
+        guard let info = state.info else { return }
+        let stagedPaths = state.files.filter(\.staged).map(\.relativePath)
+        guard !stagedPaths.isEmpty else { return }
+        do {
+            try await store.services.git.unstage(in: info, relativePaths: stagedPaths)
+            await refresh()
+        } catch {
+            note("Unstage-all failed: \(error.localizedDescription)", kind: .error)
         }
     }
 
