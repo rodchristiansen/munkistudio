@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Core
+import Infra
 
 /// Lazygit-style Git pane (revised).
 ///
@@ -554,21 +555,12 @@ private extension GitView {
 
     func commitDiff(sha: String) async -> String {
         guard let info = state.info else { return "" }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["show", "--stat", "--patch", sha]
-        process.currentDirectoryURL = info.workTreeRoot
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
-            return String(decoding: data, as: UTF8.self)
-        } catch {
-            return ""
-        }
+        let result = try? await ProcessRunner.run(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["show", "--stat", "--patch", sha],
+            in: info.workTreeRoot
+        )
+        return result?.stdout ?? ""
     }
 
     func toggleStageSelected() async {
@@ -698,26 +690,41 @@ private extension GitView {
         await runShell(["switch", name], successMessage: "Switched to \(name)")
     }
 
+    /// Run a git subcommand and stream its output into ``state.processOutput``
+    /// line by line. Previously this used `Process.waitUntilExit()` on the
+    /// main thread, which froze the entire UI for the duration of a
+    /// `git pull` / `git fetch` / `git push` and only refreshed the
+    /// output box once the process exited. The streaming variant yields
+    /// across line boundaries so the run loop keeps spinning and the
+    /// user sees progress as it arrives.
+    ///
+    /// `usePTY: true` makes git see a terminal on stdout, so it
+    /// line-buffers its progress output (counting objects, resolving
+    /// deltas, …) instead of block-buffering until exit.
     func runShell(_ args: [String], successMessage: String) async {
         guard let info = state.info else { return }
         state.processOutput = ""
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = info.workTreeRoot
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let executable = URL(fileURLWithPath: "/usr/bin/git")
+        var exitCode: Int32 = -1
         do {
-            try process.run()
-            process.waitUntilExit()
-            let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
-            state.processOutput += String(decoding: data, as: UTF8.self)
-            if process.terminationStatus == 0 {
+            for try await event in ProcessRunner.stream(
+                executable,
+                arguments: args,
+                in: info.workTreeRoot,
+                usePTY: true
+            ) {
+                switch event {
+                case .line(let line):
+                    state.processOutput += line + "\n"
+                case .terminated(let code):
+                    exitCode = code
+                }
+            }
+            if exitCode == 0 {
                 note(successMessage, kind: .success)
                 await refresh()
             } else {
-                note("\(args.first ?? "git") failed: exit \(process.terminationStatus)", kind: .error)
+                note("\(args.first ?? "git") failed: exit \(exitCode)", kind: .error)
             }
         } catch {
             note("Process error: \(error.localizedDescription)", kind: .error)

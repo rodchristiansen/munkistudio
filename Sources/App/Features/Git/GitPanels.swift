@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Core
+import Infra
 
 /// Three focused-panel views for the Git pane. Each renders a list whose
 /// selection lives on the shared ``GitPaneState`` so the parent view's
@@ -231,14 +232,11 @@ struct GitFilesPanel: View {
         alert.alertStyle = .warning
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         guard let info = state.info else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["checkout", "--", relativePath]
-        process.currentDirectoryURL = info.workTreeRoot
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try? process.run()
-        process.waitUntilExit()
+        _ = try? await ProcessRunner.run(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["checkout", "--", relativePath],
+            in: info.workTreeRoot
+        )
         await refresh()
     }
 
@@ -511,21 +509,13 @@ struct GitCommitsPanel: View {
     /// clipboard — the `.patch` form that can be applied with `git am`.
     private func copyPatch(for sha: String) async {
         guard let info = state.info else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["format-patch", "-1", "--stdout", sha]
-        process.currentDirectoryURL = info.workTreeRoot
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
-            let patch = String(decoding: data, as: UTF8.self)
-            if !patch.isEmpty { copyToPasteboard(patch) }
-        } catch {
-            // Clipboard silently unchanged on failure.
+        let result = try? await ProcessRunner.run(
+            URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["format-patch", "-1", "--stdout", sha],
+            in: info.workTreeRoot
+        )
+        if let patch = result?.stdout, !patch.isEmpty {
+            copyToPasteboard(patch)
         }
     }
 }
