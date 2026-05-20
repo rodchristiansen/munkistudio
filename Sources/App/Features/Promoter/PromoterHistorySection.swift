@@ -12,6 +12,11 @@ struct PromoterHistorySection: View {
     /// Packages tab. The commit-level row stays informational.
     var onOpenPackage: ((String) -> Void)? = nil
 
+    /// Selection lives at the section level — delta rows across all
+    /// commits share one selection so single-click feedback feels
+    /// natural ("pick a delta, double-click to open").
+    @State private var selectedDeltaID: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader
@@ -23,6 +28,7 @@ struct PromoterHistorySection: View {
                         HistoryRow(
                             entry: entry,
                             hiddenCatalogs: hiddenCatalogs,
+                            selectedDeltaID: $selectedDeltaID,
                             onOpenPackage: onOpenPackage
                         )
                         if index < entries.count - 1 { Divider() }
@@ -64,6 +70,7 @@ struct PromoterHistorySection: View {
 private struct HistoryRow: View {
     let entry: PromotionHistoryEntry
     let hiddenCatalogs: Set<String>
+    @Binding var selectedDeltaID: String?
     var onOpenPackage: ((String) -> Void)? = nil
 
     private static let dateFormatter: DateFormatter = {
@@ -107,6 +114,8 @@ private struct HistoryRow: View {
                         DeltaRow(
                             delta: delta,
                             hiddenCatalogs: hiddenCatalogs,
+                            isSelected: selectedDeltaID == delta.id,
+                            onSelect: { selectedDeltaID = delta.id },
                             onOpenPackage: { onOpenPackage?(delta.pkgName) }
                         )
                     }
@@ -127,6 +136,8 @@ private struct HistoryRow: View {
 private struct DeltaRow: View {
     let delta: PromotionDelta
     let hiddenCatalogs: Set<String>
+    let isSelected: Bool
+    let onSelect: () -> Void
     let onOpenPackage: () -> Void
 
     private var before: [String] {
@@ -155,8 +166,12 @@ private struct DeltaRow: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onOpenPackage)
+        .onTapGesture(count: 1, perform: onSelect)
     }
 
     /// Render the transition. `[]` on either side is omitted gracefully —

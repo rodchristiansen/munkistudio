@@ -10,6 +10,8 @@ struct PromoterImportsSection: View {
     /// Packages detail" when set; nil leaves the rows display-only.
     var onOpenPackage: ((String) -> Void)? = nil
 
+    @State private var selectedRowID: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader
@@ -21,7 +23,9 @@ struct PromoterImportsSection: View {
                         ImportRow(
                             entry: entry,
                             hiddenCatalogs: hiddenCatalogs,
-                            onOpenPackage: onOpenPackage
+                            isSelected: selectedRowID == entry.id,
+                            onSelect: { selectedRowID = entry.id },
+                            onOpenPackage: { onOpenPackage?(entry.pkgName) }
                         )
                         if index < imports.count - 1 { Divider() }
                     }
@@ -62,7 +66,9 @@ struct PromoterImportsSection: View {
 private struct ImportRow: View {
     let entry: AutoPkgImport
     let hiddenCatalogs: Set<String>
-    var onOpenPackage: ((String) -> Void)? = nil
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onOpenPackage: () -> Void
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -110,9 +116,9 @@ private struct ImportRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .contentShape(.rect)
-        .onTapGesture(count: 2) {
-            onOpenPackage?(entry.pkgName)
-        }
+        .onTapGesture(count: 2, perform: onOpenPackage)
+        .onTapGesture(count: 1, perform: onSelect)
     }
 }

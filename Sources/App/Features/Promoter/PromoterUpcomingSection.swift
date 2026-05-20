@@ -20,6 +20,8 @@ struct PromoterUpcomingSection: View {
     /// Wired to double-click on a candidate row → open in Packages tab.
     var onOpenPackage: ((String) -> Void)? = nil
 
+    @State private var selectedRowID: URL?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader
@@ -32,6 +34,8 @@ struct PromoterUpcomingSection: View {
                             candidate: candidate,
                             busy: busyURL == candidate.pkginfoURL,
                             hiddenCatalogs: hiddenCatalogs,
+                            isSelected: selectedRowID == candidate.id,
+                            onSelect: { selectedRowID = candidate.id },
                             onPromote: { onPromote(candidate) },
                             onDefer: { onDefer(candidate) },
                             onOpenPackage: { onOpenPackage?(candidate.pkgName) }
@@ -122,6 +126,8 @@ private struct PromoterCandidateRow: View {
     let candidate: PromotionCandidate
     let busy: Bool
     let hiddenCatalogs: Set<String>
+    let isSelected: Bool
+    let onSelect: () -> Void
     let onPromote: () -> Void
     let onDefer: () -> Void
     let onOpenPackage: () -> Void
@@ -156,8 +162,10 @@ private struct PromoterCandidateRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onOpenPackage)
+        .onTapGesture(count: 1, perform: onSelect)
     }
 
     private var statusBadge: some View {
