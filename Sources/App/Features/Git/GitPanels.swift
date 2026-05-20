@@ -65,7 +65,7 @@ struct GitFilesPanel: View {
             // always operate on the visually-targeted row.
             .contextMenu(forSelectionType: String.self) { selections in
                 let targets = selections.isEmpty
-                    ? [state.fileSelection].compactMap { $0 }
+                    ? Array(state.fileSelection)
                     : Array(selections)
                 if let path = targets.first {
                     fileContextMenu(relativePath: path)

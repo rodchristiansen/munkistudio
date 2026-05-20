@@ -511,7 +511,9 @@ private extension GitView {
             state.commits = try await commits
             let hooksOverride = settings.gitHooksPathOverride.isEmpty ? nil : settings.gitHooksPathOverride
             state.hooksInfo = try? await store.services.git.hooks(in: info, overridePath: hooksOverride)
-            if state.fileSelection == nil { state.fileSelection = state.files.first?.relativePath }
+            if state.fileSelection.isEmpty, let first = state.files.first?.relativePath {
+                state.fileSelection = [first]
+            }
             if state.commitSelection == nil { state.commitSelection = state.commits.first?.sha }
             if state.hookSelection == nil { state.hookSelection = state.hooksInfo?.hooks.first?.id }
             await syncDiff()
@@ -532,7 +534,7 @@ private extension GitView {
         guard let info = state.info else { state.diffText = ""; return }
         switch state.focusedPanel {
         case .files:
-            guard let path = state.fileSelection else { state.diffText = ""; return }
+            guard let path = state.primaryFileSelection else { state.diffText = ""; return }
             state.diffText = (try? await store.services.git.diff(in: info, relativePath: path)) ?? ""
         case .history:
             guard let sha = state.commitSelection else { state.diffText = ""; return }
@@ -563,15 +565,21 @@ private extension GitView {
         return result?.stdout ?? ""
     }
 
+    /// Toggle staging across every file in the multi-select. If all
+    /// of them are currently staged the action unstages the lot;
+    /// otherwise it stages every one (treating any unstaged item as
+    /// "we want to stage"). Matches the macOS multi-select feel —
+    /// the action label/intent flips based on the dominant state.
     func toggleStageSelected() async {
-        guard let info = state.info, let path = state.fileSelection else { return }
-        let entry = state.files.first { $0.relativePath == path }
-        let isStaged = entry?.staged ?? false
+        guard let info = state.info, !state.fileSelection.isEmpty else { return }
+        let paths = Array(state.fileSelection)
+        let stagedPaths = Set(state.files.filter(\.staged).map(\.relativePath))
+        let allStaged = paths.allSatisfy { stagedPaths.contains($0) }
         do {
-            if isStaged {
-                try await store.services.git.unstage(in: info, relativePaths: [path])
+            if allStaged {
+                try await store.services.git.unstage(in: info, relativePaths: paths)
             } else {
-                try await store.services.git.stage(in: info, relativePaths: [path])
+                try await store.services.git.stage(in: info, relativePaths: paths)
             }
             await refresh()
         } catch {
@@ -711,6 +719,7 @@ private extension GitView {
                 executable,
                 arguments: args,
                 in: info.workTreeRoot,
+                environment: GitProcessEnvironment.make(),
                 usePTY: true
             ) {
                 switch event {
@@ -732,21 +741,36 @@ private extension GitView {
     }
 
     func openSelectedInEditor() {
-        guard let info = state.info, let path = state.fileSelection else { return }
+        guard let info = state.info, let path = state.primaryFileSelection else { return }
         let url = info.workTreeRoot.appending(path: path)
         NSWorkspace.shared.open(url)
     }
 
+    /// Discard the changes to every selected file. The confirmation
+    /// alert lists each path so the user can sanity-check multi-select
+    /// hits — `git checkout --` is irreversible and we don't want
+    /// surprise mass-discards because the keyboard shortcut fired
+    /// against a wider selection than the user remembered.
     func discardSelected() async {
-        guard state.info != nil, let path = state.fileSelection else { return }
+        guard state.info != nil, !state.fileSelection.isEmpty else { return }
+        let paths = state.fileSelection.sorted()
         let alert = NSAlert()
-        alert.messageText = "Discard changes to \(path)?"
-        alert.informativeText = "This is irreversible."
+        if paths.count == 1 {
+            alert.messageText = "Discard changes to \(paths[0])?"
+        } else {
+            alert.messageText = "Discard changes to \(paths.count) files?"
+        }
+        alert.informativeText = paths.count == 1
+            ? "This is irreversible."
+            : "This is irreversible. Files:\n\n" + paths.joined(separator: "\n")
         alert.addButton(withTitle: "Discard")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        await runShell(["checkout", "--", path], successMessage: "Discarded \(path)")
+        let summary = paths.count == 1
+            ? "Discarded \(paths[0])"
+            : "Discarded \(paths.count) files"
+        await runShell(["checkout", "--"] + paths, successMessage: summary)
     }
 
     func note(_ message: String, kind: GitPaneState.StatusKind) {
