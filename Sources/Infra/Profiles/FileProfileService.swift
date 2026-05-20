@@ -20,6 +20,7 @@ public struct FileProfileService: ProfileService {
             do {
                 let data = try Data(contentsOf: url)
                 let xml = String(decoding: data, as: UTF8.self)
+                let signature = ProfileSignatureDetector.detect(data: data)
                 let profile = Self.parseProfile(from: data) ?? Profile()
                 let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
                 records.append(ProfileRecord(
@@ -27,7 +28,8 @@ public struct FileProfileService: ProfileService {
                     fileURL: url,
                     xmlString: xml,
                     createdAt: attrs?[.creationDate] as? Date,
-                    modifiedAt: attrs?[.modificationDate] as? Date
+                    modifiedAt: attrs?[.modificationDate] as? Date,
+                    signature: signature
                 ))
             } catch {
                 // Unreadable files still appear — empty content lets the

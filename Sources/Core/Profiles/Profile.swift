@@ -40,6 +40,11 @@ public struct ProfileRecord: Sendable, Hashable, Identifiable {
     public var xmlString: String
     public var createdAt: Date?
     public var modifiedAt: Date?
+    /// PKCS#7 signing state for the file as it sits on disk —
+    /// `.unsigned` for plain-XML profiles, `.signed(signers:)` when
+    /// the file is wrapped in a CMS envelope. Detected once at load
+    /// time and reused on every render.
+    public var signature: ProfileSignature
 
     public var id: URL { fileURL }
 
@@ -56,12 +61,14 @@ public struct ProfileRecord: Sendable, Hashable, Identifiable {
         fileURL: URL,
         xmlString: String,
         createdAt: Date? = nil,
-        modifiedAt: Date? = nil
+        modifiedAt: Date? = nil,
+        signature: ProfileSignature = .unsigned
     ) {
         self.profile = profile
         self.fileURL = fileURL
         self.xmlString = xmlString
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
+        self.signature = signature
     }
 }

@@ -96,6 +96,7 @@ private struct ProfileEditor: View {
                     .frame(width: 7, height: 7)
                     .help("Unsaved changes")
             }
+            signatureChip
             Spacer(minLength: 12)
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([record.fileURL])
@@ -122,6 +123,32 @@ private struct ProfileEditor: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    /// Compact "Signed by …" chip rendered next to the title for
+    /// PKCS#7-wrapped profiles. Unsigned files show nothing — the
+    /// absence is the signal. Tooltip carries the full certificate
+    /// chain for spot-checking provenance without leaving the
+    /// editor.
+    @ViewBuilder
+    private var signatureChip: some View {
+        if case .signed(let signers) = record.signature {
+            let label = signers.first?.commonName ?? signers.first?.summary ?? "Unknown signer"
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.seal.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(.green)
+                Text("Signed by \(label)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.green.opacity(0.12), in: .capsule)
+            .help(signers.map { $0.summary }.joined(separator: "\n"))
+        }
     }
 
     // MARK: Open With menu
