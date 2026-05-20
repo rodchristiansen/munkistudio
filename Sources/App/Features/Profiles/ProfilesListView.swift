@@ -14,21 +14,22 @@ struct ProfilesListView: View {
     var body: some View {
         @Bindable var bindable = store
         VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Button {
-                    showNewProfileSheet = true
-                } label: {
-                    Image(systemName: "plus")
+            if directoryURL != nil {
+                HStack {
+                    Spacer()
+                    Button {
+                        showNewProfileSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .help("New profile")
                 }
-                .help("New profile")
-                .disabled(directoryURL == nil)
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            FilterField(text: $search, prompt: "Filter profiles", focused: $searchFocused)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                FilterField(text: $search, prompt: "Filter profiles", focused: $searchFocused)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+            }
             content
         }
         .navigationTitle("Profiles")
@@ -49,20 +50,43 @@ struct ProfilesListView: View {
             ContentUnavailableView {
                 Label("No profiles folder set", systemImage: "folder.badge.gearshape")
             } description: {
-                Text("Choose a folder of .mobileconfig files in Settings → Features.")
+                Text("Point MunkiStudio at a folder of .mobileconfig files to use the Profiles tab.")
+            } actions: {
+                Button("Choose Folder…") { chooseFolder() }
+                    .buttonStyle(.borderedProminent)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if store.records.isEmpty {
             ContentUnavailableView {
                 Label("No profiles found", systemImage: "doc.text")
             } description: {
                 Text("Scanned \(directoryPath) — found no .mobileconfig files.")
+            } actions: {
+                Button("Reveal Folder") {
+                    if let directoryURL { NSWorkspace.shared.activateFileViewerSelecting([directoryURL]) }
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ProfileTreeList(
                 records: filtered,
                 rootPath: directoryPath,
                 forceExpandAll: !search.isEmpty
             )
+        }
+    }
+
+    /// Inline folder-picker so the no-folder empty state is actionable
+    /// without users having to dive into Settings.
+    private func chooseFolder() {
+        @Bindable var bindable = settings
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder of .mobileconfig profiles."
+        if panel.runModal() == .OK, let url = panel.url {
+            bindable.profilesDirectoryPath = url.path
         }
     }
 

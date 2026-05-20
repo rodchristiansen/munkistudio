@@ -1,16 +1,23 @@
 import SwiftUI
 import Core
 
-/// Right column of the Profiles tab — monospaced XML editor with a live
-/// validation panel. Save / Revert / Reveal in Finder live in the
-/// inline toolbar; per-row destructive actions stay in the list's
-/// context menu.
+/// Right column of the Profiles tab — monospaced XML editor with a
+/// status strip above. The strip shows a one-line valid / N issues
+/// summary; clicking the chevron expands the per-issue list with line
+/// and column numbers. The XML uses the full pane width so users have
+/// room to read deep payloads.
 struct ProfileDetailView: View {
     @Environment(ProfileStore.self) private var store
+    @Environment(AppSettings.self) private var settings
 
     var body: some View {
         if let record = selectedRecord {
             ProfileEditor(record: record).id(record.id)
+        } else if settings.profilesDirectoryPath.trimmingCharacters(in: .whitespaces).isEmpty {
+            // Suppress the "No profile selected" message in this case —
+            // it competes with the left-column empty state and confuses
+            // the user. Just show a neutral background.
+            Color.clear
         } else {
             ContentUnavailableView(
                 "No profile selected",
@@ -30,6 +37,8 @@ private struct ProfileEditor: View {
     @Environment(ProfileStore.self) private var store
     let record: ProfileRecord
 
+    @State private var issuesExpanded = false
+
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -48,15 +57,21 @@ private struct ProfileEditor: View {
         store.drafts[record.fileURL] != nil
     }
 
+    private var issues: [MobileConfigValidator.ValidationIssue] {
+        MobileConfigValidator.validate(store.currentXML(for: record))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            HSplitView {
-                editorPane
-                lintPane
-                    .frame(minWidth: 240, idealWidth: 300)
+            statusStrip
+            if issuesExpanded && !issues.isEmpty {
+                Divider()
+                issueList
             }
+            Divider()
+            editor
         }
         .alert("Save Failed", isPresented: saveErrorPresented) {
             Button("OK", role: .cancel) { store.saveError = nil }
@@ -64,6 +79,8 @@ private struct ProfileEditor: View {
             Text(store.saveError ?? "")
         }
     }
+
+    // MARK: Header
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -83,9 +100,16 @@ private struct ProfileEditor: View {
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
             Spacer()
+            if let modifiedAt = record.modifiedAt {
+                Text(Self.timestampFormatter.string(from: modifiedAt))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([record.fileURL])
             } label: {
@@ -111,130 +135,102 @@ private struct ProfileEditor: View {
         .padding(.vertical, 10)
     }
 
-    private var editorPane: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("XML")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let modifiedAt = record.modifiedAt {
-                    Text("Modified " + Self.timestampFormatter.string(from: modifiedAt))
+    // MARK: Status strip
+
+    private var statusStrip: some View {
+        let errors = issues.filter { $0.severity == .error }.count
+        let warnings = issues.filter { $0.severity == .warning }.count
+        return Button {
+            if !issues.isEmpty { issuesExpanded.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                statusIcon(errors: errors, warnings: warnings)
+                statusText(errors: errors, warnings: warnings)
+                if !issues.isEmpty {
+                    Text(issuesExpanded ? "hide details" : "show details")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-            TextEditor(text: xmlBinding)
-                .font(.system(.body, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .textBackgroundColor))
-                .padding(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                )
-                .padding(.bottom, 8)
-        }
-    }
-
-    private var lintPane: some View {
-        let xml = store.currentXML(for: record)
-        let issues = MobileConfigValidator.validate(xml)
-        let errors = issues.filter { $0.severity == .error }
-        let warnings = issues.filter { $0.severity == .warning }
-        return VStack(alignment: .leading, spacing: 12) {
-            statusHeader(errors: errors.count, warnings: warnings.count)
-            metadataCard
-            Divider()
-            if issues.isEmpty {
-                Label("No issues found.", systemImage: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-                    .font(.callout)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(issues) { issue in
-                            issueRow(issue)
-                        }
-                    }
+                Spacer()
+                if !issues.isEmpty {
+                    Image(systemName: issuesExpanded ? "chevron.up" : "chevron.down")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
                 }
             }
-            Spacer()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .contentShape(.rect)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .buttonStyle(.plain)
+        .disabled(issues.isEmpty)
     }
 
     @ViewBuilder
-    private func statusHeader(errors: Int, warnings: Int) -> some View {
-        HStack(spacing: 8) {
-            if errors == 0 && warnings == 0 {
-                Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-                Text("Valid").font(.headline)
-            } else if errors > 0 {
-                Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(.red)
-                Text("\(errors) error\(errors == 1 ? "" : "s")").font(.headline)
+    private func statusIcon(errors: Int, warnings: Int) -> some View {
+        if errors == 0 && warnings == 0 {
+            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+        } else if errors > 0 {
+            Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(.red)
+        } else {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
+    }
+
+    @ViewBuilder
+    private func statusText(errors: Int, warnings: Int) -> some View {
+        if errors == 0 && warnings == 0 {
+            Text("Valid").font(.callout.weight(.medium))
+        } else if errors > 0 {
+            HStack(spacing: 6) {
+                Text("\(errors) error\(errors == 1 ? "" : "s")")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.red)
                 if warnings > 0 {
                     Text("· \(warnings) warning\(warnings == 1 ? "" : "s")")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                        .font(.subheadline)
                 }
-            } else {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text("\(warnings) warning\(warnings == 1 ? "" : "s")").font(.headline)
             }
-            Spacer()
+        } else {
+            Text("\(warnings) warning\(warnings == 1 ? "" : "s")")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.orange)
         }
     }
 
-    private var metadataCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            metadataRow("Identifier", record.profile.identifier)
-            metadataRow("UUID", record.profile.uuid)
-            metadataRow("Display name", record.profile.displayName)
-            metadataRow("Organization", record.profile.organization)
-            metadataRow("Type", record.profile.profileType)
-            metadataRow("Payloads", "\(record.profile.payloadCount)")
+    // MARK: Issue list (expanded)
+
+    private var issueList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(issues.enumerated()), id: \.element.id) { index, issue in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: issue.severity == .error ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(issue.severity == .error ? Color.red : Color.orange)
+                        .imageScale(.small)
+                        .frame(width: 16)
+                    Text(issue.displayMessage)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 5)
+                if index < issues.count - 1 { Divider().padding(.leading, 16) }
+            }
         }
-        .font(.caption)
-        .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor), in: .rect(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
-        )
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
     }
 
-    @ViewBuilder
-    private func metadataRow(_ label: String, _ value: String?) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary).frame(width: 92, alignment: .trailing)
-            Text(value ?? "—")
-                .font(.caption.monospaced())
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-            Spacer(minLength: 0)
-        }
-    }
+    // MARK: Editor
 
-    @ViewBuilder
-    private func issueRow(_ issue: MobileConfigValidator.ValidationIssue) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: issue.severity == .error ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(issue.severity == .error ? Color.red : Color.orange)
-                .imageScale(.small)
-                .padding(.top, 2)
-            Text(issue.message)
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
+    private var editor: some View {
+        TextEditor(text: xmlBinding)
+            .font(.system(.body, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .textBackgroundColor))
+            .padding(10)
     }
 
     private var saveErrorPresented: Binding<Bool> {

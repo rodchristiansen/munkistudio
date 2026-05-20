@@ -4,16 +4,97 @@ import Foundation
 /// schema. Returns a list of issues — empty means the profile is
 /// well-formed and structurally complete.
 ///
-/// This is intentionally lightweight: parses as a plist, checks that
-/// the top-level dictionary is a `Configuration` profile, and verifies
-/// the required identity keys and per-payload identity keys. It does
-/// not validate against MDM payload-type schemas (each MDM vendor has
-/// its own); those would belong in a separate validator.
+/// Two passes:
+///
+/// 1. **XML well-formedness** via `XMLParser`. This catches mismatched
+///    or missing brackets / tags and reports the exact line and column
+///    where the parser bailed. Plist parsing alone collapses everything
+///    into a single generic "Couldn't open file" error, which made it
+///    impossible to tell *which* bracket the user dropped.
+/// 2. **Plist + profile structure** via `PropertyListSerialization`:
+///    top-level dictionary, required identity keys, per-payload identity
+///    keys, duplicate-UUID detection. These checks only run when the
+///    XML actually parses — otherwise the message would be misleading.
+///
+/// This is intentionally lightweight: it doesn't validate against the
+/// per-MDM payload-type schemas; each vendor has its own and those would
+/// belong in a separate validator.
 public enum MobileConfigValidator {
     public static func validate(_ xml: String) -> [ValidationIssue] {
         guard let data = xml.data(using: .utf8) else {
             return [ValidationIssue(severity: .error, message: "File is not valid UTF-8.")]
         }
+        let xmlIssues = xmlWellFormednessIssues(data: data)
+        if !xmlIssues.isEmpty {
+            return xmlIssues
+        }
+        return plistStructuralIssues(data: data)
+    }
+
+    // MARK: XML well-formedness
+
+    /// Run an `XMLParser` pass purely to discover malformed XML before
+    /// handing the data to the plist deserializer. Returns an empty
+    /// array on a clean parse.
+    private static func xmlWellFormednessIssues(data: Data) -> [ValidationIssue] {
+        let parser = XMLParser(data: data)
+        let collector = XMLErrorCollector()
+        parser.delegate = collector
+        let ok = parser.parse()
+        if ok && collector.issues.isEmpty {
+            return []
+        }
+        if collector.issues.isEmpty, let error = parser.parserError {
+            return [ValidationIssue(
+                severity: .error,
+                message: humanReadable(error: error as NSError),
+                line: parser.lineNumber,
+                column: parser.columnNumber
+            )]
+        }
+        return collector.issues
+    }
+
+    private static func humanReadable(error: NSError) -> String {
+        // `XMLParser` localized messages tend to be terse ("Premature
+        // end of data in tag ..."). Keep the original; the line/column
+        // values carry the useful position info.
+        if error.localizedDescription.isEmpty {
+            return "XML is malformed (code \(error.code))."
+        }
+        return error.localizedDescription
+    }
+
+    /// `XMLParser` reports errors via a delegate callback. We collect
+    /// each one with its line/column so the UI can render them as
+    /// "Line 42, col 7 — Premature end of data".
+    private final class XMLErrorCollector: NSObject, XMLParserDelegate {
+        var issues: [ValidationIssue] = []
+
+        func parser(_ parser: XMLParser, parseErrorOccurred parseError: any Error) {
+            let nsError = parseError as NSError
+            issues.append(ValidationIssue(
+                severity: .error,
+                message: humanReadable(error: nsError),
+                line: parser.lineNumber,
+                column: parser.columnNumber
+            ))
+        }
+
+        func parser(_ parser: XMLParser, validationErrorOccurred validationError: any Error) {
+            let nsError = validationError as NSError
+            issues.append(ValidationIssue(
+                severity: .warning,
+                message: humanReadable(error: nsError),
+                line: parser.lineNumber,
+                column: parser.columnNumber
+            ))
+        }
+    }
+
+    // MARK: Plist + structural checks
+
+    private static func plistStructuralIssues(data: Data) -> [ValidationIssue] {
         var format: PropertyListSerialization.PropertyListFormat = .xml
         let object: Any
         do {
@@ -23,7 +104,10 @@ public enum MobileConfigValidator {
                 format: &format
             )
         } catch {
-            return [ValidationIssue(severity: .error, message: "XML doesn't parse as a plist: \(error.localizedDescription)")]
+            return [ValidationIssue(
+                severity: .error,
+                message: "XML parses but isn't a valid plist: \(error.localizedDescription)"
+            )]
         }
         guard let dict = object as? [String: Any] else {
             return [ValidationIssue(severity: .error, message: "Top-level value must be a dictionary.")]
@@ -107,8 +191,34 @@ public enum MobileConfigValidator {
     public struct ValidationIssue: Sendable, Hashable, Identifiable {
         public var severity: Severity
         public var message: String
+        /// 1-based line number when the issue is positional (XML parse
+        /// errors), `nil` for whole-file structural issues.
+        public var line: Int?
+        /// 1-based column number when the issue is positional.
+        public var column: Int?
 
-        public var id: String { "\(severity.rawValue):\(message)" }
+        public init(severity: Severity, message: String, line: Int? = nil, column: Int? = nil) {
+            self.severity = severity
+            self.message = message
+            self.line = line
+            self.column = column
+        }
+
+        public var id: String {
+            "\(severity.rawValue):\(line ?? -1):\(column ?? -1):\(message)"
+        }
+
+        /// Human-friendly display string. Prefixes the line/column when
+        /// available so the lint list lines up.
+        public var displayMessage: String {
+            if let line, line > 0 {
+                if let column, column > 0 {
+                    return "Line \(line), col \(column) — \(message)"
+                }
+                return "Line \(line) — \(message)"
+            }
+            return message
+        }
 
         public enum Severity: String, Sendable, Hashable {
             case error

@@ -69,6 +69,28 @@ struct MobileConfigValidatorTests {
         #expect(issues.contains { $0.severity == .error })
     }
 
+    @Test("XML parse errors carry a line number from XMLParser")
+    func xmlErrorsHaveLineNumbers() {
+        // Two unclosed tags — XMLParser should report the position
+        // where it gave up parsing.
+        let broken = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+            <key>PayloadType
+            <string>Configuration</string>
+        </dict>
+        </plist>
+        """
+        let issues = MobileConfigValidator.validate(broken)
+        let xmlError = issues.first { $0.severity == .error && $0.line != nil }
+        #expect(xmlError != nil)
+        #expect((xmlError?.line ?? 0) > 0)
+        if let xmlError {
+            #expect(xmlError.displayMessage.hasPrefix("Line "))
+        }
+    }
+
     private func minimalProfile() -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
