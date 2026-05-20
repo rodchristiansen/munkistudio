@@ -143,9 +143,9 @@ private struct OverviewTab: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 16) {
                 identityCard
+                catalogsCard
                 descriptionCard
                 adminNotesCard
-                catalogsCard
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             VStack(alignment: .leading, spacing: 16) {
@@ -314,6 +314,9 @@ private struct OverviewTab: View {
                 LabelledField("Architectures", alignment: .top) {
                     ArchitecturePicker(selected: $draft.supportedArchitectures)
                 }
+                LabelledField("Force install after", alignment: .center) {
+                    ForceInstallDateField(date: $draft.forceInstallAfterDate)
+                }
                 LabelledField("Installable condition", alignment: .top) {
                     TextEditor(text: Bindings.optional($draft.installableCondition))
                         .frame(minHeight: 80)
@@ -434,6 +437,11 @@ private struct DetectionTab: View {
                     .cardStyle()
             }
             VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Receipts")
+                ReceiptsTable(items: Bindings.bindArray($draft.receipts))
+                    .cardStyle()
+            }
+            VStack(alignment: .leading, spacing: 0) {
                 CardSectionHeader("Install check script")
                 hint("When set, overrides the installs/receipts check.")
                 ScriptEditor(label: "", text: Bindings.optional($draft.installcheckScript))
@@ -443,11 +451,6 @@ private struct DetectionTab: View {
                 CardSectionHeader("Version script")
                 hint("Reports the installed version; Munki compares the output to the pkginfo's version field.")
                 ScriptEditor(label: "", text: Bindings.optional($draft.versionScript))
-                    .cardStyle()
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                CardSectionHeader("Receipts")
-                ReceiptsTable(items: Bindings.bindArray($draft.receipts))
                     .cardStyle()
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -701,7 +704,6 @@ private struct AdvancedTab: View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 16) {
                 flagsCard
-                timingCard
                 sizesCard
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -733,16 +735,6 @@ private struct AdvancedTab: View {
                 Toggle("Unattended install", isOn: Bindings.optionalBool($draft.unattendedInstall))
                 Toggle("Unattended uninstall", isOn: Bindings.optionalBool($draft.unattendedUninstall))
                 Toggle("On demand", isOn: Bindings.optionalBool($draft.onDemand))
-            }
-            .cardStyle()
-        }
-    }
-
-    private var timingCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CardSectionHeader("Timing")
-            LabelledField("Force install after", alignment: .center) {
-                ForceInstallDateField(date: $draft.forceInstallAfterDate)
             }
             .cardStyle()
         }
