@@ -84,24 +84,38 @@ private struct PackageEditor: View {
                 .padding(.trailing, 14)
         }
         .padding(.top, 18)
+        // Continuous baseline rule across the whole strip so the row
+        // reads as a single tabbed control instead of disconnected
+        // labels. Each active tab paints its accent rule on top.
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.22))
+                .frame(height: 1)
+        }
     }
 
-    /// Underlined-tab style — plain label, accent underline for the
-    /// active tab. Xcode debug bar / Safari favorites bar aesthetic;
-    /// no chrome, just typography and a 2pt rule.
+    /// Underlined-tab style — bigger, bolder labels with a continuous
+    /// gray baseline rule under every tab. The active tab paints an
+    /// accent rule on top with a soft glow for depth.
     private func tabButton(_ tab: EditorTab) -> some View {
-        Button {
+        let isActive = activeTab == tab
+        return Button {
             activeTab = tab
         } label: {
             VStack(spacing: 0) {
                 Text(tab.title)
-                    .font(.callout.weight(activeTab == tab ? .semibold : .regular))
-                    .foregroundStyle(activeTab == tab ? Color.primary : Color.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .font(.title3.weight(isActive ? .bold : .semibold))
+                    .foregroundStyle(isActive ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
                 Rectangle()
-                    .fill(activeTab == tab ? Color.accentColor : Color.clear)
+                    .fill(isActive ? Color.accentColor : Color.clear)
                     .frame(height: 2)
+                    .shadow(
+                        color: isActive ? Color.accentColor.opacity(0.32) : .clear,
+                        radius: 3,
+                        y: 1
+                    )
             }
             .contentShape(.rect)
         }
