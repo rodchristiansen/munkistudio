@@ -75,26 +75,14 @@ private struct PackageEditor: View {
     }
 
     private var tabStrip: some View {
-        HStack(spacing: 2) {
-            ForEach(EditorTab.allCases) { tab in
-                Button {
-                    activeTab = tab
-                } label: {
-                    Text(tab.title)
-                        .font(.callout.weight(activeTab == tab ? .semibold : .regular))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .foregroundStyle(activeTab == tab ? Color.accentColor : Color.secondary)
-                        .background(
-                            activeTab == tab
-                                ? AnyShapeStyle(Color.accentColor.opacity(0.12))
-                                : AnyShapeStyle(Color.clear)
-                        )
-                        .clipShape(.capsule)
+        HStack(spacing: 12) {
+            Picker("", selection: $activeTab) {
+                ForEach(EditorTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
                 }
-                .buttonStyle(.plain)
             }
-            Spacer()
+            .pickerStyle(.segmented)
+            .labelsHidden()
             RecordActionMenu(record: .package(record))
         }
         .padding(.horizontal, 14)
