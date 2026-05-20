@@ -69,6 +69,38 @@ struct MobileConfigValidatorTests {
         #expect(issues.contains { $0.severity == .error })
     }
 
+    @Test("multiple dropped brackets are all reported, not just the first")
+    func reportsAllDroppedBrackets() {
+        // Three separate lines with the leading `<` removed —
+        // XMLParser alone stops at the first one, but the heuristic
+        // scanner finds the rest so the user sees every breakage.
+        let broken = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>PayloadType</key>
+            <string>Configuration</string>
+            key>PayloadIdentifier</key>
+            <string>com.example.profile</string>
+            key>PayloadUUID</key>
+            <string>4F3F8E7C-7A24-4F0E-92E1-0F0E0C0B0A09</string>
+            key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+        </plist>
+        """
+        let issues = MobileConfigValidator.validate(broken)
+        let positionalErrors = issues.filter { $0.severity == .error && $0.line != nil }
+        // At minimum: the three dropped-bracket lines (7, 9, 11) all
+        // surface as separate issues. XMLParser may add its own
+        // entry on top of those; we don't pin the exact count.
+        let lines = Set(positionalErrors.compactMap(\.line))
+        #expect(lines.contains(7))
+        #expect(lines.contains(9))
+        #expect(lines.contains(11))
+    }
+
     @Test("XML parse errors carry a line number from XMLParser")
     func xmlErrorsHaveLineNumbers() {
         // Two unclosed tags — XMLParser should report the position

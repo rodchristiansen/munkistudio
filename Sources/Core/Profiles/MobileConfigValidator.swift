@@ -24,12 +24,113 @@ public enum MobileConfigValidator {
         guard let data = xml.data(using: .utf8) else {
             return [ValidationIssue(severity: .error, message: "File is not valid UTF-8.")]
         }
+        // XMLParser stops at the first malformed character, so it
+        // only sees one error per parse even when the user dropped
+        // brackets on three different lines. We supplement its
+        // positional report with a heuristic line scanner that finds
+        // the common "missing leading `<`" pattern across the whole
+        // file, then merge — XMLParser's exact column wins for the
+        // line they overlap on; the scanner surfaces the rest.
         let xmlIssues = xmlWellFormednessIssues(data: data)
-        if !xmlIssues.isEmpty {
-            return xmlIssues
+        let heuristics = bracketHeuristicIssues(xml: xml)
+        let xmlLines = Set(xmlIssues.compactMap { $0.line })
+        var combined = xmlIssues
+        combined.append(contentsOf: heuristics.filter { issue in
+            guard let line = issue.line else { return true }
+            return !xmlLines.contains(line)
+        })
+        if !combined.isEmpty {
+            return combined.sorted { ($0.line ?? Int.max) < ($1.line ?? Int.max) }
         }
         return plistStructuralIssues(data: data)
     }
+
+    // MARK: Bracket heuristics
+
+    /// Scan each non-comment, non-CDATA line for the textbook missing
+    /// bracket patterns:
+    ///   - a leading `tag>` with no `<` (e.g. `key>foo</key>` instead of
+    ///     `<key>foo</key>`)
+    ///   - a closing tag fragment (`</tag` or `tag/>`) with no `>`
+    ///     terminating it
+    ///   - an opening tag fragment (`<tag` followed by content but no
+    ///     `>` on the same line, ignoring single-line comments and
+    ///     multi-line wrappers)
+    ///
+    /// The scanner is intentionally conservative — it would rather
+    /// miss an obscure breakage than emit false positives on
+    /// well-formed multi-line constructs. Comments are tracked across
+    /// lines so a `<!-- ... -->` block doesn't trigger noise.
+    private static func bracketHeuristicIssues(xml: String) -> [ValidationIssue] {
+        var issues: [ValidationIssue] = []
+        var inComment = false
+        let lines = xml.components(separatedBy: "\n")
+        for (index, rawLine) in lines.enumerated() {
+            let lineNumber = index + 1
+            let line = rawLine
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+
+            // Track multi-line comments so a `<!-- ... -->` block
+            // doesn't trip the per-line bracket counts.
+            if inComment {
+                if line.contains("-->") { inComment = false }
+                continue
+            }
+            if line.contains("<!--") && !line.contains("-->") {
+                inComment = true
+                continue
+            }
+            // Single-line comments — skip entirely.
+            if trimmed.hasPrefix("<!--") && trimmed.hasSuffix("-->") { continue }
+            // XML prolog and DOCTYPE — skip.
+            if trimmed.hasPrefix("<?") || trimmed.hasPrefix("<!DOCTYPE") { continue }
+
+            // Pattern A: "tagname>..." at the start of the line with
+            // no leading "<". Captures the dropped opening bracket
+            // the user just made.
+            if let match = leadingTagPattern.firstMatch(
+                in: line,
+                options: [],
+                range: NSRange(line.startIndex..., in: line)
+            ), let tagRange = Range(match.range(at: 1), in: line) {
+                issues.append(ValidationIssue(
+                    severity: .error,
+                    message: "Missing opening '<' before \"\(line[tagRange])>\".",
+                    line: lineNumber,
+                    column: 1
+                ))
+                continue
+            }
+
+            // Pattern B: bracket count mismatch on a non-comment line
+            // — usually a missing trailing `>` on an opening tag.
+            // Counts `<` and `>` literally because property-list
+            // content doesn't contain stray brackets in well-formed
+            // mobileconfigs.
+            let opens = line.filter { $0 == "<" }.count
+            let closes = line.filter { $0 == ">" }.count
+            if opens != closes {
+                issues.append(ValidationIssue(
+                    severity: .error,
+                    message: "Bracket mismatch: \(opens) '<' but \(closes) '>' on this line.",
+                    line: lineNumber
+                ))
+            }
+        }
+        return issues
+    }
+
+    /// Matches `tagname>` (or `tagname/>`) at the very start of a line
+    /// (with optional leading whitespace) when there's no preceding
+    /// `<`. The captured group is the tag name itself.
+    private static let leadingTagPattern: NSRegularExpression = {
+        // ^\s*([A-Za-z][\w:-]*)>  — anchored, no `<` before the tag.
+        try! NSRegularExpression(
+            pattern: #"^\s*([A-Za-z][\w:-]*)/?>"#,
+            options: []
+        )
+    }()
 
     // MARK: XML well-formedness
 
