@@ -186,7 +186,9 @@ struct DashboardView: View {
     // MARK: Stats
 
     private var statsGrid: some View {
-        let columns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 14)]
+        // Fixed 5-column layout so the dashboard reads as a 5×2 grid
+        // at any window width. Tiles shrink rather than reflow.
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 14), count: 5)
         return LazyVGrid(columns: columns, spacing: 14) {
             StatTile(
                 label: "Packages",

@@ -23,6 +23,11 @@ struct PromoterView: View {
     /// rerun on every render with thousands of pkginfos.
     @State private var cachedCandidates: [PromotionCandidate] = []
     @State private var cachedCatalogSamples: [[String]] = []
+    /// Shared selection across all three columns. Holds a namespaced
+    /// row identifier (`"imports::<id>"`, `"upcoming::<url>"`,
+    /// `"history::<commit>::<id>"`) so picking a row in one column
+    /// clears the selection in the others — the Mac-list pattern.
+    @State private var selectedRowID: String?
 
     var body: some View {
         Group {
@@ -134,6 +139,7 @@ struct PromoterView: View {
                     PromoterImportsSection(
                         imports: promoterStore.snapshot.imports,
                         hiddenCatalogs: hiddenCatalogs,
+                        selectedRowID: $selectedRowID,
                         onOpenPackage: openInPackagesTab
                     )
                 }
@@ -146,6 +152,7 @@ struct PromoterView: View {
                         knownPromoteFromSets: promoterStore.snapshot.config.rules.map { $0.promoteFrom },
                         pkginfoCatalogSamples: cachedCatalogSamples,
                         repositoryPath: store.repository?.rootURL.path,
+                        selectedRowID: $selectedRowID,
                         onPromote: handlePromote,
                         onDefer: { candidate in
                             Task { await promoterStore.apply(.defer_(candidate), store: store) }
@@ -157,6 +164,7 @@ struct PromoterView: View {
                     PromoterHistorySection(
                         entries: promoterStore.snapshot.history,
                         hiddenCatalogs: hiddenCatalogs,
+                        selectedRowID: $selectedRowID,
                         onOpenPackage: openInPackagesTab
                     )
                 }

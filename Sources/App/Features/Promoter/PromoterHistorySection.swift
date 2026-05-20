@@ -8,14 +8,13 @@ import Core
 struct PromoterHistorySection: View {
     let entries: [PromotionHistoryEntry]
     let hiddenCatalogs: Set<String>
+    /// Shared with the other Promoter columns — picking a delta
+    /// here clears any selection in Imports or Upcoming.
+    @Binding var selectedRowID: String?
     /// Wired to double-click on a per-pkginfo delta row → open in
     /// Packages tab. The commit-level row stays informational.
     var onOpenPackage: ((String) -> Void)? = nil
 
-    /// Selection lives at the section level — delta rows across all
-    /// commits share one selection so single-click feedback feels
-    /// natural ("pick a delta, double-click to open").
-    @State private var selectedDeltaID: String?
     @State private var lastTapID: String?
     @State private var lastTapAt: Date?
 
@@ -31,7 +30,7 @@ struct PromoterHistorySection: View {
                             entry: entry,
                             hiddenCatalogs: hiddenCatalogs,
                             commitHash: entry.commitHash,
-                            selectedDeltaID: $selectedDeltaID,
+                            selectedRowID: $selectedRowID,
                             onTap: { id, pkgName in handleTap(id: id, pkgName: pkgName) }
                         )
                         if index < entries.count - 1 { Divider() }
@@ -70,7 +69,7 @@ struct PromoterHistorySection: View {
             lastTapID = nil
             lastTapAt = nil
         } else {
-            selectedDeltaID = id
+            selectedRowID = id
             lastTapID = id
             lastTapAt = now
         }
@@ -94,17 +93,18 @@ private struct HistoryRow: View {
     /// pkginfo can appear in multiple commits and would otherwise
     /// share a selection ID, lighting up both at once.
     let commitHash: String
-    @Binding var selectedDeltaID: String?
+    @Binding var selectedRowID: String?
     /// `(deltaSelectionID, deltaPkgName) -> Void` — bubbled to the
     /// section so the timing-based double-click handler sees every
     /// click across all commits in one place.
     let onTap: (String, String) -> Void
 
-    /// Per-commit unique ID for a delta — combines commit hash with
-    /// the delta's pkginfo path so the same package across two
-    /// commits gets distinct selection IDs.
+    /// Globally unique selection ID for a delta — namespaced by
+    /// section ("history::"), commit hash, and the delta's own id
+    /// (its pkginfo URL) so the same package across two commits or
+    /// across columns can never collide.
     private func selectionID(for delta: PromotionDelta) -> String {
-        commitHash + "::" + delta.id
+        "history::" + commitHash + "::" + delta.id
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -149,7 +149,7 @@ private struct HistoryRow: View {
                         DeltaRow(
                             delta: delta,
                             hiddenCatalogs: hiddenCatalogs,
-                            isSelected: selectedDeltaID == id,
+                            isSelected: selectedRowID == id,
                             onTap: { onTap(id, delta.pkgName) }
                         )
                     }

@@ -15,14 +15,21 @@ struct PromoterUpcomingSection: View {
     /// > 0 so the user can see why no rule matches.
     let pkginfoCatalogSamples: [[String]]
     let repositoryPath: String?
+    /// Shared with the other Promoter columns — selecting a row in
+    /// any one column clears whatever was selected in the others.
+    @Binding var selectedRowID: String?
     let onPromote: (PromotionCandidate) -> Void
     let onDefer: (PromotionCandidate) -> Void
     /// Wired to double-click on a candidate row → open in Packages tab.
     var onOpenPackage: ((String) -> Void)? = nil
 
-    @State private var selectedRowID: URL?
-    @State private var lastTapID: URL?
+    @State private var lastTapID: String?
     @State private var lastTapAt: Date?
+
+    /// Namespace each Upcoming candidate's selection ID.
+    private func selectionID(for candidate: PromotionCandidate) -> String {
+        "upcoming::" + candidate.pkginfoURL.path
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -36,7 +43,7 @@ struct PromoterUpcomingSection: View {
                             candidate: candidate,
                             busy: busyURL == candidate.pkginfoURL,
                             hiddenCatalogs: hiddenCatalogs,
-                            isSelected: selectedRowID == candidate.id,
+                            isSelected: selectedRowID == selectionID(for: candidate),
                             onTap: { handleTap(candidate: candidate) },
                             onPromote: { onPromote(candidate) },
                             onDefer: { onDefer(candidate) }
@@ -129,14 +136,15 @@ struct PromoterUpcomingSection: View {
     /// Timing-based double-click resolution — see the corresponding
     /// notes in PromoterImportsSection.
     private func handleTap(candidate: PromotionCandidate) {
+        let id = selectionID(for: candidate)
         let now = Date()
-        if lastTapID == candidate.id, let last = lastTapAt, now.timeIntervalSince(last) < 0.4 {
+        if lastTapID == id, let last = lastTapAt, now.timeIntervalSince(last) < 0.4 {
             onOpenPackage?(candidate.pkgName)
             lastTapID = nil
             lastTapAt = nil
         } else {
-            selectedRowID = candidate.id
-            lastTapID = candidate.id
+            selectedRowID = id
+            lastTapID = id
             lastTapAt = now
         }
     }
