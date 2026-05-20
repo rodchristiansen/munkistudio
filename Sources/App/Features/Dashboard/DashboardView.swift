@@ -10,6 +10,10 @@ struct DashboardView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(PromoterStore.self) private var promoterStore
     @State private var recentCommits: [GitCommit] = []
+    /// Cached candidate list — same caching strategy as the Promoter
+    /// tab so the dashboard tiles don't trigger 1366×rules set
+    /// comparisons on every render.
+    @State private var cachedCandidates: [PromotionCandidate] = []
     @ScaledMetric(relativeTo: .caption) private var shaColumnWidth: CGFloat = 70
 
     var body: some View {
@@ -26,6 +30,17 @@ struct DashboardView: View {
         }
         .navigationTitle("Dashboard")
         .task(id: store.gitInfo?.workTreeRoot) { await loadCommits() }
+        .onAppear { recomputeCandidates() }
+        .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCandidates() }
+        .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCandidates() }
+    }
+
+    private func recomputeCandidates() {
+        cachedCandidates = FilePromoterService.candidates(
+            from: store.snapshot.pkginfos,
+            config: promoterStore.snapshot.config,
+            now: Date()
+        )
     }
 
     // MARK: Recently modified
@@ -214,8 +229,7 @@ struct DashboardView: View {
                 )
             }
             if settings.enablePromoterTab {
-                let candidates = liveCandidates
-                let eligible = candidates.filter { $0.isEligible() }.count
+                let eligible = cachedCandidates.filter { $0.isEligible() }.count
                 StatTile(
                     label: "Eligible now",
                     value: "\(eligible)",
@@ -224,7 +238,7 @@ struct DashboardView: View {
                 ) { store.selectedSection = .promoter }
                 StatTile(
                     label: "Tracked",
-                    value: "\(candidates.count)",
+                    value: "\(cachedCandidates.count)",
                     icon: "clock.arrow.circlepath",
                     color: .blue
                 ) { store.selectedSection = .promoter }
@@ -236,19 +250,6 @@ struct DashboardView: View {
                 ) { store.selectedSection = .promoter }
             }
         }
-    }
-
-    /// Compute candidates live against the current pkginfo snapshot.
-    /// Mirrors PromoterView's approach — the snapshot's cached
-    /// `.candidates` can land empty when the async pipeline fires
-    /// before pkginfos finish loading, so the tile counts are
-    /// recomputed each render against the up-to-date state.
-    private var liveCandidates: [PromotionCandidate] {
-        FilePromoterService.candidates(
-            from: store.snapshot.pkginfos,
-            config: promoterStore.snapshot.config,
-            now: Date()
-        )
     }
 
     private var uniqueCategories: Set<String> {

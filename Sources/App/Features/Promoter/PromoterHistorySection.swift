@@ -16,6 +16,8 @@ struct PromoterHistorySection: View {
     /// commits share one selection so single-click feedback feels
     /// natural ("pick a delta, double-click to open").
     @State private var selectedDeltaID: String?
+    @State private var lastTapID: String?
+    @State private var lastTapAt: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -28,8 +30,9 @@ struct PromoterHistorySection: View {
                         HistoryRow(
                             entry: entry,
                             hiddenCatalogs: hiddenCatalogs,
+                            commitHash: entry.commitHash,
                             selectedDeltaID: $selectedDeltaID,
-                            onOpenPackage: onOpenPackage
+                            onTap: { id, pkgName in handleTap(id: id, pkgName: pkgName) }
                         )
                         if index < entries.count - 1 { Divider() }
                     }
@@ -56,6 +59,23 @@ struct PromoterHistorySection: View {
         .padding(.bottom, 8)
     }
 
+    /// Timing-based double-click resolution. The history section
+    /// owns this rather than each row because deltas can repeat
+    /// across commits and the selection ID is composite — easier
+    /// to keep all the state in one place.
+    private func handleTap(id: String, pkgName: String) {
+        let now = Date()
+        if lastTapID == id, let last = lastTapAt, now.timeIntervalSince(last) < 0.4 {
+            onOpenPackage?(pkgName)
+            lastTapID = nil
+            lastTapAt = nil
+        } else {
+            selectedDeltaID = id
+            lastTapID = id
+            lastTapAt = now
+        }
+    }
+
     private var emptyState: some View {
         HStack {
             Text("No \"Promoter:\" commits in this repository's git history.")
@@ -70,8 +90,22 @@ struct PromoterHistorySection: View {
 private struct HistoryRow: View {
     let entry: PromotionHistoryEntry
     let hiddenCatalogs: Set<String>
+    /// Used to namespace delta selection IDs per commit — the same
+    /// pkginfo can appear in multiple commits and would otherwise
+    /// share a selection ID, lighting up both at once.
+    let commitHash: String
     @Binding var selectedDeltaID: String?
-    var onOpenPackage: ((String) -> Void)? = nil
+    /// `(deltaSelectionID, deltaPkgName) -> Void` — bubbled to the
+    /// section so the timing-based double-click handler sees every
+    /// click across all commits in one place.
+    let onTap: (String, String) -> Void
+
+    /// Per-commit unique ID for a delta — combines commit hash with
+    /// the delta's pkginfo path so the same package across two
+    /// commits gets distinct selection IDs.
+    private func selectionID(for delta: PromotionDelta) -> String {
+        commitHash + "::" + delta.id
+    }
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -111,12 +145,12 @@ private struct HistoryRow: View {
             if !entry.deltas.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(entry.deltas.prefix(8)) { delta in
+                        let id = selectionID(for: delta)
                         DeltaRow(
                             delta: delta,
                             hiddenCatalogs: hiddenCatalogs,
-                            isSelected: selectedDeltaID == delta.id,
-                            onSelect: { selectedDeltaID = delta.id },
-                            onOpenPackage: { onOpenPackage?(delta.pkgName) }
+                            isSelected: selectedDeltaID == id,
+                            onTap: { onTap(id, delta.pkgName) }
                         )
                     }
                     if entry.deltas.count > 8 {
@@ -137,8 +171,7 @@ private struct DeltaRow: View {
     let delta: PromotionDelta
     let hiddenCatalogs: Set<String>
     let isSelected: Bool
-    let onSelect: () -> Void
-    let onOpenPackage: () -> Void
+    let onTap: () -> Void
 
     private var before: [String] {
         filteringHidden(delta.before, hidden: hiddenCatalogs)
@@ -180,8 +213,7 @@ private struct DeltaRow: View {
         )
         .padding(.horizontal, 4)
         .contentShape(.rect)
-        .onTapGesture(count: 2, perform: onOpenPackage)
-        .onTapGesture(count: 1, perform: onSelect)
+        .onTapGesture(perform: onTap)
     }
 
     /// Render the transition. `[]` on either side is omitted gracefully —

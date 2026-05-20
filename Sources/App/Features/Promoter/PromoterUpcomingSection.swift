@@ -21,6 +21,8 @@ struct PromoterUpcomingSection: View {
     var onOpenPackage: ((String) -> Void)? = nil
 
     @State private var selectedRowID: URL?
+    @State private var lastTapID: URL?
+    @State private var lastTapAt: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -35,10 +37,9 @@ struct PromoterUpcomingSection: View {
                             busy: busyURL == candidate.pkginfoURL,
                             hiddenCatalogs: hiddenCatalogs,
                             isSelected: selectedRowID == candidate.id,
-                            onSelect: { selectedRowID = candidate.id },
+                            onTap: { handleTap(candidate: candidate) },
                             onPromote: { onPromote(candidate) },
-                            onDefer: { onDefer(candidate) },
-                            onOpenPackage: { onOpenPackage?(candidate.pkgName) }
+                            onDefer: { onDefer(candidate) }
                         )
                         if index < candidates.count - 1 { Divider() }
                     }
@@ -120,6 +121,21 @@ struct PromoterUpcomingSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
     }
+
+    /// Timing-based double-click resolution — see the corresponding
+    /// notes in PromoterImportsSection.
+    private func handleTap(candidate: PromotionCandidate) {
+        let now = Date()
+        if lastTapID == candidate.id, let last = lastTapAt, now.timeIntervalSince(last) < 0.4 {
+            onOpenPackage?(candidate.pkgName)
+            lastTapID = nil
+            lastTapAt = nil
+        } else {
+            selectedRowID = candidate.id
+            lastTapID = candidate.id
+            lastTapAt = now
+        }
+    }
 }
 
 private struct PromoterCandidateRow: View {
@@ -127,10 +143,9 @@ private struct PromoterCandidateRow: View {
     let busy: Bool
     let hiddenCatalogs: Set<String>
     let isSelected: Bool
-    let onSelect: () -> Void
+    let onTap: () -> Void
     let onPromote: () -> Void
     let onDefer: () -> Void
-    let onOpenPackage: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -164,8 +179,7 @@ private struct PromoterCandidateRow: View {
         .padding(.vertical, 10)
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .contentShape(.rect)
-        .onTapGesture(count: 2, perform: onOpenPackage)
-        .onTapGesture(count: 1, perform: onSelect)
+        .onTapGesture(perform: onTap)
     }
 
     private var statusBadge: some View {
@@ -207,8 +221,13 @@ private struct PromoterCandidateRow: View {
             ProgressView().controlSize(.small).frame(width: 110, alignment: .trailing)
         } else {
             HStack(spacing: 6) {
+                // `.bordered` instead of `.borderedProminent` so the
+                // button keeps its colored chrome when the window
+                // loses key — `.borderedProminent` collapses to a
+                // flat label in that state and the action becomes
+                // invisible.
                 Button(candidate.isEligible() ? "Approve" : "Promote Early", action: onPromote)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(candidate.isEligible() ? .green : .orange)
                 Menu {

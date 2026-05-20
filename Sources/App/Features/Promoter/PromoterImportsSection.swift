@@ -11,6 +11,12 @@ struct PromoterImportsSection: View {
     var onOpenPackage: ((String) -> Void)? = nil
 
     @State private var selectedRowID: String?
+    /// Tracks the most recent click for double-tap detection — single
+    /// vs. double click is resolved by time delta rather than two
+    /// chained `.onTapGesture` modifiers, which compose unreliably
+    /// and were dropping double-clicks in practice.
+    @State private var lastTapID: String?
+    @State private var lastTapAt: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -24,8 +30,7 @@ struct PromoterImportsSection: View {
                             entry: entry,
                             hiddenCatalogs: hiddenCatalogs,
                             isSelected: selectedRowID == entry.id,
-                            onSelect: { selectedRowID = entry.id },
-                            onOpenPackage: { onOpenPackage?(entry.pkgName) }
+                            onTap: { handleTap(entry: entry) }
                         )
                         if index < imports.count - 1 { Divider() }
                     }
@@ -61,14 +66,29 @@ struct PromoterImportsSection: View {
         }
         .padding(14)
     }
+
+    /// Single tap handler that resolves to either select or open
+    /// based on whether the previous click was on the same row
+    /// within macOS's standard double-click interval (0.4s).
+    private func handleTap(entry: AutoPkgImport) {
+        let now = Date()
+        if lastTapID == entry.id, let last = lastTapAt, now.timeIntervalSince(last) < 0.4 {
+            onOpenPackage?(entry.pkgName)
+            lastTapID = nil
+            lastTapAt = nil
+        } else {
+            selectedRowID = entry.id
+            lastTapID = entry.id
+            lastTapAt = now
+        }
+    }
 }
 
 private struct ImportRow: View {
     let entry: AutoPkgImport
     let hiddenCatalogs: Set<String>
     let isSelected: Bool
-    let onSelect: () -> Void
-    let onOpenPackage: () -> Void
+    let onTap: () -> Void
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -118,7 +138,6 @@ private struct ImportRow: View {
         .padding(.vertical, 10)
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .contentShape(.rect)
-        .onTapGesture(count: 2, perform: onOpenPackage)
-        .onTapGesture(count: 1, perform: onSelect)
+        .onTapGesture(perform: onTap)
     }
 }

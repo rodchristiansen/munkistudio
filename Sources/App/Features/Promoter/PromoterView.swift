@@ -18,6 +18,11 @@ struct PromoterView: View {
     @State private var pendingEarly: PromotionCandidate?
     @State private var showRulesSheet = false
     @State private var showRecipesSheet = false
+    /// Cached candidate list. Recomputed only when pkginfo count or
+    /// rule set changes — the full O(N×M) match is too expensive to
+    /// rerun on every render with thousands of pkginfos.
+    @State private var cachedCandidates: [PromotionCandidate] = []
+    @State private var cachedCatalogSamples: [[String]] = []
 
     var body: some View {
         Group {
@@ -134,12 +139,12 @@ struct PromoterView: View {
                 }
                 columnScroll {
                     PromoterUpcomingSection(
-                        candidates: liveCandidates,
+                        candidates: cachedCandidates,
                         busyURL: promoterStore.busyURL,
                         hiddenCatalogs: hiddenCatalogs,
                         pkginfoCount: store.snapshot.pkginfos.count,
                         knownPromoteFromSets: promoterStore.snapshot.config.rules.map { $0.promoteFrom },
-                        pkginfoCatalogSamples: catalogSamples,
+                        pkginfoCatalogSamples: cachedCatalogSamples,
                         repositoryPath: store.repository?.rootURL.path,
                         onPromote: handlePromote,
                         onDefer: { candidate in
@@ -157,6 +162,36 @@ struct PromoterView: View {
                 }
             }
         }
+        .onAppear { recomputeCache() }
+        .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCache() }
+        .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCache() }
+    }
+
+    /// Recompute the candidate list + sample catalogs and store in
+    /// @State. Called when pkginfo count or rule count changes, not
+    /// on every render — the match is O(N×M) and dominated body
+    /// time on repos with thousands of pkginfos.
+    private func recomputeCache() {
+        cachedCandidates = FilePromoterService.candidates(
+            from: store.snapshot.pkginfos,
+            config: promoterStore.snapshot.config,
+            now: Date()
+        )
+        cachedCatalogSamples = computeCatalogSamples()
+    }
+
+    private func computeCatalogSamples() -> [[String]] {
+        var seen: Set<String> = []
+        var result: [[String]] = []
+        for record in store.snapshot.pkginfos {
+            let catalogs = record.pkginfo.catalogs ?? []
+            let key = catalogs.joined(separator: "\u{1F}")
+            if seen.insert(key).inserted {
+                result.append(catalogs)
+                if result.count >= 5 { break }
+            }
+        }
+        return result
     }
 
     /// Plain scroll wrapper for one column. The title + count live
@@ -172,27 +207,25 @@ struct PromoterView: View {
         .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Compute candidates live against the current pkginfo snapshot.
-    /// Going through `store.snapshot.pkginfos` directly (instead of the
-    /// PromoterStore's cached `snapshot.candidates`) sidesteps any
-    /// staleness when the user lands on the tab before the async
-    /// snapshot pipeline has rerun — the matching logic is pure /
-    /// cheap, so we can recompute on every render without cost.
-    private var liveCandidates: [PromotionCandidate] {
-        FilePromoterService.candidates(
-            from: store.snapshot.pkginfos,
-            config: promoterStore.snapshot.config,
-            now: Date()
-        )
-    }
-
     /// Jump to the Packages tab and select the matching pkginfo by
-    /// name. Used by row double-clicks in every column so the user
-    /// can pivot from "what got promoted" to "the actual package".
+    /// name. Used by row clicks in every column so the user can pivot
+    /// from "what got promoted" to "the actual package". The lookup
+    /// tries an exact name match first, then falls back to a
+    /// file-basename match so AutoPkg import rows (whose `pkgName`
+    /// is sometimes the dashed filename like `Chrome-147.0.7727.138`)
+    /// still resolve.
     private func openInPackagesTab(named pkgName: String) {
-        guard let record = store.snapshot.pkginfos.first(where: {
-            $0.pkginfo.name.caseInsensitiveCompare(pkgName) == .orderedSame
-        }) else { return }
+        let lower = pkgName.lowercased()
+        let record =
+            store.snapshot.pkginfos.first { $0.pkginfo.name.caseInsensitiveCompare(pkgName) == .orderedSame }
+            ?? store.snapshot.pkginfos.first { record in
+                let base = record.fileURL.deletingPathExtension().lastPathComponent.lowercased()
+                return base == lower
+            }
+            ?? store.snapshot.pkginfos.first { record in
+                lower.hasPrefix(record.pkginfo.name.lowercased() + "-")
+            }
+        guard let record else { return }
         store.selectedSection = .packages
         store.selectedItemID = AnyHashable(record.id)
         let category = (record.pkginfo.category?.trimmingCharacters(in: .whitespaces)).flatMap {
@@ -297,23 +330,6 @@ struct PromoterView: View {
 
     private var hiddenCatalogs: Set<String> {
         settings.promoterHiddenCatalogsSet
-    }
-
-    /// Up to 5 distinct catalog signatures from the loaded pkginfos —
-    /// surfaced in the diagnostic so the user can eyeball them against
-    /// the rules' `promote_from` sets.
-    private var catalogSamples: [[String]] {
-        var seen: Set<String> = []
-        var result: [[String]] = []
-        for record in store.snapshot.pkginfos {
-            let catalogs = record.pkginfo.catalogs ?? []
-            let key = catalogs.joined(separator: "\u{1F}")
-            if seen.insert(key).inserted {
-                result.append(catalogs)
-                if result.count >= 5 { break }
-            }
-        }
-        return result
     }
 
     private var earlyPresented: Binding<Bool> {
