@@ -9,6 +9,7 @@ struct DashboardView: View {
     @Environment(RepositoryStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @Environment(PromoterStore.self) private var promoterStore
+    @Environment(ProfileStore.self) private var profileStore
     @State private var recentCommits: [GitCommit] = []
     /// Cached candidate list — same caching strategy as the Promoter
     /// tab so the dashboard tiles don't trigger 1366×rules set
@@ -33,6 +34,12 @@ struct DashboardView: View {
         .onAppear { recomputeCandidates() }
         .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCandidates() }
         .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCandidates() }
+        // Invalidate after every promote/defer round-trip — busyURL
+        // returns to nil once the action commits, signalling that a
+        // candidate may have just transitioned out of the tracked set.
+        .onChange(of: promoterStore.busyURL) { _, new in
+            if new == nil { recomputeCandidates() }
+        }
     }
 
     private func recomputeCandidates() {
@@ -248,6 +255,14 @@ struct DashboardView: View {
                     icon: "square.and.arrow.down",
                     color: .indigo
                 ) { store.selectedSection = .promoter }
+            }
+            if settings.enableProfilesTab {
+                StatTile(
+                    label: "Profiles",
+                    value: "\(profileStore.records.count)",
+                    icon: "doc.text",
+                    color: .cyan
+                ) { store.selectedSection = .profiles }
             }
         }
     }

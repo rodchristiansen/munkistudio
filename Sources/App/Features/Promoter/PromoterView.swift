@@ -162,22 +162,41 @@ struct PromoterView: View {
                 }
             }
         }
-        .onAppear { recomputeCache() }
-        .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCache() }
-        .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCache() }
+        .onAppear { recomputeCache(animated: false) }
+        .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCache(animated: false) }
+        .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCache(animated: false) }
+        // Animate when a promote / defer round-trip completes:
+        // busyURL goes nil → URL → nil, so the trailing-nil edge is
+        // the signal that the candidate list may have just changed
+        // for non-load reasons. easeOut(0.25) lets the approved row
+        // fade out cleanly instead of disappearing on the next tick.
+        .onChange(of: promoterStore.busyURL) { _, new in
+            if new == nil {
+                recomputeCache(animated: true)
+            }
+        }
     }
 
     /// Recompute the candidate list + sample catalogs and store in
     /// @State. Called when pkginfo count or rule count changes, not
     /// on every render — the match is O(N×M) and dominated body
     /// time on repos with thousands of pkginfos.
-    private func recomputeCache() {
-        cachedCandidates = FilePromoterService.candidates(
+    private func recomputeCache(animated: Bool) {
+        let candidates = FilePromoterService.candidates(
             from: store.snapshot.pkginfos,
             config: promoterStore.snapshot.config,
             now: Date()
         )
-        cachedCatalogSamples = computeCatalogSamples()
+        let samples = computeCatalogSamples()
+        if animated {
+            withAnimation(.easeOut(duration: 0.25)) {
+                cachedCandidates = candidates
+                cachedCatalogSamples = samples
+            }
+        } else {
+            cachedCandidates = candidates
+            cachedCatalogSamples = samples
+        }
     }
 
     private func computeCatalogSamples() -> [[String]] {

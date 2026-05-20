@@ -173,30 +173,24 @@ private struct DeltaRow: View {
     let isSelected: Bool
     let onTap: () -> Void
 
-    private var before: [String] {
-        filteringHidden(delta.before, hidden: hiddenCatalogs)
-    }
-
-    private var after: [String] {
-        filteringHidden(delta.after, hidden: hiddenCatalogs)
-    }
-
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Color.clear.frame(width: 26)
-            HStack(spacing: 4) {
-                Text(delta.pkgName)
-                    .font(.caption.weight(.medium))
-                if let version = delta.version {
-                    Text(version)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Text(transitionText)
-                .font(.caption.monospaced())
-                .foregroundStyle(.tertiary)
+            Text(delta.pkgName)
+                .font(.caption.weight(.medium))
                 .lineLimit(1)
+                .truncationMode(.tail)
+            if let version = delta.version {
+                Text(version)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            // Catalog transitions used to render here. Dropped on
+            // purpose — every promotion follows the same fixed
+            // Development → Testing → Staging → Production flow,
+            // so spelling the source / target sets out per row was
+            // noise that also wrapped badly in narrow columns.
             Spacer(minLength: 0)
         }
         // Rounded, inset selection — sits cleanly inside the
@@ -214,20 +208,5 @@ private struct DeltaRow: View {
         .padding(.horizontal, 4)
         .contentShape(.rect)
         .onTapGesture(perform: onTap)
-    }
-
-    /// Render the transition. `[]` on either side is omitted gracefully —
-    /// an added file shows as `→ Testing,Staging` and a deleted file
-    /// shows as `Testing,Staging →` without misleading empty arrows.
-    private var transitionText: String {
-        let left = before.isEmpty ? "" : before.joined(separator: ",")
-        let right = after.isEmpty ? "" : after.joined(separator: ",")
-        if left.isEmpty && right.isEmpty {
-            return ""
-        }
-        if left == right {
-            return "(metadata only)"
-        }
-        return "(\(left) → \(right))"
     }
 }

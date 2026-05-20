@@ -41,6 +41,10 @@ struct PromoterUpcomingSection: View {
                             onPromote: { onPromote(candidate) },
                             onDefer: { onDefer(candidate) }
                         )
+                        .transition(.asymmetric(
+                            insertion: .opacity,
+                            removal: .opacity.combined(with: .move(edge: .trailing))
+                        ))
                         if index < candidates.count - 1 { Divider() }
                     }
                 }
