@@ -19,9 +19,17 @@ final class GitPaneState {
     var branches: [GitBranch] = []
     var commits: [GitCommit] = []
 
-    var fileSelection: String?
+    /// Files panel uses a Set so SwiftUI's List gives us native macOS
+    /// multi-select: Cmd-click toggles individual files, Shift-click
+    /// extends a contiguous range. The diff pane and other "operate
+    /// on the focused file" flows use `primaryFileSelection`.
+    var fileSelection: Set<String> = []
     var branchSelection: String?
     var commitSelection: String?
+
+    /// The "focused" file for diff sync and single-target actions —
+    /// just the first element of the multi-select set.
+    var primaryFileSelection: String? { fileSelection.first }
 
     var focusedPanel: Panel = .files
 
@@ -96,7 +104,8 @@ final class GitPaneState {
     func moveSelectionDown() {
         switch focusedPanel {
         case .files:
-            fileSelection = nextID(in: filteredFiles.map(\.relativePath), after: fileSelection)
+            let next = nextID(in: filteredFiles.map(\.relativePath), after: primaryFileSelection)
+            fileSelection = next.map { [$0] } ?? []
         case .history:
             commitSelection = nextID(in: filteredCommits.map(\.sha), after: commitSelection)
         case .hooks:
@@ -107,7 +116,8 @@ final class GitPaneState {
     func moveSelectionUp() {
         switch focusedPanel {
         case .files:
-            fileSelection = previousID(in: filteredFiles.map(\.relativePath), before: fileSelection)
+            let prev = previousID(in: filteredFiles.map(\.relativePath), before: primaryFileSelection)
+            fileSelection = prev.map { [$0] } ?? []
         case .history:
             commitSelection = previousID(in: filteredCommits.map(\.sha), before: commitSelection)
         case .hooks:

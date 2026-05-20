@@ -298,10 +298,11 @@ public final class ShellGitService: GitService {
     ) -> AsyncThrowingStream<GitProcessEvent, any Error> {
         let work = info.workTreeRoot
         let executable = gitURL
+        let env = GitProcessEnvironment.make()
         return AsyncThrowingStream { continuation in
             Task {
                 do {
-                    for try await event in ProcessRunner.stream(executable, arguments: args, in: work) {
+                    for try await event in ProcessRunner.stream(executable, arguments: args, in: work, environment: env, usePTY: true) {
                         switch event {
                         case .line(let line):
                             continuation.yield(.line(line))
