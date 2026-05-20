@@ -100,10 +100,12 @@ private struct ImportRow: View {
                 Text(Self.dateFormatter.string(from: entry.date))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                // .textSelection intentionally omitted — it captures
+                // double-clicks for word selection and would prevent
+                // the row-level onTapGesture from firing.
                 Text(String(entry.commitHash.prefix(7)))
                     .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
             }
         }
         .padding(.horizontal, 14)

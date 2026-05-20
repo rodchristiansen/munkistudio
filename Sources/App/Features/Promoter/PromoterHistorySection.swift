@@ -93,10 +93,12 @@ private struct HistoryRow: View {
                     Text(Self.dateFormatter.string(from: entry.date))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                    // .textSelection intentionally omitted so the
+                    // commit-hash text doesn't swallow double-clicks
+                    // before the delta rows below get a chance.
                     Text(String(entry.commitHash.prefix(7)))
                         .font(.caption.monospaced())
                         .foregroundStyle(.tertiary)
-                        .textSelection(.enabled)
                 }
             }
             if !entry.deltas.isEmpty {
