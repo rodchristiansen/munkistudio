@@ -9,6 +9,8 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            FeatureSettingsView()
+                .tabItem { Label("Features", systemImage: "switch.2") }
             GitSettingsView()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             BuildSettingsView()
@@ -17,6 +19,46 @@ struct SettingsView: View {
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 520)
+    }
+}
+
+// MARK: - Features
+
+private struct FeatureSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+                Toggle("Enable Profiles tab", isOn: $settings.enableProfilesTab)
+                HStack {
+                    TextField("Profiles folder", text: $settings.profilesDirectoryPath,
+                              prompt: Text("Folder of .mobileconfig files"))
+                    Button("Choose…") { chooseFolder(into: $settings.profilesDirectoryPath) }
+                }
+                .disabled(!settings.enableProfilesTab)
+            } header: {
+                Text("Profiles")
+            } footer: {
+                Text("The Profiles tab lists every .mobileconfig under this folder, expanded by default, and opens an XML editor with live validation for each.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: 220)
+    }
+
+    private func chooseFolder(into binding: Binding<String>) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            binding.wrappedValue = url.path
+        }
     }
 }
 

@@ -10,6 +10,7 @@ import Infra
 struct MunkiStudioApp: SwiftUI.App {
     @State private var store: RepositoryStore
     @State private var settings = AppSettings()
+    @State private var profileStore = ProfileStore()
 
     init() {
         let packages = FilePackageService()
@@ -44,7 +45,11 @@ struct MunkiStudioApp: SwiftUI.App {
             ContentView()
                 .environment(store)
                 .environment(settings)
+                .environment(profileStore)
                 .frame(minWidth: 1100, minHeight: 700)
+                .task(id: settings.profilesDirectoryPath) {
+                    await profileStore.reload(directory: profilesDirectoryURL)
+                }
         }
         .commands {
             MunkiStudioCommands(store: store)
@@ -54,7 +59,14 @@ struct MunkiStudioApp: SwiftUI.App {
             SettingsView()
                 .environment(settings)
                 .environment(store)
+                .environment(profileStore)
         }
+    }
+
+    private var profilesDirectoryURL: URL? {
+        let path = settings.profilesDirectoryPath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty, settings.enableProfilesTab else { return nil }
+        return URL(fileURLWithPath: path)
     }
 }
 

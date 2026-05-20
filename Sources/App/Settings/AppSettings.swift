@@ -41,6 +41,18 @@ final class AppSettings {
         didSet { defaults.set(munkipkgExecutablePath, forKey: Key.munkipkgExecutablePath) }
     }
 
+    /// Show the Profiles tab. Off by default — opt-in from onboarding or
+    /// Settings → Features. Requires `profilesDirectoryPath` to point at
+    /// a folder of `.mobileconfig` files.
+    var enableProfilesTab: Bool {
+        didSet { defaults.set(enableProfilesTab, forKey: Key.enableProfilesTab) }
+    }
+
+    /// Folder of `.mobileconfig` profiles the Profiles tab scans.
+    var profilesDirectoryPath: String {
+        didSet { defaults.set(profilesDirectoryPath, forKey: Key.profilesDirectoryPath) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -57,6 +69,10 @@ final class AppSettings {
             defaults.string(forKey: Key.munkipkgProjectsPath) ?? ""
         self.munkipkgExecutablePath =
             defaults.string(forKey: Key.munkipkgExecutablePath) ?? ""
+        self.enableProfilesTab =
+            defaults.bool(forKey: Key.enableProfilesTab)
+        self.profilesDirectoryPath =
+            defaults.string(forKey: Key.profilesDirectoryPath) ?? ""
     }
 
     private enum Key {
@@ -66,5 +82,7 @@ final class AppSettings {
         static let showGitSection = "MunkiStudio.settings.showGitSection"
         static let munkipkgProjectsPath = "MunkiStudio.settings.munkipkgProjectsPath"
         static let munkipkgExecutablePath = MunkipkgDefaults.executablePathKey
+        static let enableProfilesTab = "MunkiStudio.settings.enableProfilesTab"
+        static let profilesDirectoryPath = "MunkiStudio.settings.profilesDirectoryPath"
     }
 }
