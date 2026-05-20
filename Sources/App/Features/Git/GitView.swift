@@ -624,7 +624,7 @@ private extension GitView {
     /// inline.
     @MainActor
     private func handleGitError(
-        _ error: Error,
+        _ error: any Error,
         action: String,
         info: GitRepositoryInfo,
         retry: @escaping () async -> Void

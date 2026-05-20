@@ -113,6 +113,16 @@ $(APP_BUNDLE): FORCE | $(BUILD_DIR)
 	@mkdir -p $(APP_MACOS) $(APP_RESOURCES)
 	cp $(BIN_PATH) $(APP_MACOS)/$(APP_NAME)
 	@chmod +x $(APP_MACOS)/$(APP_NAME)
+	@# SwiftPM emits a `<App>_<Target>.bundle` next to the executable
+	@# for every target that declares `resources:` (Infra ships the
+	@# vendored Payloads.yaml). Bundle.module looks them up inside
+	@# Contents/Resources at runtime, so copy whatever SwiftPM built
+	@# alongside the binary or the app traps on launch.
+	@for bundle in .build/$(CONFIGURATION)/*.bundle; do \
+	    [ -e "$$bundle" ] || continue; \
+	    echo "Embedding resource bundle $$(basename $$bundle)"; \
+	    cp -R "$$bundle" "$(APP_RESOURCES)/"; \
+	done
 	@./scripts/render-info-plist.sh \
 	    $(INFO_PLIST) \
 	    "$(BUNDLE_ID)" "$(MARKETING_VERSION)" "$(BUILD)" \

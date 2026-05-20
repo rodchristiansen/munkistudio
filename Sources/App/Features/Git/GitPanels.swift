@@ -198,7 +198,7 @@ struct GitFilesPanel: View {
     /// sees something happened.
     @MainActor
     private func handle(
-        error: Error,
+        error: any Error,
         action: String,
         info: GitRepositoryInfo,
         retry: @escaping () async -> Void

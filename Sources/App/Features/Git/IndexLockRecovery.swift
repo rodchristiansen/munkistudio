@@ -17,7 +17,7 @@ enum IndexLockRecovery {
     /// Returns `true` if the error looks like an index-lock conflict.
     /// Used by callers to decide whether to swap their generic error
     /// message for the recovery flow.
-    static func matches(_ error: Error) -> Bool {
+    static func matches(_ error: any Error) -> Bool {
         matches(message: error.localizedDescription)
     }
 
