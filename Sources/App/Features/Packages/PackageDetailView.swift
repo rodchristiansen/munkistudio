@@ -83,12 +83,7 @@ private struct PackageEditor: View {
             RecordActionMenu(record: .package(record))
                 .padding(.trailing, 14)
         }
-        .background(.thinMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.black.opacity(0.08))
-                .frame(height: 0.5)
-        }
+        .padding(.top, 18)
     }
 
     /// Underlined-tab style — plain label, accent underline for the
