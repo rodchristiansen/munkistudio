@@ -132,13 +132,15 @@ private struct ProfileEditor: View {
     private var openWithMenu: some View {
         Menu {
             let imazing = Self.installedApp(bundleIDs: [
+                "com.DigiDNA.iMazingProfileEditorMac",
+                "com.DigiDNA.iMazingProfileEditor",
                 "com.dynamic-lynx.imazing-profile-editor",
-                "com.imazing.profileeditor",
-                "com.DigiDNA.iMazingProfileEditor"
+                "com.imazing.profileeditor"
             ])
             let lowProfile = Self.installedApp(bundleIDs: [
-                "nz.co.ninxsoft.LowProfile",
-                "com.ninxsoft.LowProfile"
+                "com.ninxsoft.lowprofile",
+                "com.ninxsoft.LowProfile",
+                "nz.co.ninxsoft.LowProfile"
             ])
 
             if let imazing {
@@ -170,7 +172,6 @@ private struct ProfileEditor: View {
         } label: {
             Label("Open With", systemImage: "arrow.up.forward.app")
         }
-        .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Open this .mobileconfig in iMazing Profile Editor, Low Profile, or another app")
     }
