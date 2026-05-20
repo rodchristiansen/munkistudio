@@ -369,12 +369,23 @@ private struct OverviewTab: View {
         VStack(alignment: .leading, spacing: 0) {
             CardSectionHeader("File")
             VStack(alignment: .leading, spacing: 10) {
-                LabelledField("Path") {
-                    Text(fileURL.path)
-                        .font(.system(.callout, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                LabelledField("Path", alignment: .top) {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(fileURL.path)
+                            .font(.system(.callout, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Reveal in Finder")
+                    }
                 }
                 LabelledField("Format") {
                     Picker("", selection: $format) {
