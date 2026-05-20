@@ -8,6 +8,13 @@ struct PromoterUpcomingSection: View {
     let busyURL: URL?
     let hiddenCatalogs: Set<String>
     let pkginfoCount: Int
+    /// Set of catalog names found in any rule's `promote_from`, surfaced
+    /// in the diagnostic so the user can compare against pkginfo catalogs.
+    let knownPromoteFromSets: [[String]]
+    /// First few pkginfo catalog signatures (deduped), shown when count
+    /// > 0 so the user can see why no rule matches.
+    let pkginfoCatalogSamples: [[String]]
+    let repositoryPath: String?
     let onPromote: (PromotionCandidate) -> Void
     let onDefer: (PromotionCandidate) -> Void
 
@@ -62,20 +69,45 @@ struct PromoterUpcomingSection: View {
     /// or rules exist but no pkginfo's catalog set matches a rule's
     /// `promote_from`.
     private var diagnosticPanel: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("No pkginfos match any current promoter rule.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if pkginfoCount == 0 {
-                Label("0 pkginfos loaded from the open repository — open the folder containing pkgsinfo/ to populate the candidate list.", systemImage: "info.circle")
+                Label("0 pkginfos loaded from the open repository.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .labelStyle(.titleAndIcon)
+                if let repositoryPath {
+                    Text("Open repo path: \(repositoryPath)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                }
+                Text("Expected pkginfo files at <repo>/pkgsinfo/ — open the folder containing pkgsinfo/.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             } else {
                 Label("\(pkginfoCount) pkginfo\(pkginfoCount == 1 ? "" : "s") loaded but none match any rule's `promote_from` set.", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .labelStyle(.titleAndIcon)
+                if !knownPromoteFromSets.isEmpty {
+                    Text("Rules expect:").font(.caption2).foregroundStyle(.tertiary)
+                    ForEach(Array(knownPromoteFromSets.enumerated()), id: \.offset) { _, set in
+                        Text("  • [\(set.joined(separator: ", "))]")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                if !pkginfoCatalogSamples.isEmpty {
+                    Text("Sample pkginfo catalogs:").font(.caption2).foregroundStyle(.tertiary)
+                    ForEach(Array(pkginfoCatalogSamples.enumerated()), id: \.offset) { _, set in
+                        Text("  • [\(set.joined(separator: ", "))]")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

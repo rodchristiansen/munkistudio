@@ -363,13 +363,35 @@ public struct FilePromoterService: PromoterService {
               output.exitCode == 0 else {
             return []
         }
+        // `git show --name-only` emits paths relative to the GIT root,
+        // which may not be the Munki repo root (e.g. when the Munki repo
+        // is nested as `<git-root>/deployment/`). Append to the git root
+        // so the resulting absolute URLs match `PkginfoRecord.fileURL`
+        // exactly — otherwise every recordsByURL lookup misses and the
+        // delta computation's pkgsinfo filter rejects every row.
+        let base = await gitRootURL(workingDir: repository.rootURL) ?? repository.rootURL
         var urls: [URL] = []
         for raw in output.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
             let path = String(raw).trimmingCharacters(in: .whitespaces)
             guard !path.isEmpty else { continue }
-            urls.append(repository.rootURL.appending(path: path))
+            urls.append(base.appending(path: path))
         }
         return urls
+    }
+
+    /// Resolve the git repository root containing `workingDir`. Returns
+    /// `nil` if `workingDir` isn't inside a git tree at all.
+    fileprivate func gitRootURL(workingDir: URL) async -> URL? {
+        guard let output = try? await ProcessRunner.run(
+            gitURL,
+            arguments: ["rev-parse", "--show-toplevel"],
+            in: workingDir
+        ), output.exitCode == 0 else {
+            return nil
+        }
+        let trimmed = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(fileURLWithPath: trimmed)
     }
 
     /// Read pkginfo data at a specific commit (`git show <commit>:<path>`)
@@ -400,20 +422,26 @@ public struct FilePromoterService: PromoterService {
         commit: String,
         paths: [URL]
     ) async -> [PromotionDelta] {
-        let pkgsinfoRel = relativePath(repository.pkgsinfoURL, base: repository.rootURL) ?? "pkgsinfo"
+        // Path comparisons happen against the git root so the same
+        // logic works for both standard Munki layouts (`<repoRoot>/pkgsinfo`
+        // == `<gitRoot>/pkgsinfo`) and nested layouts where the Munki
+        // root is below the git root (e.g. `<gitRoot>/deployment/pkgsinfo`).
+        let gitRoot = await gitRootURL(workingDir: repository.rootURL) ?? repository.rootURL
+        let pkgsinfoRel = relativePath(repository.pkgsinfoURL, base: gitRoot) ?? "pkgsinfo"
         let candidates = paths
             .filter { url in
-                (relativePath(url, base: repository.rootURL) ?? url.lastPathComponent)
+                (relativePath(url, base: gitRoot) ?? url.lastPathComponent)
                     .hasPrefix(pkgsinfoRel)
             }
             .prefix(Self.maxFilesPerCommit)
         guard !candidates.isEmpty else { return [] }
         let repo = repository
+        let root = gitRoot
         let captured = self
         return await withTaskGroup(of: (Int, PromotionDelta?).self) { group in
             for (index, url) in candidates.enumerated() {
                 group.addTask {
-                    let rel = captured.relativePath(url, base: repo.rootURL) ?? url.lastPathComponent
+                    let rel = captured.relativePath(url, base: root) ?? url.lastPathComponent
                     async let after = captured.pkginfoSnapshotAtCommit(in: repo, commit: commit, path: rel)
                     async let before = captured.pkginfoSnapshotAtCommit(in: repo, commit: "\(commit)~1", path: rel)
                     let (afterSnap, beforeSnap) = await (after, before)

@@ -3,24 +3,21 @@ import AppKit
 import Core
 import Infra
 
-/// Promoter tab — preview of AutoPkg imports, upcoming promotions, and
-/// promoter history. The tab is opt-in; visibility is gated on
-/// ``AppSettings.enablePromoterTab`` and on the user having configured an
-/// AutoPkg deployment folder (where `promoter.yml` lives).
+/// Promoter tab — three side-by-side columns (Imports / Upcoming /
+/// History) over the same `PromoterStore`. Config-style affordances
+/// (Promotion Rules, AutoPkg Recipes) live in the toolbar and open
+/// modal sheets so they don't crowd the data columns.
 ///
-/// Five tabs under a single content area:
-/// - Upcoming — promotions tracked by the rules, with approve / promote
-///   early / defer actions per item.
-/// - Imports — recent AutoPkg import commits with version + catalogs.
-/// - History — promoter commits with per-item `before → after` deltas.
-/// - Rules — the raw `promoter.yml` editor.
-/// - Recipe List — the AutoPkg `recipe_list.yaml` / `.plist` editor.
+/// The tab is opt-in; visibility is gated on
+/// ``AppSettings.enablePromoterTab`` and on the user having configured
+/// an AutoPkg deployment folder.
 struct PromoterView: View {
     @Environment(RepositoryStore.self) private var store
     @Environment(AppSettings.self) private var settings
-    @State private var model = PromoterModel()
+    @Environment(PromoterStore.self) private var promoterStore
     @State private var pendingEarly: PromotionCandidate?
-    @State private var section: PromoterSection = .upcoming
+    @State private var showRulesSheet = false
+    @State private var showRecipesSheet = false
 
     var body: some View {
         Group {
@@ -37,11 +34,37 @@ struct PromoterView: View {
             }
         }
         .navigationTitle("Promoter")
-        .task(id: refreshKey) { await model.refresh(store: store, deploymentRoot: deploymentURL) }
         .toolbar { toolbarContent }
+        .sheet(isPresented: $showRulesSheet) {
+            sheetWrapper(title: "Promotion Rules") {
+                PromoterFileEditor(
+                    title: "promoter.yml",
+                    fileURL: deploymentURL.appending(path: "promoter.yml"),
+                    supportedExtensions: ["yml", "yaml"],
+                    onSaved: {
+                        Task {
+                            await promoterStore.refresh(
+                                store: store,
+                                deploymentRoot: deploymentURL
+                            )
+                        }
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showRecipesSheet) {
+            sheetWrapper(title: "AutoPkg Recipes") {
+                PromoterFileEditor(
+                    title: "recipe_list",
+                    fileURL: recipeListURL,
+                    supportedExtensions: ["yaml", "yml", "plist"],
+                    onSaved: nil
+                )
+            }
+        }
         .alert("Promote Early?", isPresented: earlyPresented, presenting: pendingEarly) { candidate in
             Button("Promote Now") {
-                Task { await model.apply(.promote(candidate), store: store) }
+                Task { await promoterStore.apply(.promote(candidate), store: store) }
             }
             Button("Cancel", role: .cancel) {}
         } message: { candidate in
@@ -49,27 +72,40 @@ struct PromoterView: View {
             Text("\(candidate.pkgName) \(candidate.version ?? "") is \(days) day\(days == 1 ? "" : "s") short of the \(candidate.requiredDays)-day window for \"\(candidate.ruleName)\". Promote anyway?")
         }
         .alert("Promoter Action Failed", isPresented: errorPresented) {
-            Button("OK", role: .cancel) { model.errorMessage = nil }
+            Button("OK", role: .cancel) { promoterStore.errorMessage = nil }
         } message: {
-            Text(model.errorMessage ?? "")
+            Text(promoterStore.errorMessage ?? "")
         }
     }
 
-    // MARK: Header chrome
+    // MARK: Toolbar
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { showRulesSheet = true } label: {
+                Label("Promotion Rules", systemImage: "list.bullet.rectangle")
+            }
+            .help("View and edit promoter.yml")
+            Button { showRecipesSheet = true } label: {
+                Label("AutoPkg Recipes", systemImage: "doc.text")
+            }
+            .help("View and edit recipe_list (YAML or plist)")
             Button {
-                Task { await model.refresh(store: store, deploymentRoot: deploymentURL) }
+                Task {
+                    await promoterStore.refresh(
+                        store: store,
+                        deploymentRoot: deploymentURL
+                    )
+                }
             } label: {
-                if model.loading {
+                if promoterStore.loading {
                     ProgressView().controlSize(.small)
                 } else {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
             }
-            .disabled(model.loading || deploymentPath.isEmpty)
+            .disabled(promoterStore.loading || deploymentPath.isEmpty)
             .help("Re-read promoter.yml and refresh the imports / candidates / history feeds")
         }
     }
@@ -77,115 +113,103 @@ struct PromoterView: View {
     // MARK: Content
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            summaryHeader
-            Picker("Section", selection: $section) {
-                ForEach(PromoterSection.allCases) { section in
-                    Label(section.title, systemImage: section.systemImage)
-                        .tag(section)
+        VStack(spacing: 0) {
+            if promoterStore.loading {
+                Label("Loading promoter data…", systemImage: "arrow.clockwise")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color(nsColor: .controlBackgroundColor), in: .capsule)
+                    .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1))
+                    .padding(.top, 8)
+            }
+            HSplitView {
+                column(title: "Imports", systemImage: "square.and.arrow.down", count: promoterStore.snapshot.imports.count) {
+                    PromoterImportsSection(
+                        imports: promoterStore.snapshot.imports,
+                        hiddenCatalogs: hiddenCatalogs
+                    )
+                }
+                column(title: "Upcoming", systemImage: "calendar.badge.clock", count: promoterStore.snapshot.candidates.count) {
+                    PromoterUpcomingSection(
+                        candidates: promoterStore.snapshot.candidates,
+                        busyURL: promoterStore.busyURL,
+                        hiddenCatalogs: hiddenCatalogs,
+                        pkginfoCount: store.snapshot.pkginfos.count,
+                        knownPromoteFromSets: promoterStore.snapshot.config.rules.map { $0.promoteFrom },
+                        pkginfoCatalogSamples: catalogSamples,
+                        repositoryPath: store.repository?.rootURL.path,
+                        onPromote: handlePromote,
+                        onDefer: { candidate in
+                            Task { await promoterStore.apply(.defer_(candidate), store: store) }
+                        }
+                    )
+                }
+                column(title: "History", systemImage: "clock.arrow.circlepath", count: promoterStore.snapshot.history.count) {
+                    PromoterHistorySection(
+                        entries: promoterStore.snapshot.history,
+                        hiddenCatalogs: hiddenCatalogs
+                    )
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            sectionContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .top) {
-                    if model.loading {
-                        Label("Loading promoter data…", systemImage: "arrow.clockwise")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color(nsColor: .controlBackgroundColor), in: .capsule)
-                            .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1))
-                            .padding(.top, 6)
-                    }
-                }
         }
-        .padding(16)
     }
 
+    /// One scrollable column wrapped in a header strip. Each column is
+    /// independently resizable via the `HSplitView` divider so the user
+    /// can give whichever column they're focused on more room.
     @ViewBuilder
-    private var sectionContent: some View {
-        switch section {
-        case .upcoming:
-            ScrollView {
-                PromoterUpcomingSection(
-                    candidates: model.snapshot.candidates,
-                    busyURL: model.busyURL,
-                    hiddenCatalogs: hiddenCatalogs,
-                    pkginfoCount: store.snapshot.pkginfos.count,
-                    onPromote: handlePromote,
-                    onDefer: { candidate in
-                        Task { await model.apply(.defer_(candidate), store: store) }
-                    }
-                )
-                .padding(.vertical, 4)
+    private func column<Content: View>(
+        title: String,
+        systemImage: String,
+        count: Int,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.tint)
+                Text(title).font(.headline)
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
-        case .imports:
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
             ScrollView {
-                PromoterImportsSection(
-                    imports: model.snapshot.imports,
-                    hiddenCatalogs: hiddenCatalogs
-                )
-                .padding(.vertical, 4)
+                content()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
             }
-        case .history:
-            ScrollView {
-                PromoterHistorySection(
-                    entries: model.snapshot.history,
-                    hiddenCatalogs: hiddenCatalogs
-                )
-                .padding(.vertical, 4)
-            }
-        case .rules:
-            PromoterFileEditor(
-                title: "promoter.yml",
-                fileURL: deploymentURL.appending(path: "promoter.yml"),
-                supportedExtensions: ["yml", "yaml"],
-                onSaved: {
-                    Task { await model.refresh(store: store, deploymentRoot: deploymentURL) }
+        }
+        .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Modal sheet chrome shared by both editors.
+    @ViewBuilder
+    private func sheetWrapper<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title).font(.headline)
+                Spacer()
+                Button("Done") {
+                    showRulesSheet = false
+                    showRecipesSheet = false
                 }
-            )
-        case .recipeList:
-            PromoterFileEditor(
-                title: "recipe_list",
-                fileURL: recipeListURL,
-                supportedExtensions: ["yaml", "yml", "plist"],
-                onSaved: nil
-            )
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
+            content()
         }
-    }
-
-    private var summaryHeader: some View {
-        let candidates = model.snapshot.candidates
-        let eligibleCount = candidates.filter { $0.isEligible() }.count
-        return HStack(spacing: 16) {
-            statTile(label: "Eligible now", value: "\(eligibleCount)", icon: "checkmark.seal.fill", tint: .green)
-            statTile(label: "Tracked", value: "\(candidates.count)", icon: "clock.arrow.circlepath", tint: .blue)
-            statTile(label: "Recent imports", value: "\(model.snapshot.imports.count)", icon: "square.and.arrow.down", tint: .indigo)
-            statTile(label: "Rules", value: "\(model.snapshot.config.rules.count)", icon: "list.bullet.rectangle", tint: .secondary)
-            Spacer()
-        }
-    }
-
-    private func statTile(label: String, value: String, icon: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(label, systemImage: icon)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .labelStyle(.titleAndIcon)
-            Text(value)
-                .font(.title2.weight(.semibold).monospacedDigit())
-                .foregroundStyle(tint == .secondary ? AnyShapeStyle(Color.primary) : AnyShapeStyle(tint))
-        }
-        .padding(12)
-        .frame(minWidth: 130, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: .rect(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-        )
+        .frame(minWidth: 720, minHeight: 520)
     }
 
     // MARK: Empty states
@@ -204,7 +228,7 @@ struct PromoterView: View {
                 .frame(maxWidth: 460)
             Button("Choose Folder…") { chooseDeploymentFolder() }
                 .buttonStyle(.borderedProminent)
-            Text("You can change this any time in Settings → Features.")
+            Text("This is independent of your Munki repository — you can change it any time in Settings → Features.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -215,7 +239,7 @@ struct PromoterView: View {
 
     private func handlePromote(_ candidate: PromotionCandidate) {
         if candidate.isEligible() {
-            Task { await model.apply(.promote(candidate), store: store) }
+            Task { await promoterStore.apply(.promote(candidate), store: store) }
         } else {
             pendingEarly = candidate
         }
@@ -228,7 +252,7 @@ struct PromoterView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
-        panel.message = "Select the AutoPkg deployment folder containing promoter.yml."
+        panel.message = "Select the AutoPkg deployment folder containing promoter.yml. This is independent of your Munki repository folder."
         if panel.runModal() == .OK, let url = panel.url {
             bindable.autopkgDeploymentPath = url.path
         }
@@ -244,8 +268,8 @@ struct PromoterView: View {
         URL(fileURLWithPath: deploymentPath)
     }
 
-    /// Resolve the recipe_list file. AutoPkg accepts either YAML or plist
-    /// — prefer the YAML names since the user's fork supports them, but
+    /// Resolve the recipe_list file. AutoPkg accepts either YAML or
+    /// plist — prefer YAML names since the user's fork supports them,
     /// fall back to the legacy `.plist` if that's what exists on disk.
     private var recipeListURL: URL {
         let candidates = ["recipe_list.yaml", "recipe_list.yml", "recipe_list.plist"]
@@ -262,12 +286,21 @@ struct PromoterView: View {
         settings.promoterHiddenCatalogsSet
     }
 
-    /// Recompute whenever the user reconfigures the deployment path, opens
-    /// a different repo, or the pkginfo snapshot changes (a save just
-    /// happened).
-    private var refreshKey: String {
-        let repoPath = store.repository?.rootURL.path ?? "-"
-        return repoPath + "|" + deploymentPath + "|" + String(store.snapshot.pkginfos.count)
+    /// Up to 5 distinct catalog signatures from the loaded pkginfos —
+    /// surfaced in the diagnostic so the user can eyeball them against
+    /// the rules' `promote_from` sets.
+    private var catalogSamples: [[String]] {
+        var seen: Set<String> = []
+        var result: [[String]] = []
+        for record in store.snapshot.pkginfos {
+            let catalogs = record.pkginfo.catalogs ?? []
+            let key = catalogs.joined(separator: "\u{1F}")
+            if seen.insert(key).inserted {
+                result.append(catalogs)
+                if result.count >= 5 { break }
+            }
+        }
+        return result
     }
 
     private var earlyPresented: Binding<Bool> {
@@ -279,111 +312,9 @@ struct PromoterView: View {
 
     private var errorPresented: Binding<Bool> {
         Binding(
-            get: { model.errorMessage != nil },
-            set: { if !$0 { model.errorMessage = nil } }
+            get: { promoterStore.errorMessage != nil },
+            set: { if !$0 { promoterStore.errorMessage = nil } }
         )
-    }
-}
-
-/// Tabs offered by the Promoter view. The order matters — Upcoming
-/// first because it's the action surface; configuration tabs sit at
-/// the trailing end.
-enum PromoterSection: String, CaseIterable, Identifiable, Hashable {
-    case upcoming, imports, history, rules, recipeList
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .upcoming: "Upcoming"
-        case .imports: "Imports"
-        case .history: "History"
-        case .rules: "Rules"
-        case .recipeList: "Recipe List"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .upcoming: "calendar.badge.clock"
-        case .imports: "square.and.arrow.down"
-        case .history: "clock.arrow.circlepath"
-        case .rules: "list.bullet.rectangle"
-        case .recipeList: "doc.text"
-        }
-    }
-}
-
-/// View-local observable model. Owns the latest snapshot, the loading
-/// flag, the per-row busy URL, and any user-surfaced error string.
-@Observable
-@MainActor
-final class PromoterModel {
-    var snapshot: PromoterSnapshot = .empty
-    var loading: Bool = false
-    var busyURL: URL?
-    var errorMessage: String?
-
-    enum Action {
-        case promote(PromotionCandidate)
-        case defer_(PromotionCandidate)
-    }
-
-    func refresh(store: RepositoryStore, deploymentRoot: URL) async {
-        guard let repo = store.repository else {
-            snapshot = .empty
-            return
-        }
-        loading = true
-        defer { loading = false }
-        do {
-            snapshot = try await store.services.promoter.snapshot(
-                repository: repo,
-                deploymentRoot: deploymentRoot,
-                pkginfos: store.snapshot.pkginfos
-            )
-        } catch {
-            snapshot = .empty
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func apply(_ action: Action, store: RepositoryStore) async {
-        let candidate: PromotionCandidate = {
-            switch action {
-            case .promote(let c): return c
-            case .defer_(let c): return c
-            }
-        }()
-        busyURL = candidate.pkginfoURL
-        defer { busyURL = nil }
-        do {
-            let updated: PkginfoRecord
-            switch action {
-            case .promote(let c):
-                updated = try await store.services.promoter.promote(c, in: store.snapshot.pkginfos)
-            case .defer_(let c):
-                updated = try await store.services.promoter.defer_(c, in: store.snapshot.pkginfos)
-            }
-            store.upsert(updated)
-            // Recompute candidates against the new pkginfo state — no
-            // need to re-shell git for imports / history, since neither
-            // changed.
-            let config = snapshot.config
-            let recomputed = FilePromoterService.candidates(
-                from: store.snapshot.pkginfos,
-                config: config,
-                now: Date()
-            )
-            snapshot = PromoterSnapshot(
-                config: config,
-                imports: snapshot.imports,
-                candidates: recomputed,
-                history: snapshot.history
-            )
-        } catch {
-            errorMessage = error.localizedDescription
-        }
     }
 }
 

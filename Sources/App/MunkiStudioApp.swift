@@ -10,6 +10,7 @@ import Infra
 struct MunkiStudioApp: SwiftUI.App {
     @State private var store: RepositoryStore
     @State private var settings = AppSettings()
+    @State private var promoterStore = PromoterStore()
 
     init() {
         let packages = FilePackageService()
@@ -45,7 +46,18 @@ struct MunkiStudioApp: SwiftUI.App {
             ContentView()
                 .environment(store)
                 .environment(settings)
+                .environment(promoterStore)
                 .frame(minWidth: 1100, minHeight: 700)
+                .task(id: promoterRefreshKey) {
+                    guard settings.enablePromoterTab else {
+                        promoterStore.snapshot = .empty
+                        return
+                    }
+                    await promoterStore.refresh(
+                        store: store,
+                        deploymentRoot: promoterDeploymentURL
+                    )
+                }
         }
         .commands {
             MunkiStudioCommands(store: store)
@@ -55,7 +67,24 @@ struct MunkiStudioApp: SwiftUI.App {
             SettingsView()
                 .environment(settings)
                 .environment(store)
+                .environment(promoterStore)
         }
+    }
+
+    /// Re-run the promoter refresh whenever any input changes: the
+    /// repository, deployment path, or the pkginfo count (a save just
+    /// landed or the repo finished loading).
+    private var promoterRefreshKey: String {
+        let repoPath = store.repository?.rootURL.path ?? "-"
+        let deployment = settings.autopkgDeploymentPath
+        let enabled = settings.enablePromoterTab ? "1" : "0"
+        return "\(enabled)|\(repoPath)|\(deployment)|\(store.snapshot.pkginfos.count)"
+    }
+
+    private var promoterDeploymentURL: URL? {
+        let path = settings.autopkgDeploymentPath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
     }
 }
 
