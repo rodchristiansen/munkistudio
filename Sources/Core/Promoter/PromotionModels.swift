@@ -84,13 +84,14 @@ public struct AutoPkgImport: Sendable, Hashable, Identifiable {
 }
 
 /// One promoter run, derived from a `Promoter: …` git commit over the
-/// pkgsinfo subtree. The `affected` list is the pkginfo files touched
-/// by that commit.
+/// pkgsinfo subtree. The `deltas` list is the per-pkginfo catalog
+/// transition the commit applied — parsed from the commit diff so the
+/// history pane can show what was promoted and where.
 public struct PromotionHistoryEntry: Sendable, Hashable, Identifiable {
     public var commitHash: String
     public var date: Date
     public var subject: String
-    public var affected: [URL]
+    public var deltas: [PromotionDelta]
 
     public var id: String { commitHash }
 
@@ -98,12 +99,41 @@ public struct PromotionHistoryEntry: Sendable, Hashable, Identifiable {
         commitHash: String,
         date: Date,
         subject: String,
-        affected: [URL]
+        deltas: [PromotionDelta]
     ) {
         self.commitHash = commitHash
         self.date = date
         self.subject = subject
-        self.affected = affected
+        self.deltas = deltas
+    }
+}
+
+/// One pkginfo's catalog transition inside a promoter commit. `before`
+/// is the catalog list as of the parent commit; `after` is the list at
+/// this commit. Either may be empty (e.g. for a new file the promoter
+/// touched alongside an updated one), in which case the UI shows the
+/// non-empty side without an arrow.
+public struct PromotionDelta: Sendable, Hashable, Identifiable {
+    public var pkginfoURL: URL
+    public var pkgName: String
+    public var version: String?
+    public var before: [String]
+    public var after: [String]
+
+    public var id: String { pkginfoURL.path }
+
+    public init(
+        pkginfoURL: URL,
+        pkgName: String,
+        version: String?,
+        before: [String],
+        after: [String]
+    ) {
+        self.pkginfoURL = pkginfoURL
+        self.pkgName = pkgName
+        self.version = version
+        self.before = before
+        self.after = after
     }
 }
 

@@ -6,6 +6,7 @@ import Core
 struct PromoterUpcomingSection: View {
     let candidates: [PromotionCandidate]
     let busyURL: URL?
+    let hiddenCatalogs: Set<String>
     let onPromote: (PromotionCandidate) -> Void
     let onDefer: (PromotionCandidate) -> Void
 
@@ -20,6 +21,7 @@ struct PromoterUpcomingSection: View {
                         PromoterCandidateRow(
                             candidate: candidate,
                             busy: busyURL == candidate.pkginfoURL,
+                            hiddenCatalogs: hiddenCatalogs,
                             onPromote: { onPromote(candidate) },
                             onDefer: { onDefer(candidate) }
                         )
@@ -62,6 +64,7 @@ struct PromoterUpcomingSection: View {
 private struct PromoterCandidateRow: View {
     let candidate: PromotionCandidate
     let busy: Bool
+    let hiddenCatalogs: Set<String>
     let onPromote: () -> Void
     let onDefer: () -> Void
 
@@ -109,7 +112,11 @@ private struct PromoterCandidateRow: View {
     }
 
     private var catalogTransition: String {
-        candidate.currentCatalogs.joined(separator: ",") + " → " + candidate.targetCatalogs.joined(separator: ",")
+        let current = filteringHidden(candidate.currentCatalogs, hidden: hiddenCatalogs)
+        let target = filteringHidden(candidate.targetCatalogs, hidden: hiddenCatalogs)
+        let left = current.isEmpty ? "—" : current.joined(separator: ",")
+        let right = target.isEmpty ? "—" : target.joined(separator: ",")
+        return left + " → " + right
     }
 
     @ViewBuilder

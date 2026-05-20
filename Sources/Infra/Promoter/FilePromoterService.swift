@@ -218,9 +218,11 @@ public struct FilePromoterService: PromoterService {
 
     // MARK: Git feeds
 
-    /// Read promoter-relevant commits touching the pkgsinfo subtree.
-    /// Excludes the AutoPkg import commits — those are returned by
-    /// `autopkgImports(in:)`.
+    /// Read promoter-relevant commits touching the pkgsinfo subtree and
+    /// compute per-pkginfo `before`/`after` catalog deltas so the
+    /// history pane can show the actual transitions, not just file
+    /// counts. AutoPkg-import commits are filtered out here — they are
+    /// returned by ``autopkgImports(in:pkginfos:limit:)``.
     private func gitHistory(
         in repository: MunkiRepository,
         limit: Int
@@ -241,24 +243,25 @@ public struct FilePromoterService: PromoterService {
             let parts = line.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init)
             guard parts.count >= 3 else { continue }
             let subject = parts[2]
-            // Keep only the promoter commits — AutoPkg imports go in the
-            // imports feed and would otherwise clutter the history pane.
             guard subject.lowercased().hasPrefix("promoter") else { continue }
             guard let date = Self.parseISO8601(parts[1]) else { continue }
-            let affected = await affectedFiles(in: repository, commit: parts[0])
+            let touched = await affectedFiles(in: repository, commit: parts[0])
+            let deltas = await deltas(in: repository, commit: parts[0], paths: touched)
             entries.append(PromotionHistoryEntry(
                 commitHash: parts[0],
                 date: date,
                 subject: subject,
-                affected: affected
+                deltas: deltas
             ))
         }
         return entries
     }
 
     /// Read AutoPkg import commits and parse the pkginfo records they
-    /// touched. Each commit can introduce multiple pkginfo files; one
-    /// `AutoPkgImport` row is emitted per file.
+    /// touched. One ``AutoPkgImport`` row per touched file. When the
+    /// file no longer matches a current pkginfo (renamed / moved), we
+    /// parse the file body at the introducing commit so the row still
+    /// carries version + catalogs instead of falling back to "—".
     private func autopkgImports(
         in repository: MunkiRepository,
         pkginfos: [PkginfoRecord],
@@ -276,8 +279,6 @@ public struct FilePromoterService: PromoterService {
         let output = try await ProcessRunner.run(gitURL, arguments: args, in: repository.rootURL)
         guard output.exitCode == 0 else { return [] }
         var imports: [AutoPkgImport] = []
-        // Map URL → record so we can resolve each touched file back to
-        // its current name/version/catalogs without re-parsing.
         let recordsByURL = Dictionary(uniqueKeysWithValues: pkginfos.map { ($0.fileURL.standardizedFileURL.path, $0) })
         for line in output.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
             let parts = line.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init)
@@ -297,10 +298,20 @@ public struct FilePromoterService: PromoterService {
                         pkginfoURL: url,
                         catalogs: record.pkginfo.catalogs ?? []
                     ))
+                } else if let snapshot = await pkginfoSnapshotAtCommit(
+                    in: repository,
+                    commit: parts[0],
+                    path: relativePath(url, base: repository.rootURL) ?? url.lastPathComponent
+                ) {
+                    imports.append(AutoPkgImport(
+                        commitHash: parts[0],
+                        date: date,
+                        pkgName: snapshot.name ?? url.deletingPathExtension().lastPathComponent,
+                        version: snapshot.version,
+                        pkginfoURL: url,
+                        catalogs: snapshot.catalogs
+                    ))
                 } else {
-                    // File no longer exists in the repo (renamed,
-                    // deleted, or moved); still surface the row so the
-                    // history is honest, just without resolved metadata.
                     let bare = url.deletingPathExtension().lastPathComponent
                     imports.append(AutoPkgImport(
                         commitHash: parts[0],
@@ -330,6 +341,100 @@ public struct FilePromoterService: PromoterService {
             urls.append(repository.rootURL.appending(path: path))
         }
         return urls
+    }
+
+    /// Read pkginfo data at a specific commit (`git show <commit>:<path>`)
+    /// and return the catalog/name/version triple. `nil` when the path
+    /// doesn't exist in that commit (added, deleted, or renamed).
+    private func pkginfoSnapshotAtCommit(
+        in repository: MunkiRepository,
+        commit: String,
+        path: String
+    ) async -> PkginfoCatalogSnapshot? {
+        let args = ["show", "\(commit):\(path)"]
+        guard let output = try? await ProcessRunner.run(gitURL, arguments: args, in: repository.rootURL),
+              output.exitCode == 0 else {
+            return nil
+        }
+        return Self.parsePkginfoSnapshot(text: output.stdout, path: path)
+    }
+
+    /// Compute the catalog deltas for every pkginfo touched by a single
+    /// commit. Sequentially walks the file list because the
+    /// `Self`-isolation makes a `withTaskGroup` little gain here and the
+    /// list is typically small (a couple of files).
+    private func deltas(
+        in repository: MunkiRepository,
+        commit: String,
+        paths: [URL]
+    ) async -> [PromotionDelta] {
+        var deltas: [PromotionDelta] = []
+        for url in paths {
+            let rel = relativePath(url, base: repository.rootURL) ?? url.lastPathComponent
+            // Skip files outside the pkgsinfo subtree just in case a
+            // promoter commit touched something else (e.g. a tracking
+            // log alongside the pkginfo).
+            let pkgsinfoRel = relativePath(repository.pkgsinfoURL, base: repository.rootURL) ?? "pkgsinfo"
+            guard rel.hasPrefix(pkgsinfoRel) else { continue }
+            async let after = pkginfoSnapshotAtCommit(in: repository, commit: commit, path: rel)
+            async let before = pkginfoSnapshotAtCommit(in: repository, commit: "\(commit)~1", path: rel)
+            let (afterSnap, beforeSnap) = await (after, before)
+            let name = afterSnap?.name ?? beforeSnap?.name ?? url.deletingPathExtension().lastPathComponent
+            deltas.append(PromotionDelta(
+                pkginfoURL: url,
+                pkgName: name,
+                version: afterSnap?.version ?? beforeSnap?.version,
+                before: beforeSnap?.catalogs ?? [],
+                after: afterSnap?.catalogs ?? []
+            ))
+        }
+        return deltas
+    }
+
+    /// Tuple-ish snapshot of just the fields the Promoter UI needs from
+    /// a pkginfo at a point in time. Public so the App layer and tests
+    /// can reuse the parser without re-implementing it.
+    public struct PkginfoCatalogSnapshot: Sendable, Hashable {
+        public let name: String?
+        public let version: String?
+        public let catalogs: [String]
+
+        public init(name: String?, version: String?, catalogs: [String]) {
+            self.name = name
+            self.version = version
+            self.catalogs = catalogs
+        }
+    }
+
+    /// Extract catalogs/name/version from a pkginfo text payload.
+    /// Detects YAML vs. plist by file extension. Public so tests can
+    /// exercise both formats directly.
+    public static func parsePkginfoSnapshot(text: String, path: String) -> PkginfoCatalogSnapshot? {
+        let lower = path.lowercased()
+        if lower.hasSuffix(".yaml") || lower.hasSuffix(".yml") {
+            guard let object = try? Yams.load(yaml: text) as? [String: Any] else { return nil }
+            return PkginfoCatalogSnapshot(
+                name: object["name"] as? String,
+                version: Self.flexibleString(object["version"]),
+                catalogs: (object["catalogs"] as? [String]) ?? []
+            )
+        }
+        guard let data = text.data(using: .utf8),
+              let object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+            return nil
+        }
+        return PkginfoCatalogSnapshot(
+            name: object["name"] as? String,
+            version: Self.flexibleString(object["version"]),
+            catalogs: (object["catalogs"] as? [String]) ?? []
+        )
+    }
+
+    private static func flexibleString(_ any: Any?) -> String? {
+        if let string = any as? String { return string }
+        if let int = any as? Int { return String(int) }
+        if let double = any as? Double { return String(double) }
+        return nil
     }
 
     private func relativePath(_ url: URL, base: URL) -> String? {

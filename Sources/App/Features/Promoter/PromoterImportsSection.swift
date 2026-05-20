@@ -5,6 +5,7 @@ import Core
 /// with "AutoPkg import". One row per touched pkginfo file.
 struct PromoterImportsSection: View {
     let imports: [AutoPkgImport]
+    let hiddenCatalogs: Set<String>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -14,7 +15,7 @@ struct PromoterImportsSection: View {
                     emptyState
                 } else {
                     ForEach(Array(imports.enumerated()), id: \.element.id) { index, entry in
-                        ImportRow(entry: entry)
+                        ImportRow(entry: entry, hiddenCatalogs: hiddenCatalogs)
                         if index < imports.count - 1 { Divider() }
                     }
                 }
@@ -53,6 +54,7 @@ struct PromoterImportsSection: View {
 
 private struct ImportRow: View {
     let entry: AutoPkgImport
+    let hiddenCatalogs: Set<String>
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -60,6 +62,10 @@ private struct ImportRow: View {
         formatter.timeStyle = .short
         return formatter
     }()
+
+    private var visibleCatalogs: [String] {
+        filteringHidden(entry.catalogs, hidden: hiddenCatalogs)
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -74,10 +80,12 @@ private struct ImportRow: View {
                         Text(version).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
-                Text(entry.catalogs.isEmpty ? "—" : entry.catalogs.joined(separator: ", "))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                if !visibleCatalogs.isEmpty {
+                    Text(visibleCatalogs.joined(separator: ", "))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {

@@ -126,4 +126,42 @@ struct PromoterServiceTests {
         #expect(FilePromoterService.parseISO8601(fractional) != nil)
         #expect(FilePromoterService.parseISO8601("not a date") == nil)
     }
+
+    @Test("parsePkginfoSnapshot reads catalogs from YAML and plist payloads")
+    func parsesPkginfoSnapshots() {
+        let yaml = """
+        name: Firefox
+        version: 126.0
+        catalogs:
+          - Development
+          - Testing
+          - Staging
+        """
+        let yamlSnapshot = FilePromoterService.parsePkginfoSnapshot(text: yaml, path: "pkgsinfo/Firefox-126.0.yaml")
+        #expect(yamlSnapshot?.name == "Firefox")
+        #expect(yamlSnapshot?.version == "126.0")
+        #expect(yamlSnapshot?.catalogs == ["Development", "Testing", "Staging"])
+
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>name</key><string>Slack</string>
+            <key>version</key><string>4.0.0</string>
+            <key>catalogs</key>
+            <array>
+                <string>Testing</string>
+                <string>Staging</string>
+            </array>
+        </dict>
+        </plist>
+        """
+        let plistSnapshot = FilePromoterService.parsePkginfoSnapshot(text: plist, path: "pkgsinfo/Slack-4.0.plist")
+        #expect(plistSnapshot?.name == "Slack")
+        #expect(plistSnapshot?.version == "4.0.0")
+        #expect(plistSnapshot?.catalogs == ["Testing", "Staging"])
+
+        #expect(FilePromoterService.parsePkginfoSnapshot(text: "{{{", path: "x.yaml") == nil)
+    }
 }

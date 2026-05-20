@@ -2,9 +2,12 @@ import SwiftUI
 import Core
 
 /// Promotion history — git commits whose subject begins with "Promoter".
-/// One row per commit; the affected-file count is the headline number.
+/// Each entry expands inline into one sub-row per touched pkginfo with
+/// its `before → after` catalog transition, so users can scan exactly
+/// what was promoted from where to where.
 struct PromoterHistorySection: View {
     let entries: [PromotionHistoryEntry]
+    let hiddenCatalogs: Set<String>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -14,7 +17,7 @@ struct PromoterHistorySection: View {
                     emptyState
                 } else {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                        HistoryRow(entry: entry)
+                        HistoryRow(entry: entry, hiddenCatalogs: hiddenCatalogs)
                         if index < entries.count - 1 { Divider() }
                     }
                 }
@@ -53,6 +56,7 @@ struct PromoterHistorySection: View {
 
 private struct HistoryRow: View {
     let entry: PromotionHistoryEntry
+    let hiddenCatalogs: Set<String>
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -62,31 +66,94 @@ private struct HistoryRow: View {
     }()
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "arrow.up.forward")
-                .foregroundStyle(.green)
-                .imageScale(.small)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.subject)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                Text("\(entry.affected.count) file\(entry.affected.count == 1 ? "" : "s") changed")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "arrow.up.forward")
+                    .foregroundStyle(.green)
+                    .imageScale(.small)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.subject)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                    Text("\(entry.deltas.count) file\(entry.deltas.count == 1 ? "" : "s") changed")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(Self.dateFormatter.string(from: entry.date))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text(String(entry.commitHash.prefix(7)))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(Self.dateFormatter.string(from: entry.date))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Text(String(entry.commitHash.prefix(7)))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
+            if !entry.deltas.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(entry.deltas.prefix(8)) { delta in
+                        DeltaRow(delta: delta, hiddenCatalogs: hiddenCatalogs)
+                    }
+                    if entry.deltas.count > 8 {
+                        Text("…and \(entry.deltas.count - 8) more")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 32)
+                    }
+                }
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+}
+
+private struct DeltaRow: View {
+    let delta: PromotionDelta
+    let hiddenCatalogs: Set<String>
+
+    private var before: [String] {
+        filteringHidden(delta.before, hidden: hiddenCatalogs)
+    }
+
+    private var after: [String] {
+        filteringHidden(delta.after, hidden: hiddenCatalogs)
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Color.clear.frame(width: 26)
+            HStack(spacing: 4) {
+                Text(delta.pkgName)
+                    .font(.caption.weight(.medium))
+                if let version = delta.version {
+                    Text(version)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(transitionText)
+                .font(.caption.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Render the transition. `[]` on either side is omitted gracefully —
+    /// an added file shows as `→ Testing,Staging` and a deleted file
+    /// shows as `Testing,Staging →` without misleading empty arrows.
+    private var transitionText: String {
+        let left = before.isEmpty ? "" : before.joined(separator: ",")
+        let right = after.isEmpty ? "" : after.joined(separator: ",")
+        if left.isEmpty && right.isEmpty {
+            return ""
+        }
+        if left == right {
+            return "(metadata only)"
+        }
+        return "(\(left) → \(right))"
     }
 }

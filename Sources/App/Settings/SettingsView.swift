@@ -38,17 +38,20 @@ private struct FeatureSettingsView: View {
                     Button("Choose…") { chooseFolder(into: $settings.autopkgDeploymentPath) }
                 }
                 .disabled(!settings.enablePromoterTab)
+                TextField("Hidden catalogs", text: $settings.promoterHiddenCatalogs,
+                          prompt: Text("Comma-separated names to hide from display"))
+                    .disabled(!settings.enablePromoterTab)
             } header: {
                 Text("Promoter")
             } footer: {
-                Text("The Promoter tab shows a preview of recent AutoPkg imports, upcoming promotions, and promoter history — and lets you approve, anticipate, or defer individual items.")
+                Text("The Promoter tab shows a preview of recent AutoPkg imports, upcoming promotions, and promoter history — and lets you approve, anticipate, or defer individual items. \"Hidden catalogs\" suppresses catalog names from transition labels and stats without changing which catalogs the promoter actually writes to.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 220)
+        .frame(minHeight: 240)
     }
 
     private func chooseFolder(into binding: Binding<String>) {

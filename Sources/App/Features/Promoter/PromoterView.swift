@@ -8,14 +8,19 @@ import Infra
 /// ``AppSettings.enablePromoterTab`` and on the user having configured an
 /// AutoPkg deployment folder (where `promoter.yml` lives).
 ///
-/// The view is full-width — no separate detail column. Each of the three
-/// sections is a card; actions on individual candidates (Approve / Promote
-/// Early / Defer) live inline on the row.
+/// Five tabs under a single content area:
+/// - Upcoming — promotions tracked by the rules, with approve / promote
+///   early / defer actions per item.
+/// - Imports — recent AutoPkg import commits with version + catalogs.
+/// - History — promoter commits with per-item `before → after` deltas.
+/// - Rules — the raw `promoter.yml` editor.
+/// - Recipe List — the AutoPkg `recipe_list.yaml` / `.plist` editor.
 struct PromoterView: View {
     @Environment(RepositoryStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @State private var model = PromoterModel()
     @State private var pendingEarly: PromotionCandidate?
+    @State private var section: PromoterSection = .upcoming
 
     var body: some View {
         Group {
@@ -72,21 +77,70 @@ struct PromoterView: View {
     // MARK: Content
 
     private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                summaryHeader
+        VStack(alignment: .leading, spacing: 12) {
+            summaryHeader
+            Picker("Section", selection: $section) {
+                ForEach(PromoterSection.allCases) { section in
+                    Label(section.title, systemImage: section.systemImage)
+                        .tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            sectionContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(16)
+    }
+
+    @ViewBuilder
+    private var sectionContent: some View {
+        switch section {
+        case .upcoming:
+            ScrollView {
                 PromoterUpcomingSection(
                     candidates: model.snapshot.candidates,
                     busyURL: model.busyURL,
+                    hiddenCatalogs: hiddenCatalogs,
                     onPromote: handlePromote,
                     onDefer: { candidate in
                         Task { await model.apply(.defer_(candidate), store: store) }
                     }
                 )
-                PromoterImportsSection(imports: model.snapshot.imports)
-                PromoterHistorySection(entries: model.snapshot.history)
+                .padding(.vertical, 4)
             }
-            .padding(16)
+        case .imports:
+            ScrollView {
+                PromoterImportsSection(
+                    imports: model.snapshot.imports,
+                    hiddenCatalogs: hiddenCatalogs
+                )
+                .padding(.vertical, 4)
+            }
+        case .history:
+            ScrollView {
+                PromoterHistorySection(
+                    entries: model.snapshot.history,
+                    hiddenCatalogs: hiddenCatalogs
+                )
+                .padding(.vertical, 4)
+            }
+        case .rules:
+            PromoterFileEditor(
+                title: "promoter.yml",
+                fileURL: deploymentURL.appending(path: "promoter.yml"),
+                supportedExtensions: ["yml", "yaml"],
+                onSaved: {
+                    Task { await model.refresh(store: store, deploymentRoot: deploymentURL) }
+                }
+            )
+        case .recipeList:
+            PromoterFileEditor(
+                title: "recipe_list",
+                fileURL: recipeListURL,
+                supportedExtensions: ["yaml", "yml", "plist"],
+                onSaved: nil
+            )
         }
     }
 
@@ -177,6 +231,24 @@ struct PromoterView: View {
         URL(fileURLWithPath: deploymentPath)
     }
 
+    /// Resolve the recipe_list file. AutoPkg accepts either YAML or plist
+    /// — prefer the YAML names since the user's fork supports them, but
+    /// fall back to the legacy `.plist` if that's what exists on disk.
+    private var recipeListURL: URL {
+        let candidates = ["recipe_list.yaml", "recipe_list.yml", "recipe_list.plist"]
+        for name in candidates {
+            let url = deploymentURL.appending(path: name)
+            if FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return deploymentURL.appending(path: "recipe_list.yaml")
+    }
+
+    private var hiddenCatalogs: Set<String> {
+        settings.promoterHiddenCatalogsSet
+    }
+
     /// Recompute whenever the user reconfigures the deployment path, opens
     /// a different repo, or the pkginfo snapshot changes (a save just
     /// happened).
@@ -197,6 +269,35 @@ struct PromoterView: View {
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )
+    }
+}
+
+/// Tabs offered by the Promoter view. The order matters — Upcoming
+/// first because it's the action surface; configuration tabs sit at
+/// the trailing end.
+enum PromoterSection: String, CaseIterable, Identifiable, Hashable {
+    case upcoming, imports, history, rules, recipeList
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .upcoming: "Upcoming"
+        case .imports: "Imports"
+        case .history: "History"
+        case .rules: "Rules"
+        case .recipeList: "Recipe List"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .upcoming: "calendar.badge.clock"
+        case .imports: "square.and.arrow.down"
+        case .history: "clock.arrow.circlepath"
+        case .rules: "list.bullet.rectangle"
+        case .recipeList: "doc.text"
+        }
     }
 }
 
@@ -271,4 +372,11 @@ final class PromoterModel {
             errorMessage = error.localizedDescription
         }
     }
+}
+
+/// Helper for trimming hidden catalog names from a display list without
+/// touching the underlying data. Empty `hidden` returns the input as-is.
+func filteringHidden(_ catalogs: [String], hidden: Set<String>) -> [String] {
+    guard !hidden.isEmpty else { return catalogs }
+    return catalogs.filter { !hidden.contains($0) }
 }
