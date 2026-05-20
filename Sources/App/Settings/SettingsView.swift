@@ -48,10 +48,25 @@ private struct FeatureSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Enable Profiles tab", isOn: $settings.enableProfilesTab)
+                HStack {
+                    TextField("Profiles folder", text: $settings.profilesDirectoryPath,
+                              prompt: Text("Folder of .mobileconfig files"))
+                    Button("Choose…") { chooseFolder(into: $settings.profilesDirectoryPath) }
+                }
+                .disabled(!settings.enableProfilesTab)
+            } header: {
+                Text("Profiles")
+            } footer: {
+                Text("The Profiles tab lists every .mobileconfig under this folder, expanded by default, and opens an XML editor with live validation for each.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 240)
+        .frame(minHeight: 360)
     }
 
     private func chooseFolder(into binding: Binding<String>) {

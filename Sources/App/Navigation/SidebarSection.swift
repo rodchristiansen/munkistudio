@@ -8,6 +8,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
     case packages = "Packages"
     case manifests = "Manifests"
+    case profiles = "Profiles"
     case catalogs = "Catalogs"
     case dependencies = "Dependencies"
     case build = "Build"
@@ -23,6 +24,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
         case .dashboard: "rectangle.grid.2x2"
         case .packages: "shippingbox"
         case .manifests: "list.bullet.rectangle"
+        case .profiles: "doc.text"
         case .catalogs: "books.vertical"
         case .dependencies: "point.3.connected.trianglepath.dotted"
         case .build: "hammer"
@@ -40,7 +42,7 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     var prefersFullWidth: Bool {
         switch self {
         case .dashboard, .git, .importer, .promoter, .dependencies, .build, .clean: true
-        case .packages, .manifests, .catalogs: false
+        case .packages, .manifests, .profiles, .catalogs: false
         }
     }
 }

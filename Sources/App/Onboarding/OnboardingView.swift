@@ -12,7 +12,7 @@ struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
 
     enum Step: Int, CaseIterable {
-        case welcome, munkipkg, repository, projectsFolder, promoter
+        case welcome, munkipkg, repository, projectsFolder, promoter, profiles
     }
 
     @State private var step: Step = .welcome
@@ -46,6 +46,7 @@ struct OnboardingView: View {
         case .repository: repositoryStep
         case .projectsFolder: projectsFolderStep
         case .promoter: promoterStep
+        case .profiles: profilesStep
         }
     }
 
@@ -176,6 +177,26 @@ struct OnboardingView: View {
         }
     }
 
+    private var profilesStep: some View {
+        @Bindable var settings = settings
+        return onboardingStep(
+            icon: "doc.text",
+            title: "Profiles tab",
+            subtitle: "Optional — manage your folder of .mobileconfig profiles directly in MunkiStudio with an XML editor and live validation. Off by default."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Enable the Profiles tab", isOn: $settings.enableProfilesTab)
+                HStack {
+                    TextField("Profiles folder", text: $settings.profilesDirectoryPath,
+                              prompt: Text("Folder of .mobileconfig files"))
+                        .textFieldStyle(.roundedBorder)
+                    Button("Choose\u{2026}") { chooseProfilesFolder() }
+                }
+                .disabled(!settings.enableProfilesTab)
+            }
+        }
+    }
+
     @ViewBuilder
     private func onboardingStep<Content: View>(
         icon: String,
@@ -221,7 +242,7 @@ struct OnboardingView: View {
 
             Spacer()
 
-            if step == .promoter {
+            if step == .profiles {
                 Button("Get Started") { finish() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
@@ -293,6 +314,17 @@ struct OnboardingView: View {
         panel.message = "Select the AutoPkg deployment folder containing promoter.yml."
         if panel.runModal() == .OK, let url = panel.url {
             settings.autopkgDeploymentPath = url.path
+        }
+    }
+
+    private func chooseProfilesFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a folder of .mobileconfig profiles."
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.profilesDirectoryPath = url.path
         }
     }
 }

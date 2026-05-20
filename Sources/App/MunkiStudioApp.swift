@@ -11,6 +11,7 @@ struct MunkiStudioApp: SwiftUI.App {
     @State private var store: RepositoryStore
     @State private var settings = AppSettings()
     @State private var promoterStore = PromoterStore()
+    @State private var profileStore = ProfileStore()
 
     init() {
         let packages = FilePackageService()
@@ -47,6 +48,7 @@ struct MunkiStudioApp: SwiftUI.App {
                 .environment(store)
                 .environment(settings)
                 .environment(promoterStore)
+                .environment(profileStore)
                 .frame(minWidth: 1100, minHeight: 700)
                 .task(id: promoterRefreshKey) {
                     guard settings.enablePromoterTab else {
@@ -58,6 +60,9 @@ struct MunkiStudioApp: SwiftUI.App {
                         deploymentRoot: promoterDeploymentURL
                     )
                 }
+                .task(id: settings.profilesDirectoryPath) {
+                    await profileStore.reload(directory: profilesDirectoryURL)
+                }
         }
         .commands {
             MunkiStudioCommands(store: store)
@@ -68,6 +73,7 @@ struct MunkiStudioApp: SwiftUI.App {
                 .environment(settings)
                 .environment(store)
                 .environment(promoterStore)
+                .environment(profileStore)
         }
     }
 
@@ -84,6 +90,12 @@ struct MunkiStudioApp: SwiftUI.App {
     private var promoterDeploymentURL: URL? {
         let path = settings.autopkgDeploymentPath.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    private var profilesDirectoryURL: URL? {
+        let path = settings.profilesDirectoryPath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty, settings.enableProfilesTab else { return nil }
         return URL(fileURLWithPath: path)
     }
 }

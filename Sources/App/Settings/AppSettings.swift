@@ -75,6 +75,18 @@ final class AppSettings {
         )
     }
 
+    /// Show the Profiles tab. Off by default — opt-in from onboarding or
+    /// Settings → Features. Requires `profilesDirectoryPath` to point at
+    /// a folder of `.mobileconfig` files.
+    var enableProfilesTab: Bool {
+        didSet { defaults.set(enableProfilesTab, forKey: Key.enableProfilesTab) }
+    }
+
+    /// Folder of `.mobileconfig` profiles the Profiles tab scans.
+    var profilesDirectoryPath: String {
+        didSet { defaults.set(profilesDirectoryPath, forKey: Key.profilesDirectoryPath) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -97,6 +109,10 @@ final class AppSettings {
             defaults.string(forKey: Key.autopkgDeploymentPath) ?? ""
         self.promoterHiddenCatalogs =
             defaults.string(forKey: Key.promoterHiddenCatalogs) ?? ""
+        self.enableProfilesTab =
+            defaults.bool(forKey: Key.enableProfilesTab)
+        self.profilesDirectoryPath =
+            defaults.string(forKey: Key.profilesDirectoryPath) ?? ""
     }
 
     private enum Key {
@@ -109,5 +125,7 @@ final class AppSettings {
         static let enablePromoterTab = "MunkiStudio.settings.enablePromoterTab"
         static let autopkgDeploymentPath = "MunkiStudio.settings.autopkgDeploymentPath"
         static let promoterHiddenCatalogs = "MunkiStudio.settings.promoterHiddenCatalogs"
+        static let enableProfilesTab = "MunkiStudio.settings.enableProfilesTab"
+        static let profilesDirectoryPath = "MunkiStudio.settings.profilesDirectoryPath"
     }
 }

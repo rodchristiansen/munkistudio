@@ -187,6 +187,8 @@ private struct SidebarView: View {
                 return store.gitInfo != nil && settings.showGitSection
             case .promoter:
                 return settings.enablePromoterTab
+            case .profiles:
+                return settings.enableProfilesTab
             default:
                 return true
             }
@@ -220,6 +222,7 @@ private struct ContentColumn: View {
         case .dashboard: DashboardView()
         case .packages: PackagesListView()
         case .manifests: ManifestsListView()
+        case .profiles: ProfilesListView()
         case .catalogs: CatalogsListView()
         case .dependencies: EmptyView()
         case .build: EmptyView()
@@ -240,6 +243,7 @@ private struct DetailColumn: View {
         case .dashboard: DashboardDetailView()
         case .packages: PackageDetailView()
         case .manifests: ManifestDetailView()
+        case .profiles: ProfileDetailView()
         case .catalogs: CatalogDetailView()
         case .dependencies: EmptyView()
         case .build: EmptyView()
