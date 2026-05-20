@@ -58,7 +58,10 @@ private struct ProfileEditor: View {
     }
 
     private var issues: [MobileConfigValidator.ValidationIssue] {
-        MobileConfigValidator.validate(store.currentXML(for: record))
+        MobileConfigValidator.validate(
+            store.currentXML(for: record),
+            schema: store.payloadSchema
+        )
     }
 
     var body: some View {

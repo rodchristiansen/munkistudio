@@ -26,6 +26,9 @@ let package = Package(
         .target(
             name: "Infra",
             dependencies: ["Core", "Yams"],
+            resources: [
+                .copy("Profiles/Resources/Payloads.yaml"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
                 .enableUpcomingFeature("ExistentialAny"),

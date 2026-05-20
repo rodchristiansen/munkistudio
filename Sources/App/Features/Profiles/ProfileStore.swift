@@ -13,6 +13,13 @@ final class ProfileStore {
     /// Loaded profile records, sorted by path.
     var records: [ProfileRecord] = []
 
+    /// Cached payload schema vendored from ninxsoft/LowProfile.
+    /// Loaded once at store construction (~10ms parse for the
+    /// 670KB YAML) and reused for every lint pass. `nil` if the
+    /// bundled file is missing or doesn't parse; the validator
+    /// then skips schema-aware checks gracefully.
+    let payloadSchema: PayloadSchema?
+
     /// Selected record's `fileURL`. Nil shows the empty detail state.
     var selectedID: URL?
 
@@ -35,8 +42,12 @@ final class ProfileStore {
 
     let service: any ProfileService
 
-    init(service: any ProfileService = FileProfileService()) {
+    init(
+        service: any ProfileService = FileProfileService(),
+        payloadSchema: PayloadSchema? = PayloadSchemaLoader.loadBundled()
+    ) {
         self.service = service
+        self.payloadSchema = payloadSchema
     }
 
     // MARK: Loading

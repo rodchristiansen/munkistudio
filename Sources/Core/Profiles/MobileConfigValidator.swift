@@ -20,7 +20,10 @@ import Foundation
 /// per-MDM payload-type schemas; each vendor has its own and those would
 /// belong in a separate validator.
 public enum MobileConfigValidator {
-    public static func validate(_ xml: String) -> [ValidationIssue] {
+    public static func validate(
+        _ xml: String,
+        schema: PayloadSchema? = nil
+    ) -> [ValidationIssue] {
         guard let data = xml.data(using: .utf8) else {
             return [ValidationIssue(severity: .error, message: "File is not valid UTF-8.")]
         }
@@ -42,7 +45,42 @@ public enum MobileConfigValidator {
         if !combined.isEmpty {
             return combined.sorted { ($0.line ?? Int.max) < ($1.line ?? Int.max) }
         }
-        return plistStructuralIssues(data: data)
+        var structural = plistStructuralIssues(data: data)
+        if let schema {
+            structural.append(contentsOf: schemaIssues(data: data, schema: schema))
+        }
+        return structural
+    }
+
+    // MARK: Schema-driven warnings
+
+    /// Walk every payload in `PayloadContent` and flag deprecated
+    /// properties against the catalogue vendored from
+    /// ninxsoft/LowProfile. Unknown PayloadTypes degrade silently —
+    /// the YAML only catalogues Apple-defined payloads, and vendor
+    /// payloads (`com.example.mdm.foo`) routinely have keys we have
+    /// no way to model.
+    private static func schemaIssues(data: Data, schema: PayloadSchema) -> [ValidationIssue] {
+        guard let object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let dict = object as? [String: Any],
+              let payloads = dict["PayloadContent"] as? [[String: Any]] else {
+            return []
+        }
+        var issues: [ValidationIssue] = []
+        for (index, payload) in payloads.enumerated() {
+            guard let payloadType = payload["PayloadType"] as? String,
+                  let definition = schema.definition(for: payloadType) else { continue }
+            let index2 = definition.propertyIndex
+            for key in payload.keys {
+                if let property = index2[key], property.deprecated {
+                    issues.append(ValidationIssue(
+                        severity: .warning,
+                        message: "PayloadContent[\(index)]: \"\(key)\" is deprecated for \(payloadType)."
+                    ))
+                }
+            }
+        }
+        return issues
     }
 
     // MARK: Bracket heuristics

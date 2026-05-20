@@ -123,6 +123,52 @@ struct MobileConfigValidatorTests {
         }
     }
 
+    @Test("schema flags deprecated payload properties as warnings")
+    func deprecatedPropertyWarning() {
+        // Hand-built schema with one deprecated property on a fake
+        // payload type. The validator should add a warning that
+        // names the key + the payload type.
+        let schema = PayloadSchema(definitions: [
+            "com.example.Test": PayloadDefinition(
+                name: "Test",
+                properties: [
+                    PayloadProperty(name: "OldKey", typeName: "boolean", deprecated: true),
+                    PayloadProperty(name: "NewKey", typeName: "boolean")
+                ]
+            )
+        ])
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+            <key>PayloadType</key><string>Configuration</string>
+            <key>PayloadIdentifier</key><string>com.example.outer</string>
+            <key>PayloadUUID</key><string>4F3F8E7C-7A24-4F0E-92E1-0F0E0C0B0A09</string>
+            <key>PayloadVersion</key><integer>1</integer>
+            <key>PayloadDisplayName</key><string>Test</string>
+            <key>PayloadContent</key>
+            <array>
+                <dict>
+                    <key>PayloadType</key><string>com.example.Test</string>
+                    <key>PayloadIdentifier</key><string>com.example.inner</string>
+                    <key>PayloadUUID</key><string>00000000-0000-0000-0000-000000000001</string>
+                    <key>PayloadVersion</key><integer>1</integer>
+                    <key>OldKey</key><true/>
+                    <key>NewKey</key><true/>
+                </dict>
+            </array>
+        </dict>
+        </plist>
+        """
+        let issues = MobileConfigValidator.validate(xml, schema: schema)
+        let deprecation = issues.first {
+            $0.severity == .warning && $0.message.contains("OldKey") && $0.message.contains("deprecated")
+        }
+        #expect(deprecation != nil)
+        // Sanity check: the non-deprecated key doesn't trigger.
+        #expect(!issues.contains { $0.message.contains("NewKey") })
+    }
+
     private func minimalProfile() -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
