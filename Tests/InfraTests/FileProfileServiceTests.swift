@@ -15,9 +15,15 @@ struct FileProfileServiceTests {
         let expectedURL = tempDir.appending(path: "wifi").appending(path: "staff.mobileconfig")
         #expect(record.fileURL == expectedURL)
         #expect(FileManager.default.fileExists(atPath: expectedURL.path))
-        #expect(record.profile.identifier?.hasPrefix("com.munkistudio.profile.") == true)
+        // Create() derives the substitution name from the file's
+        // basename (without extension), so a nested "wifi/staff"
+        // becomes the identifier suffix "staff".
+        #expect(record.profile.identifier == "com.example.profiles.staff")
         #expect(record.profile.uuid != nil)
         #expect(record.profile.displayName == "staff")
+        // The template ships two example payloads, so a fresh profile
+        // arrives non-empty.
+        #expect(record.profile.payloadCount >= 1)
     }
 
     @Test("load walks subdirectories and surfaces every .mobileconfig")

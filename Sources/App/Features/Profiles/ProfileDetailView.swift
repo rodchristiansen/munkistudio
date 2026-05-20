@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import Core
 
 /// Right column of the Profiles tab — monospaced XML editor with a
@@ -37,8 +39,6 @@ private struct ProfileEditor: View {
     @Environment(ProfileStore.self) private var store
     let record: ProfileRecord
 
-    @State private var issuesExpanded = false
-
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -66,8 +66,7 @@ private struct ProfileEditor: View {
             header
             Divider()
             statusStrip
-            if issuesExpanded && !issues.isEmpty {
-                Divider()
+            if !issues.isEmpty {
                 issueList
             }
             Divider()
@@ -116,6 +115,7 @@ private struct ProfileEditor: View {
                 Label("Reveal", systemImage: "magnifyingglass")
             }
             .help("Reveal in Finder")
+            openWithMenu
             Button {
                 store.revertDraft(for: record)
             } label: {
@@ -135,35 +135,108 @@ private struct ProfileEditor: View {
         .padding(.vertical, 10)
     }
 
+    // MARK: Open With menu
+
+    /// Offer to open the profile in a dedicated editor. Detects each
+    /// candidate's installed bundle URL when the menu opens and either
+    /// hands the file to that app via `NSWorkspace` or, when the app is
+    /// missing, deep-links to its download page. An "Other…" entry
+    /// falls through to a standard NSOpenPanel chooser so the user can
+    /// pick any installed app the system suggests for `.mobileconfig`.
+    private var openWithMenu: some View {
+        Menu {
+            let imazing = Self.installedApp(bundleIDs: [
+                "com.dynamic-lynx.imazing-profile-editor",
+                "com.imazing.profileeditor",
+                "com.DigiDNA.iMazingProfileEditor"
+            ])
+            let lowProfile = Self.installedApp(bundleIDs: [
+                "nz.co.ninxsoft.LowProfile",
+                "com.ninxsoft.LowProfile"
+            ])
+
+            if let imazing {
+                Button("Open in iMazing Profile Editor") {
+                    open(in: imazing)
+                }
+            } else {
+                Button("Get iMazing Profile Editor…") {
+                    if let url = URL(string: "https://imazing.com/profile-editor") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+
+            if let lowProfile {
+                Button("Open in Low Profile") {
+                    open(in: lowProfile)
+                }
+            } else {
+                Button("Get Low Profile…") {
+                    if let url = URL(string: "https://github.com/ninxsoft/LowProfile") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+
+            Divider()
+            Button("Other Application…") { chooseAndOpen() }
+        } label: {
+            Label("Open With", systemImage: "arrow.up.forward.app")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Open this .mobileconfig in iMazing Profile Editor, Low Profile, or another app")
+    }
+
+    private func open(in appURL: URL) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open(
+            [record.fileURL],
+            withApplicationAt: appURL,
+            configuration: configuration
+        )
+    }
+
+    private func chooseAndOpen() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.title = "Choose Application"
+        if panel.runModal() == .OK, let appURL = panel.url {
+            open(in: appURL)
+        }
+    }
+
+    /// Walk a list of plausible bundle IDs and return the first one the
+    /// system can resolve to an installed app. Different distributions
+    /// of iMazing Profile Editor and Low Profile have shipped under
+    /// slightly different bundle IDs over time; trying a small list is
+    /// more robust than hardcoding one.
+    private static func installedApp(bundleIDs: [String]) -> URL? {
+        for id in bundleIDs {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                return url
+            }
+        }
+        return nil
+    }
+
     // MARK: Status strip
 
     private var statusStrip: some View {
         let errors = issues.filter { $0.severity == .error }.count
         let warnings = issues.filter { $0.severity == .warning }.count
-        return Button {
-            if !issues.isEmpty { issuesExpanded.toggle() }
-        } label: {
-            HStack(spacing: 8) {
-                statusIcon(errors: errors, warnings: warnings)
-                statusText(errors: errors, warnings: warnings)
-                if !issues.isEmpty {
-                    Text(issuesExpanded ? "hide details" : "show details")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                if !issues.isEmpty {
-                    Image(systemName: issuesExpanded ? "chevron.up" : "chevron.down")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .contentShape(.rect)
+        return HStack(spacing: 8) {
+            statusIcon(errors: errors, warnings: warnings)
+            statusText(errors: errors, warnings: warnings)
+            Spacer()
         }
-        .buttonStyle(.plain)
-        .disabled(issues.isEmpty)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -199,28 +272,26 @@ private struct ProfileEditor: View {
         }
     }
 
-    // MARK: Issue list (expanded)
+    // MARK: Issue list — always visible when issues exist
 
     private var issueList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(issues.enumerated()), id: \.element.id) { index, issue in
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(issues, id: \.id) { issue in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: issue.severity == .error ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
                         .foregroundStyle(issue.severity == .error ? Color.red : Color.orange)
                         .imageScale(.small)
-                        .frame(width: 16)
+                        .frame(width: 14)
                     Text(issue.displayMessage)
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 5)
-                if index < issues.count - 1 { Divider().padding(.leading, 16) }
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 
     // MARK: Editor

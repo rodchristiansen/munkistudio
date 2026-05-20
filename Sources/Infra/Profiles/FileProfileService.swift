@@ -230,28 +230,14 @@ public struct FileProfileService: ProfileService {
         return String(decoding: xmlData, as: UTF8.self)
     }
 
-    /// Minimal Configuration profile body — a profile with no payloads
-    /// is still valid; the user fills in the rest in the editor.
+    /// Render the starter body for a new profile. Built from the
+    /// embedded `MainProfileTemplate` — annotated example payloads,
+    /// matched UUIDs, and the user's name substituted into both the
+    /// outer PayloadDisplayName and the inner identifier scheme — so
+    /// new profiles arrive as a teaching artifact rather than an
+    /// empty Configuration dict.
     public static func starterXML(displayName: String) -> String {
-        let body: [String: Any] = [
-            "PayloadType": "Configuration",
-            "PayloadVersion": 1,
-            "PayloadIdentifier": "com.munkistudio.profile.\(UUID().uuidString.prefix(8))",
-            "PayloadUUID": UUID().uuidString,
-            "PayloadDisplayName": displayName,
-            "PayloadOrganization": "",
-            "PayloadDescription": "",
-            "PayloadScope": "System",
-            "PayloadContent": [[String: Any]]()
-        ]
-        guard let data = try? PropertyListSerialization.data(
-            fromPropertyList: body,
-            format: .xml,
-            options: 0
-        ) else {
-            return ""
-        }
-        return String(decoding: data, as: UTF8.self)
+        MainProfileTemplate.rendered(forName: displayName)
     }
 }
 
