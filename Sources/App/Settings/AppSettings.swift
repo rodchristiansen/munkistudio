@@ -41,6 +41,40 @@ final class AppSettings {
         didSet { defaults.set(munkipkgExecutablePath, forKey: Key.munkipkgExecutablePath) }
     }
 
+    /// Show the Promoter tab. Off by default — opt-in from onboarding or
+    /// Settings → Features. Requires `autopkgDeploymentPath` to point at
+    /// the directory holding `promoter.yml`.
+    var enablePromoterTab: Bool {
+        didSet { defaults.set(enablePromoterTab, forKey: Key.enablePromoterTab) }
+    }
+
+    /// Folder holding the AutoPkg deployment files (`promoter.yml`,
+    /// `recipe_list.yaml`, etc.). The Promoter tab reads `promoter.yml`
+    /// from here.
+    var autopkgDeploymentPath: String {
+        didSet { defaults.set(autopkgDeploymentPath, forKey: Key.autopkgDeploymentPath) }
+    }
+
+    /// Catalog names hidden from the Promoter tab's display. Many teams
+    /// have an internal staging-only catalog (e.g. "Development") that
+    /// every pkginfo always lives in — surfacing it in every transition
+    /// label is noise. Comma-separated; trimmed and lowercased on read.
+    var promoterHiddenCatalogs: String {
+        didSet { defaults.set(promoterHiddenCatalogs, forKey: Key.promoterHiddenCatalogs) }
+    }
+
+    /// Parsed view of ``promoterHiddenCatalogs`` for the UI. Empty set
+    /// when the field is empty so every catalog is shown by default —
+    /// nothing is hidden until the user opts in.
+    var promoterHiddenCatalogsSet: Set<String> {
+        Set(
+            promoterHiddenCatalogs
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        )
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -57,6 +91,12 @@ final class AppSettings {
             defaults.string(forKey: Key.munkipkgProjectsPath) ?? ""
         self.munkipkgExecutablePath =
             defaults.string(forKey: Key.munkipkgExecutablePath) ?? ""
+        self.enablePromoterTab =
+            defaults.bool(forKey: Key.enablePromoterTab)
+        self.autopkgDeploymentPath =
+            defaults.string(forKey: Key.autopkgDeploymentPath) ?? ""
+        self.promoterHiddenCatalogs =
+            defaults.string(forKey: Key.promoterHiddenCatalogs) ?? ""
     }
 
     private enum Key {
@@ -66,5 +106,8 @@ final class AppSettings {
         static let showGitSection = "MunkiStudio.settings.showGitSection"
         static let munkipkgProjectsPath = "MunkiStudio.settings.munkipkgProjectsPath"
         static let munkipkgExecutablePath = MunkipkgDefaults.executablePathKey
+        static let enablePromoterTab = "MunkiStudio.settings.enablePromoterTab"
+        static let autopkgDeploymentPath = "MunkiStudio.settings.autopkgDeploymentPath"
+        static let promoterHiddenCatalogs = "MunkiStudio.settings.promoterHiddenCatalogs"
     }
 }

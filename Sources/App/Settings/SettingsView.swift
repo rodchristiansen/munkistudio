@@ -9,6 +9,8 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            FeatureSettingsView()
+                .tabItem { Label("Features", systemImage: "switch.2") }
             GitSettingsView()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             BuildSettingsView()
@@ -17,6 +19,49 @@ struct SettingsView: View {
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 520)
+    }
+}
+
+// MARK: - Features
+
+private struct FeatureSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+                Toggle("Enable Promoter tab", isOn: $settings.enablePromoterTab)
+                HStack {
+                    TextField("Deployment folder", text: $settings.autopkgDeploymentPath,
+                              prompt: Text("Folder containing promoter.yml"))
+                    Button("Choose…") { chooseFolder(into: $settings.autopkgDeploymentPath) }
+                }
+                .disabled(!settings.enablePromoterTab)
+                TextField("Hidden catalogs", text: $settings.promoterHiddenCatalogs,
+                          prompt: Text("Comma-separated names to hide from display"))
+                    .disabled(!settings.enablePromoterTab)
+            } header: {
+                Text("Promoter")
+            } footer: {
+                Text("The Promoter tab shows a preview of recent AutoPkg imports, upcoming promotions, and promoter history — and lets you approve, anticipate, or defer individual items. \"Hidden catalogs\" suppresses catalog names from transition labels and stats without changing which catalogs the promoter actually writes to.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: 240)
+    }
+
+    private func chooseFolder(into binding: Binding<String>) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            binding.wrappedValue = url.path
+        }
     }
 }
 
