@@ -12,7 +12,7 @@ struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
 
     enum Step: Int, CaseIterable {
-        case welcome, munkipkg, repository, projectsFolder
+        case welcome, munkipkg, repository, projectsFolder, promoter
     }
 
     @State private var step: Step = .welcome
@@ -45,6 +45,7 @@ struct OnboardingView: View {
         case .munkipkg: munkipkgStep
         case .repository: repositoryStep
         case .projectsFolder: projectsFolderStep
+        case .promoter: promoterStep
         }
     }
 
@@ -155,6 +156,26 @@ struct OnboardingView: View {
         }
     }
 
+    private var promoterStep: some View {
+        @Bindable var settings = settings
+        return onboardingStep(
+            icon: "arrow.up.forward.app",
+            title: "Promoter tab",
+            subtitle: "Optional — surface a preview of AutoPkg imports, upcoming promotions, and promoter history, with per-item approve / promote-early / defer actions. Off by default."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Enable the Promoter tab", isOn: $settings.enablePromoterTab)
+                HStack {
+                    TextField("Deployment folder", text: $settings.autopkgDeploymentPath,
+                              prompt: Text("Folder containing promoter.yml"))
+                        .textFieldStyle(.roundedBorder)
+                    Button("Choose\u{2026}") { chooseAutopkgFolder() }
+                }
+                .disabled(!settings.enablePromoterTab)
+            }
+        }
+    }
+
     @ViewBuilder
     private func onboardingStep<Content: View>(
         icon: String,
@@ -200,7 +221,7 @@ struct OnboardingView: View {
 
             Spacer()
 
-            if step == .projectsFolder {
+            if step == .promoter {
                 Button("Get Started") { finish() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
@@ -261,6 +282,17 @@ struct OnboardingView: View {
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             settings.munkipkgProjectsPath = url.path
+        }
+    }
+
+    private func chooseAutopkgFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select the AutoPkg deployment folder containing promoter.yml."
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.autopkgDeploymentPath = url.path
         }
     }
 }
