@@ -514,6 +514,30 @@ final class RepositoryStore {
         }
     }
 
+    /// Apply a single-property tweak to a manifest and persist it
+    /// immediately. Drives the row context menu's Catalogs / Included
+    /// Manifests submenus — those edits commit on click, like MunkiAdmin,
+    /// rather than landing in the unsaved-draft pile. Surfaces failures
+    /// through ``manifestActionError``.
+    @discardableResult
+    func applyManifestEdit(_ updated: Manifest, to record: ManifestRecord) async -> Bool {
+        let next = ManifestRecord(
+            manifest: updated,
+            fileURL: record.fileURL,
+            format: record.format,
+            createdAt: record.createdAt,
+            modifiedAt: Date()
+        )
+        do {
+            try await services.manifests.save(next)
+            upsert(next)
+            return true
+        } catch {
+            manifestActionError = error.localizedDescription
+            return false
+        }
+    }
+
     /// Recompute the catalog projection from the current pkginfo set.
     private func recomputeCatalogs() {
         let captured = snapshot.pkginfos
