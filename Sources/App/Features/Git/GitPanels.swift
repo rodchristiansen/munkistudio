@@ -121,7 +121,7 @@ struct GitFilesPanel: View {
             }
         }
         Button("Discard Changes…", role: .destructive) {
-            Task { await discard(relativePath: relativePath) }
+            discard(relativePath: relativePath)
         }
         .disabled(entry?.kind == .untracked)
     }
@@ -199,7 +199,7 @@ struct GitFilesPanel: View {
         error: any Error,
         action: String,
         info: GitRepositoryInfo,
-        retry: @escaping () async -> Void
+        retry: @escaping @Sendable () async -> Void
     ) {
         let message = error.localizedDescription
         guard IndexLockRecovery.matches(message: message) else {
@@ -207,35 +207,21 @@ struct GitFilesPanel: View {
             state.statusKind = .error
             return
         }
-        switch IndexLockRecovery.present(workTreeRoot: info.workTreeRoot, message: message) {
-        case .deleted:
-            state.statusMessage = "Removed .git/index.lock — retrying \(action.lowercased())…"
-            state.statusKind = .info
-            Task { await retry() }
-        case .cancelled:
-            state.statusMessage = "\(action) failed: \(message)"
-            state.statusKind = .error
-        case .failed(let why):
-            state.statusMessage = why
-            state.statusKind = .error
-        }
+        // Hand the retry off to the GitView-owned recovery alert via
+        // shared state. The alert's "Delete lock file" button runs the
+        // delete + retry; "Cancel" leaves the original error visible.
+        state.indexLockRequest = GitPaneState.IndexLockRequest(
+            workTreeRoot: info.workTreeRoot,
+            message: message,
+            action: action,
+            retry: retry
+        )
     }
 
-    private func discard(relativePath: String) async {
-        let alert = NSAlert()
-        alert.messageText = "Discard changes to \(relativePath)?"
-        alert.informativeText = "This is irreversible."
-        alert.addButton(withTitle: "Discard")
-        alert.addButton(withTitle: "Cancel")
-        alert.alertStyle = .warning
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        guard let info = state.info else { return }
-        _ = try? await ProcessRunner.run(
-            URL(fileURLWithPath: "/usr/bin/git"),
-            arguments: ["checkout", "--", relativePath],
-            in: info.workTreeRoot
-        )
-        await refresh()
+    private func discard(relativePath: String) {
+        // Drive the shared SwiftUI .alert on GitView; the alert's
+        // Discard button calls performDiscard on completion.
+        state.discardRequest = .init(paths: [relativePath])
     }
 
     /// Refresh the panel's view of the working copy after a mutation.

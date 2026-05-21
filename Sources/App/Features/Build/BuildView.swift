@@ -23,6 +23,7 @@ struct BuildView: View {
     @State private var buildToken = 0
     @State private var renameTarget: MunkipkgProject?
     @State private var renameText = ""
+    @State private var deleteTarget: MunkipkgProject?
     @State private var folderWatcher: DirectoryWatcher?
     // Build flags are shared across the session so they stick when
     // switching between projects.
@@ -67,6 +68,18 @@ struct BuildView: View {
                 Button("Rename") { commitRename() }
                 Button("Cancel", role: .cancel) { renameTarget = nil }
             }
+            .alert("Delete project?", isPresented: deletePresented, presenting: deleteTarget) { target in
+                Button("Delete", role: .destructive) {
+                    Task { await performDeleteProject(target) }
+                }
+                Button("Cancel", role: .cancel) { deleteTarget = nil }
+            } message: { target in
+                Text("\u{201c}\(target.name)\u{201d} will be permanently removed from disk.")
+            }
+    }
+
+    private var deletePresented: Binding<Bool> {
+        Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } })
     }
 
     /// The project count, shown as the window's toolbar subtitle.
@@ -238,13 +251,11 @@ struct BuildView: View {
     }
 
     private func deleteProject(_ project: MunkipkgProject) async {
-        let alert = NSAlert()
-        alert.messageText = "Delete \"\(project.name)\"?"
-        alert.informativeText = "This permanently removes the munkipkg project folder from disk."
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        deleteTarget = project
+    }
+
+    private func performDeleteProject(_ project: MunkipkgProject) async {
+        deleteTarget = nil
         do {
             try FileManager.default.removeItem(at: project.directoryURL)
         } catch {
@@ -897,6 +908,7 @@ private struct PayloadSection: View {
     @State private var selection: String?
     @State private var renameNode: PayloadNode?
     @State private var renameText = ""
+    @State private var deleteNode: PayloadNode?
     @State private var contentHeight: CGFloat = 0
     @State private var boxHeight: CGFloat = 0
     @State private var editingURL: URL?
@@ -944,6 +956,14 @@ private struct PayloadSection: View {
             TextField("Name", text: $renameText)
             Button("Rename") { commitRename() }
             Button("Cancel", role: .cancel) { renameNode = nil }
+        }
+        .alert("Delete from payload?", isPresented: deletePresented, presenting: deleteNode) { node in
+            Button("Delete", role: .destructive) {
+                performDelete(node)
+            }
+            Button("Cancel", role: .cancel) { deleteNode = nil }
+        } message: { node in
+            Text("\u{201c}\(node.name)\u{201d} will be removed from the payload on disk.")
         }
         .sheet(isPresented: editingPresented) {
             ScriptEditorSheet(title: editingURL?.lastPathComponent ?? "", text: $editingText)
@@ -1136,16 +1156,18 @@ private struct PayloadSection: View {
     }
 
     private func delete(_ node: PayloadNode) {
-        let alert = NSAlert()
-        alert.messageText = "Delete \"\(node.name)\"?"
-        alert.informativeText = "This removes it from the payload on disk."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        deleteNode = node
+    }
+
+    private func performDelete(_ node: PayloadNode) {
+        deleteNode = nil
         try? FileManager.default.removeItem(at: node.url)
         if selection == node.id { selection = nil }
         reloadTree()
+    }
+
+    private var deletePresented: Binding<Bool> {
+        Binding(get: { deleteNode != nil }, set: { if !$0 { deleteNode = nil } })
     }
 
     private var renamePresented: Binding<Bool> {
