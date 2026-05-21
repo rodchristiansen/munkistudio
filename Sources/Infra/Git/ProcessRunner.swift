@@ -60,8 +60,16 @@ public enum ProcessRunner {
             do {
                 try process.run()
                 if let stdinPipe, let input {
-                    try? stdinPipe.fileHandleForWriting.write(contentsOf: input)
-                    try? stdinPipe.fileHandleForWriting.close()
+                    // Push the bytes from a background thread so a large
+                    // payload (or a child that stops draining stdin) can
+                    // never block the caller — typically MainActor. We
+                    // capture the handle/data into the detached task so
+                    // they outlive this closure frame.
+                    let writeHandle = stdinPipe.fileHandleForWriting
+                    Thread.detachNewThread {
+                        try? writeHandle.write(contentsOf: input)
+                        try? writeHandle.close()
+                    }
                 }
             } catch {
                 continuation.resume(throwing: error)
