@@ -67,6 +67,12 @@ struct ManifestsListView: View {
         } message: {
             Text(store.manifestActionError ?? "")
         }
+        .onChange(of: store.pendingManifestCriteria, initial: true) { _, new in
+            guard let new else { return }
+            criteriaGroup = new
+            search = ""
+            store.pendingManifestCriteria = nil
+        }
     }
 
     private var errorPresented: Binding<Bool> {

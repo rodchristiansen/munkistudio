@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Core
 
 /// Flat list of category folder + package leaf rows so `List(selection:)`
@@ -66,19 +67,180 @@ struct PackageTreeList: View {
     @ViewBuilder
     private func leafMenu(for row: PackageFlatRow) -> some View {
         if case .leaf(let record) = row.kind {
+            Button("Properties\u{2026}") {
+                store.selectedSection = .packages
+                store.selectedItemID = AnyHashable(record.id)
+            }
             Button("Rename\u{2026}") {
                 renameText = record.fileURL.deletingPathExtension().lastPathComponent
                 renameTarget = record
+            }
+            Divider()
+            Button("Show pkginfo in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([record.fileURL])
+            }
+            Button("Show installer in Finder") {
+                revealInstaller(for: record)
+            }
+            .disabled(installerURL(for: record) == nil)
+            Button("Search in Manifests") {
+                searchInManifests(for: record)
+            }
+            Divider()
+            Button("Import Packages\u{2026}") {
+                store.selectedSection = .importer
             }
             Button("Duplicate\u{2026}") {
                 duplicateText = record.fileURL.deletingPathExtension().lastPathComponent + " copy"
                 duplicateTarget = record
             }
-            Divider()
-            Button("Delete\u{2026}", role: .destructive) {
+            Button("Delete Package\u{2026}", role: .destructive) {
                 deleteTarget = record
             }
+            Divider()
+            Menu("Catalogs") { catalogsMenu(for: record) }
+            Menu("Category") { categoryMenu(for: record) }
+            Menu("Developer") { developerMenu(for: record) }
         }
+    }
+
+    /// File URL of the installer item the pkginfo points at, resolved
+    /// under the repo's `pkgs/` root. `nil` when the location is unset
+    /// or the file no longer exists.
+    private func installerURL(for record: PkginfoRecord) -> URL? {
+        guard let repo = store.repository,
+              let location = record.pkginfo.installerItemLocation?
+                .trimmingCharacters(in: .whitespaces),
+              !location.isEmpty else { return nil }
+        let url = repo.pkgsURL.appending(path: location)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func revealInstaller(for record: PkginfoRecord) {
+        guard let url = installerURL(for: record) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Jump to the Manifests section pre-filtered to manifests that
+    /// reference this package in any install list — the same scope
+    /// MunkiAdmin's "Search in Manifests" produces.
+    private func searchInManifests(for record: PkginfoRecord) {
+        let group = ManifestCriteriaGroup(
+            quantifier: .any,
+            criteria: [
+                ManifestCriterion(
+                    attribute: .anyInstallsItem,
+                    op: .equals,
+                    value: record.pkginfo.name
+                )
+            ]
+        )
+        store.pendingManifestCriteria = group
+        store.selectedSection = .manifests
+    }
+
+    @ViewBuilder
+    private func catalogsMenu(for record: PkginfoRecord) -> some View {
+        let current = Set(record.pkginfo.catalogs ?? [])
+        let available = catalogs(including: current)
+        if available.isEmpty {
+            Text("No catalogs available")
+        } else {
+            ForEach(available, id: \.self) { name in
+                Button {
+                    Task { await toggleCatalog(name, on: record) }
+                } label: {
+                    Label(name, systemImage: current.contains(name) ? "checkmark" : "")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func categoryMenu(for record: PkginfoRecord) -> some View {
+        let current = record.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        let names = knownCategories(including: current)
+        Button {
+            Task { await setCategory(nil, on: record) }
+        } label: {
+            Label("(none)", systemImage: current == nil ? "checkmark" : "")
+        }
+        if !names.isEmpty {
+            Divider()
+            ForEach(names, id: \.self) { name in
+                Button {
+                    Task { await setCategory(name, on: record) }
+                } label: {
+                    Label(name, systemImage: current == name ? "checkmark" : "")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func developerMenu(for record: PkginfoRecord) -> some View {
+        let current = record.pkginfo.developer?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        let names = knownDevelopers(including: current)
+        Button {
+            Task { await setDeveloper(nil, on: record) }
+        } label: {
+            Label("(none)", systemImage: current == nil ? "checkmark" : "")
+        }
+        if !names.isEmpty {
+            Divider()
+            ForEach(names, id: \.self) { name in
+                Button {
+                    Task { await setDeveloper(name, on: record) }
+                } label: {
+                    Label(name, systemImage: current == name ? "checkmark" : "")
+                }
+            }
+        }
+    }
+
+    private func catalogs(including current: Set<String>) -> [String] {
+        let known = Set(store.snapshot.catalogs.map(\.name))
+        return Array(known.union(current)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func knownCategories(including current: String?) -> [String] {
+        var names = Set(store.snapshot.pkginfos.compactMap {
+            $0.pkginfo.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        })
+        if let current { names.insert(current) }
+        return Array(names).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func knownDevelopers(including current: String?) -> [String] {
+        var names = Set(store.snapshot.pkginfos.compactMap {
+            $0.pkginfo.developer?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        })
+        if let current { names.insert(current) }
+        return Array(names).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func toggleCatalog(_ name: String, on record: PkginfoRecord) async {
+        var updated = record.pkginfo
+        var catalogs = updated.catalogs ?? []
+        if let index = catalogs.firstIndex(of: name) {
+            catalogs.remove(at: index)
+        } else {
+            catalogs.append(name)
+        }
+        updated.catalogs = catalogs.isEmpty ? nil : catalogs
+        await store.applyPkginfoEdit(updated, to: record)
+    }
+
+    private func setCategory(_ value: String?, on record: PkginfoRecord) async {
+        var updated = record.pkginfo
+        updated.category = value
+        await store.applyPkginfoEdit(updated, to: record)
+    }
+
+    private func setDeveloper(_ value: String?, on record: PkginfoRecord) async {
+        var updated = record.pkginfo
+        updated.developer = value
+        await store.applyPkginfoEdit(updated, to: record)
     }
 
     private var renamePresented: Binding<Bool> {
