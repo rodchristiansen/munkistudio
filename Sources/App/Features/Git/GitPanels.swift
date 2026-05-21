@@ -37,10 +37,8 @@ struct GitFilesPanel: View {
                     .toggleStyle(.checkbox)
                     .labelsHidden()
                     .help(isStaged ? "Unstage \(entry.relativePath)" : "Stage \(entry.relativePath)")
-                    Text(letter(for: entry.kind))
-                        .font(.caption.monospaced())
-                        .frame(width: 22)
-                        .foregroundStyle(color(for: entry.kind))
+                    GitStatusChip(kind: entry.kind, staged: isStaged)
+                    GitFileGlyph(relativePath: entry.relativePath)
                     Text(entry.relativePath)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -263,29 +261,6 @@ struct GitFilesPanel: View {
         return appURL.deletingPathExtension().lastPathComponent
     }
 
-    private func letter(for kind: GitStatusEntry.Kind) -> String {
-        switch kind {
-        case .modified: "M"
-        case .added: "A"
-        case .deleted: "D"
-        case .renamed: "R"
-        case .copied: "C"
-        case .untracked: "?"
-        case .ignored: "!"
-        case .conflicted: "U"
-        }
-    }
-
-    private func color(for kind: GitStatusEntry.Kind) -> Color {
-        switch kind {
-        case .modified: .yellow
-        case .added, .untracked: .green
-        case .deleted: .red
-        case .renamed, .copied: .blue
-        case .conflicted: .orange
-        case .ignored: .secondary
-        }
-    }
 }
 
 struct GitBranchesPanel: View {

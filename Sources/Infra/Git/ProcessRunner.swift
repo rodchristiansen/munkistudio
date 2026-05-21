@@ -19,11 +19,14 @@ public enum ProcessRunner {
     }
 
     /// Run a command to completion, capturing its full stdout / stderr.
+    /// Pass `input` to feed data into the child's stdin (used for
+    /// `git apply --cached -` and friends).
     public static func run(
         _ executable: URL,
         arguments: [String],
         in workingDirectory: URL? = nil,
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        input: Data? = nil
     ) async throws -> Output {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
@@ -39,6 +42,10 @@ public enum ProcessRunner {
             let stderrPipe = Pipe()
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
+            let stdinPipe: Pipe? = (input != nil) ? Pipe() : nil
+            if let stdinPipe {
+                process.standardInput = stdinPipe
+            }
 
             process.terminationHandler = { proc in
                 let outData = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
@@ -52,6 +59,10 @@ public enum ProcessRunner {
 
             do {
                 try process.run()
+                if let stdinPipe, let input {
+                    try? stdinPipe.fileHandleForWriting.write(contentsOf: input)
+                    try? stdinPipe.fileHandleForWriting.close()
+                }
             } catch {
                 continuation.resume(throwing: error)
             }

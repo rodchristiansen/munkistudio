@@ -25,6 +25,19 @@ public protocol GitService: Sendable {
     func stage(in info: GitRepositoryInfo, relativePaths: [String]) async throws
     func unstage(in info: GitRepositoryInfo, relativePaths: [String]) async throws
 
+    /// Apply `patch` to the working tree and/or the index.
+    /// - `cached`: when `true`, applies to the index only — the basis for
+    ///   per-hunk staging via the rich diff view.
+    /// - `reverse`: when `true`, applies the patch in reverse — used to
+    ///   unstage a single hunk (reverse-apply against the index) or
+    ///   discard one chunk from the working tree.
+    func applyPatch(
+        in info: GitRepositoryInfo,
+        patch: String,
+        cached: Bool,
+        reverse: Bool
+    ) async throws
+
     /// Create a commit. Streams hook output as it arrives so the composer
     /// UI can show progress; the final event carries the resulting SHA on
     /// success.
