@@ -15,11 +15,41 @@ public enum PayloadSchemaLoader {
     /// to parse — the validator falls back to no-schema mode in
     /// either case.
     public static func loadBundled() -> PayloadSchema? {
-        guard let url = Bundle.module.url(forResource: "Payloads", withExtension: "yaml"),
+        guard let url = locatePayloadsYAML(),
               let data = try? Data(contentsOf: url) else {
             return nil
         }
         return parse(data: data)
+    }
+
+    /// Locate the bundled `Payloads.yaml` without touching
+    /// `Bundle.module`. SwiftPM's auto-generated accessor expects the
+    /// resource bundle at `<App>.app/MunkiStudio_Infra.bundle`, but
+    /// `make`'s packaging puts it under `Contents/Resources/`. Touching
+    /// `Bundle.module` on a fresh Mac therefore traps in its lazy
+    /// initializer before we can fall back. Search the candidate
+    /// locations directly so both `swift run` and the packaged .app
+    /// resolve the resource.
+    private static func locatePayloadsYAML() -> URL? {
+        let bundleName = "MunkiStudio_Infra.bundle"
+        let fileManager = FileManager.default
+        let main = Bundle.main
+        var candidates: [URL] = []
+        if let resources = main.resourceURL {
+            candidates.append(resources.appendingPathComponent(bundleName))
+        }
+        candidates.append(main.bundleURL.appendingPathComponent(bundleName))
+        for candidate in candidates {
+            if let bundle = Bundle(url: candidate),
+               let url = bundle.url(forResource: "Payloads", withExtension: "yaml") {
+                return url
+            }
+            let flat = candidate.appendingPathComponent("Payloads.yaml")
+            if fileManager.fileExists(atPath: flat.path) {
+                return flat
+            }
+        }
+        return nil
     }
 
     /// Parse a YAML payload schema document into a `PayloadSchema`.
