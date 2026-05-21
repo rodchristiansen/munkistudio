@@ -114,6 +114,12 @@ final class RepositoryStore {
     /// Manifest tree paths currently expanded in the Manifests outline.
     var expandedManifestPaths: Set<String> = []
 
+    /// Criteria the Manifests list should apply when it next appears —
+    /// driven by "Search in Manifests" on a package, which jumps to the
+    /// Manifests section pre-filtered to manifests that reference the
+    /// chosen package. ``ManifestsListView`` consumes and clears it.
+    var pendingManifestCriteria: ManifestCriteriaGroup?
+
     // MARK: Session drafts
     //
     // Drafts hold in-progress edits keyed by file URL. They persist
@@ -481,6 +487,30 @@ final class RepositoryStore {
         } catch {
             packageActionError = error.localizedDescription
             return nil
+        }
+    }
+
+    /// Apply a single-property tweak to a pkginfo and persist it
+    /// immediately. Drives the row context menu's Catalogs / Category /
+    /// Developer submenus — those edits commit on click, like MunkiAdmin,
+    /// rather than landing in the unsaved-draft pile. Surfaces failures
+    /// through ``packageActionError``.
+    @discardableResult
+    func applyPkginfoEdit(_ updated: Pkginfo, to record: PkginfoRecord) async -> Bool {
+        let next = PkginfoRecord(
+            pkginfo: updated,
+            fileURL: record.fileURL,
+            format: record.format,
+            createdAt: record.createdAt,
+            modifiedAt: Date()
+        )
+        do {
+            try await services.packages.save(next)
+            upsert(next)
+            return true
+        } catch {
+            packageActionError = error.localizedDescription
+            return false
         }
     }
 
