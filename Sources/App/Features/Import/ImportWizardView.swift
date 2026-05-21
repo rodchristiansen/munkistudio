@@ -258,6 +258,10 @@ private struct ReviewStep: View {
 
 private struct EditMetadataStep: View {
     @Bindable var importStore: ImportStore
+    @State private var pickingIcon = false
+
+    private static let iconTypes: [UTType] = ["icns", "png"]
+        .compactMap { UTType(filenameExtension: $0) }
 
     var body: some View {
         ScrollView {
@@ -340,7 +344,7 @@ private struct EditMetadataStep: View {
                             .foregroundStyle(importStore.iconPath == nil ? .secondary : .primary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Button("Choose…") { pickIcon() }
+                        Button("Choose…") { pickingIcon = true }
                         if importStore.iconPath != nil {
                             Button("Clear") { importStore.iconPath = nil }
                         }
@@ -359,6 +363,15 @@ private struct EditMetadataStep: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .fileImporter(
+            isPresented: $pickingIcon,
+            allowedContentTypes: Self.iconTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                importStore.iconPath = url
+            }
+        }
     }
 
     @ViewBuilder
@@ -369,16 +382,6 @@ private struct EditMetadataStep: View {
         }
     }
 
-    private func pickIcon() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = ["icns", "png"].compactMap { UTType(filenameExtension: $0) }
-        panel.prompt = "Choose"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        importStore.iconPath = url
-    }
 }
 
 // MARK: - Step 3: Scripts

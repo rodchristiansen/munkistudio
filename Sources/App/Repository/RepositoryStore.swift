@@ -95,6 +95,11 @@ final class RepositoryStore {
     /// these when it appears.
     var pendingImportURLs: [URL] = []
 
+    /// File-importer toggle for the "Open Repository…" menu command.
+    /// SwiftUI's `Commands` aren't `View`s, so the command sets this
+    /// flag and `ContentView` hosts the `.fileImporter`.
+    var openRepositoryPickerRequested: Bool = false
+
     var loadState: LoadState = .idle
 
     /// Free-text query backing the global search pane.

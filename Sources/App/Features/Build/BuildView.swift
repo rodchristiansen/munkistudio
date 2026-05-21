@@ -318,6 +318,7 @@ private struct BuildProjectDetail: View {
     @State private var scriptsHeight: CGFloat = 560
     @State private var payloadExpanded = false
     @State private var showBuildOptions = false
+    @State private var pickingEnvFile = false
 
     init(
         project: MunkipkgProject,
@@ -449,12 +450,21 @@ private struct BuildProjectDetail: View {
                 HStack {
                     TextField("Auto-detect", text: $buildOptions.envPath)
                         .textFieldStyle(.roundedBorder)
-                    Button("Choose…") { chooseEnvFile() }
+                    Button("Choose…") { pickingEnvFile = true }
                 }
             }
         }
         .padding(16)
         .frame(width: 340)
+        .fileImporter(
+            isPresented: $pickingEnvFile,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                buildOptions.envPath = url.path
+            }
+        }
     }
 
     private func optionToggle(_ title: String, _ caption: String, _ isOn: Binding<Bool>) -> some View {
@@ -468,16 +478,6 @@ private struct BuildProjectDetail: View {
         }
     }
 
-    private func chooseEnvFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        if panel.runModal() == .OK, let url = panel.url {
-            buildOptions.envPath = url.path
-        }
-    }
 
     private var buildConsole: some View {
         VStack(spacing: 0) {
@@ -908,6 +908,12 @@ private struct PayloadSection: View {
     @State private var renameNode: PayloadNode?
     @State private var renameText = ""
     @State private var deleteNode: PayloadNode?
+    @State private var addFilesTarget: AddFilesTarget?
+
+    private struct AddFilesTarget: Identifiable {
+        let id = UUID()
+        let directory: URL
+    }
     @State private var contentHeight: CGFloat = 0
     @State private var boxHeight: CGFloat = 0
     @State private var editingURL: URL?
@@ -966,6 +972,13 @@ private struct PayloadSection: View {
         }
         .sheet(isPresented: editingPresented) {
             ScriptEditorSheet(title: editingURL?.lastPathComponent ?? "", text: $editingText)
+        }
+        .fileImporter(
+            isPresented: addFilesPresented,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            receiveAddFilesResult(result)
         }
     }
 
@@ -1123,19 +1136,24 @@ private struct PayloadSection: View {
     }
 
     private func addFiles(to node: PayloadNode?) {
-        let directory = destination(for: node)
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
-        guard panel.runModal() == .OK else { return }
-        for source in panel.urls {
+        addFilesTarget = AddFilesTarget(directory: destination(for: node))
+    }
+
+    private func receiveAddFilesResult(_ result: Result<[URL], any Error>) {
+        defer { addFilesTarget = nil }
+        guard let target = addFilesTarget,
+              case .success(let urls) = result else { return }
+        for source in urls {
             try? FileManager.default.copyItem(
                 at: source,
-                to: directory.appending(path: source.lastPathComponent)
+                to: target.directory.appending(path: source.lastPathComponent)
             )
         }
         reloadTree()
+    }
+
+    private var addFilesPresented: Binding<Bool> {
+        Binding(get: { addFilesTarget != nil }, set: { if !$0 { addFilesTarget = nil } })
     }
 
     private func importDropped(_ urls: [URL]) {

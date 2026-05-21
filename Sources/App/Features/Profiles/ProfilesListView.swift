@@ -9,6 +9,7 @@ struct ProfilesListView: View {
     @Environment(AppSettings.self) private var settings
     @State private var search: String = ""
     @State private var showNewProfileSheet = false
+    @State private var pickingFolder = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -36,6 +37,13 @@ struct ProfilesListView: View {
         .navigationSubtitle(subtitle)
         .sheet(isPresented: $showNewProfileSheet) {
             NewProfileSheet(directoryURL: directoryURL)
+        }
+        .fileImporter(
+            isPresented: $pickingFolder,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            receivePickedFolder(result)
         }
         .alert("Couldn't Complete Action", isPresented: errorPresented) {
             Button("OK", role: .cancel) {}
@@ -79,15 +87,13 @@ struct ProfilesListView: View {
     /// Inline folder-picker so the no-folder empty state is actionable
     /// without users having to dive into Settings.
     private func chooseFolder() {
+        pickingFolder = true
+    }
+
+    private func receivePickedFolder(_ result: Result<[URL], any Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
         @Bindable var bindable = settings
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select a folder of .mobileconfig profiles."
-        if panel.runModal() == .OK, let url = panel.url {
-            bindable.profilesDirectoryPath = url.path
-        }
+        bindable.profilesDirectoryPath = url.path
     }
 
     private var directoryPath: String {

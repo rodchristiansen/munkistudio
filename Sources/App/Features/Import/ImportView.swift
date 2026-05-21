@@ -12,6 +12,10 @@ struct ImportView: View {
     @Environment(RepositoryStore.self) private var store
     @State private var importStore = ImportStore()
     @State private var isTargeted = false
+    @State private var picking = false
+
+    private static let installerTypes: [UTType] = ["pkg", "mpkg", "dmg", "app", "iso", "zip"]
+        .compactMap { UTType(filenameExtension: $0) }
 
     var body: some View {
         content
@@ -19,6 +23,16 @@ struct ImportView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onChange(of: store.pendingImportURLs) { consumePendingImports() }
             .onAppear { consumePendingImports() }
+            .fileImporter(
+                isPresented: $picking,
+                allowedContentTypes: Self.installerTypes,
+                allowsMultipleSelection: true
+            ) { result in
+                if case .success(let urls) = result, !urls.isEmpty {
+                    importStore.handle(droppedURLs: urls)
+                    resolveQueueTemplates()
+                }
+            }
     }
 
     /// Pick up installers handed off from another tab (e.g. a `.pkg`
@@ -129,16 +143,7 @@ struct ImportView: View {
     // MARK: Pick
 
     private func pickFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = ["pkg", "mpkg", "dmg", "app", "iso", "zip"]
-            .compactMap { UTType(filenameExtension: $0) }
-        panel.prompt = "Import"
-        guard panel.runModal() == .OK else { return }
-        importStore.handle(droppedURLs: panel.urls)
-        resolveQueueTemplates()
+        picking = true
     }
 
     /// Match each freshly queued file against the repo's pkginfos by

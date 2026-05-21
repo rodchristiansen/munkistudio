@@ -1,10 +1,11 @@
 import SwiftUI
-import AppKit
+import UniformTypeIdentifiers
 
 struct RepositoryPickerView: View {
     @Environment(RepositoryStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 96
+    @State private var picking = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -28,6 +29,15 @@ struct RepositoryPickerView: View {
 
             versionBadge
                 .padding(16)
+        }
+        .fileImporter(
+            isPresented: $picking,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { await store.open(rootURL: url) }
+            }
         }
     }
 
@@ -125,15 +135,7 @@ struct RepositoryPickerView: View {
     }
 
     private func openRepository() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose the root of your Munki repository."
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await store.open(rootURL: url) }
-        }
+        picking = true
     }
 }
 

@@ -1,5 +1,5 @@
 import SwiftUI
-import AppKit
+import UniformTypeIdentifiers
 import Core
 
 /// First-run onboarding wizard. Shown once, over `ContentView`, until the
@@ -20,6 +20,12 @@ struct OnboardingView: View {
     @State private var checkingMunkipkg = false
     @State private var installingMunkipkg = false
     @State private var munkipkgMessage: String?
+    @State private var picker: PickerKind?
+
+    private enum PickerKind: Identifiable {
+        case repository, projects, autopkg, profiles
+        var id: Self { self }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +37,13 @@ struct OnboardingView: View {
             footer
         }
         .frame(width: 580, height: 480)
+        .fileImporter(
+            isPresented: pickerPresented,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            handlePickerResult(result)
+        }
         .task(id: step) {
             if step == .munkipkg, munkipkgVersion == nil { await refreshMunkipkg() }
         }
@@ -284,47 +297,32 @@ struct OnboardingView: View {
         }
     }
 
-    private func openRepository() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose the root of your Munki repository."
-        if panel.runModal() == .OK, let url = panel.url {
+    private func openRepository() { picker = .repository }
+    private func chooseProjectsFolder() { picker = .projects }
+    private func chooseAutopkgFolder() { picker = .autopkg }
+    private func chooseProfilesFolder() { picker = .profiles }
+
+    private var pickerPresented: Binding<Bool> {
+        Binding(get: { picker != nil }, set: { if !$0 { picker = nil } })
+    }
+
+    private func handlePickerResult(_ result: Result<[URL], any Error>) {
+        guard case .success(let urls) = result, let url = urls.first else {
+            picker = nil
+            return
+        }
+        switch picker {
+        case .repository:
             Task { await store.open(rootURL: url) }
-        }
-    }
-
-    private func chooseProjectsFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
+        case .projects:
             settings.munkipkgProjectsPath = url.path
-        }
-    }
-
-    private func chooseAutopkgFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select the AutoPkg deployment folder containing promoter.yml."
-        if panel.runModal() == .OK, let url = panel.url {
+        case .autopkg:
             settings.autopkgDeploymentPath = url.path
-        }
-    }
-
-    private func chooseProfilesFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select a folder of .mobileconfig profiles."
-        if panel.runModal() == .OK, let url = panel.url {
+        case .profiles:
             settings.profilesDirectoryPath = url.path
+        case .none:
+            break
         }
+        picker = nil
     }
 }

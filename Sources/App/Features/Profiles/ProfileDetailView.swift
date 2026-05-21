@@ -42,6 +42,7 @@ struct ProfileDetailView: View {
 private struct ProfileEditor: View {
     @Environment(ProfileStore.self) private var store
     let record: ProfileRecord
+    @State private var pickingApp = false
 
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -83,6 +84,13 @@ private struct ProfileEditor: View {
             Button("OK", role: .cancel) { store.saveError = nil }
         } message: {
             Text(store.saveError ?? "")
+        }
+        .fileImporter(
+            isPresented: $pickingApp,
+            allowedContentTypes: [.application],
+            allowsMultipleSelection: false
+        ) { result in
+            receivePickedApp(result)
         }
     }
 
@@ -161,7 +169,7 @@ private struct ProfileEditor: View {
     /// candidate's installed bundle URL when the menu opens and either
     /// hands the file to that app via `Workspace.open(_:with:)` or, when the app is
     /// missing, deep-links to its download page. An "Other…" entry
-    /// falls through to a standard NSOpenPanel chooser so the user can
+    /// falls through to a `.fileImporter` so the user can
     /// pick any installed app the system suggests for `.mobileconfig`.
     private var openWithMenu: some View {
         Menu {
@@ -215,14 +223,11 @@ private struct ProfileEditor: View {
     }
 
     private func chooseAndOpen() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.title = "Choose Application"
-        if panel.runModal() == .OK, let appURL = panel.url {
+        pickingApp = true
+    }
+
+    private func receivePickedApp(_ result: Result<[URL], any Error>) {
+        if case .success(let urls) = result, let appURL = urls.first {
             open(in: appURL)
         }
     }
