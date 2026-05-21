@@ -150,12 +150,13 @@ $(APP_BUNDLE): FORCE | $(BUILD_DIR)
 	@# Sign every embedded resource bundle before the outer .app so the
 	@# outer seal covers their CodeResources hashes. Without this the
 	@# notarized .pkg installs cleanly but the app dies on first launch on
-	@# any Mac other than the developer's.
+	@# any Mac other than the developer's. Fail the recipe on the first
+	@# nested-bundle signing error so we never seal a half-signed tree.
 	@for bundle in $(APP_RESOURCES)/*.bundle; do \
 	    [ -e "$$bundle" ] || continue; \
 	    codesign --force --options runtime \
 	        --sign "$(SIGN_IDENTITY)" \
-	        "$$bundle"; \
+	        "$$bundle" || exit 1; \
 	done
 	codesign --force --options runtime \
 	    --entitlements $(ENTITLEMENTS) \
@@ -184,12 +185,13 @@ sign-app: check-signing-config release
 	@echo "Signing $(APP_BUNDLE)"
 	@# Same as the dev build: sign nested resource bundles first so the
 	@# outer seal includes them and on-launch validation succeeds on Macs
-	@# other than the developer's.
+	@# other than the developer's. Fail fast — notarization would reject
+	@# the package anyway, better to surface the codesign error inline.
 	@for bundle in $(APP_RESOURCES)/*.bundle; do \
 	    [ -e "$$bundle" ] || continue; \
 	    codesign --force --options runtime --timestamp \
 	        --sign "$(SIGNING_IDENTITY_APP)" \
-	        "$$bundle"; \
+	        "$$bundle" || exit 1; \
 	done
 	codesign --force --options runtime --timestamp \
 	    --entitlements $(ENTITLEMENTS) \
