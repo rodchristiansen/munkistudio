@@ -87,14 +87,6 @@ enum Workspace {
         return Image(nsImage: nsImage)
     }
 
-    /// SwiftUI `Image` for the file at `url` — Finder icon or the
-    /// file's own preview when AppKit can render one. Used for showing
-    /// app icons in "Open With" menus.
-    @MainActor
-    static func fileIcon(at url: URL) -> Image {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-    }
-
     /// SwiftUI `Image` for the Finder icon Apple assigns to files with
     /// `extension` (e.g. "pkg" → the installer-package badge).
     @MainActor
