@@ -789,11 +789,6 @@ private extension GitView {
         NSWorkspace.shared.open(url)
     }
 
-    /// Discard the changes to every selected file. The confirmation
-    /// alert lists each path so the user can sanity-check multi-select
-    /// hits — `git checkout --` is irreversible and we don't want
-    /// surprise mass-discards because the keyboard shortcut fired
-    /// against a wider selection than the user remembered.
     // MARK: SwiftUI alert state helpers
 
     private var discardPresented: Binding<Bool> {
@@ -897,6 +892,11 @@ private extension GitView {
             """
     }
 
+    /// Hand the selected paths to the SwiftUI discard alert. The alert's
+    /// confirmation button lists each path so the user can sanity-check
+    /// multi-select hits — `git checkout --` is irreversible and we don't
+    /// want surprise mass-discards because the keyboard shortcut fired
+    /// against a wider selection than the user remembered.
     func discardSelected() {
         guard state.info != nil, !state.fileSelection.isEmpty else { return }
         state.discardRequest = .init(paths: state.fileSelection.sorted())
