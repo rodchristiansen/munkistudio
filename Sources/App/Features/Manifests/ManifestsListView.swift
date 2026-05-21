@@ -53,7 +53,8 @@ struct ManifestsListView: View {
                     records: filtered,
                     grouping: store.manifestsGrouping,
                     sort: store.manifestsSort,
-                    forceExpandAll: !search.isEmpty || !criteriaGroup.criteria.isEmpty
+                    forceExpandAll: !search.isEmpty || !criteriaGroup.criteria.isEmpty,
+                    onNewManifest: { showNewManifest = true }
                 )
             }
         }

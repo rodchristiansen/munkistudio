@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Core
 
 /// Outline view of manifests grouped by slash-separated paths.
@@ -13,6 +14,7 @@ struct ManifestTreeList: View {
     let grouping: ManifestGrouping
     let sort: PackageSort
     var forceExpandAll: Bool = false
+    var onNewManifest: () -> Void = {}
 
     @State private var renameTarget: ManifestRecord?
     @State private var renameText = ""
@@ -74,19 +76,103 @@ struct ManifestTreeList: View {
     @ViewBuilder
     private func leafMenu(for row: ManifestFlatRow) -> some View {
         if case .leaf(let record, _) = row.kind {
-            Button("Rename\u{2026}") {
-                renameText = record.manifest.manifestName
-                renameTarget = record
+            Button("Properties\u{2026}") {
+                store.selectedSection = .manifests
+                store.selectedItemID = AnyHashable(record.id)
             }
-            Button("Duplicate\u{2026}") {
+            Button("Show Manifest in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([record.fileURL])
+            }
+            Divider()
+            Button("New Manifest\u{2026}") {
+                onNewManifest()
+            }
+            Button("Duplicate Manifest\u{2026}") {
                 duplicateText = record.manifest.manifestName + " copy"
                 duplicateTarget = record
             }
-            Divider()
-            Button("Delete\u{2026}", role: .destructive) {
+            Button("Import from CSV File\u{2026}") {}
+                .disabled(true)
+                .help("Coming soon — bulk-import managed_installs from a CSV.")
+            Button("Delete Manifest\u{2026}", role: .destructive) {
                 deleteTarget = record
             }
+            Button("Rename Manifest\u{2026}") {
+                renameText = record.manifest.manifestName
+                renameTarget = record
+            }
+            Divider()
+            Menu("Catalogs") { catalogsMenu(for: record) }
+            Menu("Included Manifests") { includedMenu(for: record) }
         }
+    }
+
+    @ViewBuilder
+    private func catalogsMenu(for record: ManifestRecord) -> some View {
+        let current = Set(record.manifest.catalogs ?? [])
+        let names = allCatalogs(including: current)
+        if names.isEmpty {
+            Text("No catalogs available")
+        } else {
+            ForEach(names, id: \.self) { name in
+                Button {
+                    Task { await toggleCatalog(name, on: record) }
+                } label: {
+                    Label(name, systemImage: current.contains(name) ? "checkmark" : "")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func includedMenu(for record: ManifestRecord) -> some View {
+        let current = Set(record.manifest.includedManifests ?? [])
+        let selfName = record.manifest.manifestName
+        let names = store.snapshot.manifests
+            .map(\.manifest.manifestName)
+            .filter { $0 != selfName }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        if names.isEmpty {
+            Text("No other manifests")
+        } else {
+            ForEach(names, id: \.self) { name in
+                Button {
+                    Task { await toggleIncluded(name, on: record) }
+                } label: {
+                    Label(name, systemImage: current.contains(name) ? "checkmark" : "")
+                }
+            }
+        }
+    }
+
+    private func allCatalogs(including current: Set<String>) -> [String] {
+        let known = Set(store.snapshot.catalogs.map(\.name))
+        return Array(known.union(current))
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func toggleCatalog(_ name: String, on record: ManifestRecord) async {
+        var updated = record.manifest
+        var catalogs = updated.catalogs ?? []
+        if let index = catalogs.firstIndex(of: name) {
+            catalogs.remove(at: index)
+        } else {
+            catalogs.append(name)
+        }
+        updated.catalogs = catalogs.isEmpty ? nil : catalogs
+        await store.applyManifestEdit(updated, to: record)
+    }
+
+    private func toggleIncluded(_ name: String, on record: ManifestRecord) async {
+        var updated = record.manifest
+        var included = updated.includedManifests ?? []
+        if let index = included.firstIndex(of: name) {
+            included.remove(at: index)
+        } else {
+            included.append(name)
+        }
+        updated.includedManifests = included.isEmpty ? nil : included
+        await store.applyManifestEdit(updated, to: record)
     }
 
     private var renamePresented: Binding<Bool> {
