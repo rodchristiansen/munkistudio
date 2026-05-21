@@ -34,6 +34,9 @@ struct GitView: View {
     /// unstage everything without first hunting for the "all staged"
     /// state that the plain Stage All button toggles around.
     @State private var optionHeld: Bool = false
+    /// When the user just hit Copy on the process-output panel —
+    /// drives a brief "Copied" confirmation in place of the button label.
+    @State private var copiedOutputAt: Date?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -361,21 +364,60 @@ struct GitView: View {
             commitOptionsRow
             commitActionRow
             if !state.processOutput.isEmpty {
-                ScrollView {
-                    Text(state.processOutput)
-                        .font(.caption.monospaced())
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(maxHeight: 100)
-                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
+                processOutputPanel
             }
         }
         .padding(12)
+    }
+
+    /// Scrollable git stdout/stderr capture with a copy affordance —
+    /// errors here are usually multi-line plist/YAML parse failures
+    /// that the user wants to paste into a chat or search.
+    private var processOutputPanel: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button {
+                    Workspace.copyToPasteboard(state.processOutput)
+                    copiedOutputAt = Date()
+                } label: {
+                    Label(
+                        copiedOutputAt != nil ? "Copied" : "Copy",
+                        systemImage: copiedOutputAt != nil ? "checkmark" : "doc.on.doc"
+                    )
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy output to clipboard")
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 4)
+            ScrollView {
+                Text(state.processOutput)
+                    .font(.caption.monospaced())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 6)
+            }
+            .frame(maxHeight: 100)
+        }
+        .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+        )
+        .onChange(of: state.processOutput) { _, _ in
+            // New output supersedes the "Copied" confirmation —
+            // otherwise the label sticks past its meaning.
+            copiedOutputAt = nil
+        }
+        .task(id: copiedOutputAt) {
+            guard copiedOutputAt != nil else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            copiedOutputAt = nil
+        }
     }
 
     private var commitFieldsHeader: some View {
