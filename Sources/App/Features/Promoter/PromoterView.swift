@@ -333,8 +333,7 @@ struct PromoterView: View {
 
     private func receiveDeploymentFolder(_ result: Result<[URL], any Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
-        @Bindable var bindable = settings
-        bindable.autopkgDeploymentPath = url.path
+        settings.autopkgDeploymentPath = url.path
     }
 
     // MARK: Bindings & state

@@ -92,8 +92,7 @@ struct ProfilesListView: View {
 
     private func receivePickedFolder(_ result: Result<[URL], any Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
-        @Bindable var bindable = settings
-        bindable.profilesDirectoryPath = url.path
+        settings.profilesDirectoryPath = url.path
     }
 
     private var directoryPath: String {
