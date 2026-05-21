@@ -28,7 +28,6 @@ struct DashboardView: View {
     @State private var missingDescriptionCount: Int = 0
     @State private var missingDeveloperCount: Int = 0
     @State private var unhashedCount: Int = 0
-    @State private var unattendedCount: Int = 0
     @State private var forcedInstallCount: Int = 0
     @ScaledMetric(relativeTo: .caption) private var shaColumnWidth: CGFloat = 70
 
@@ -156,7 +155,6 @@ struct DashboardView: View {
             let missingHash = (pkg.installerItemHash?.isEmpty ?? true)
             return hasInstaller && missingHash
         }.count
-        unattendedCount = pkginfos.filter { $0.pkginfo.unattendedInstall == true }.count
         let now = Date()
         forcedInstallCount = pkginfos.filter {
             ($0.pkginfo.forceInstallAfterDate ?? .distantPast) > now
@@ -741,14 +739,6 @@ struct DashboardView: View {
                         icon: "square.and.arrow.down",
                         color: .indigo
                     ) { store.selectedSection = .promoter }
-                }
-                if unattendedCount > 0 {
-                    StatTile(
-                        label: "Unattended",
-                        value: "\(unattendedCount)",
-                        icon: "wand.and.stars",
-                        color: .purple
-                    ) { store.selectedSection = .packages }
                 }
                 if forcedInstallCount > 0 {
                     StatTile(
