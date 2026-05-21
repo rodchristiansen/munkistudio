@@ -220,11 +220,12 @@ struct GitView: View {
     // MARK: Body
 
     private var mainBody: some View {
-        // Aim for a 1:2 split — left column (composer + file list) gets
-        // a third, diff gets two-thirds. HSplitView still lets the user
-        // drag from there.
+        // Left column (composer + file list) defaults to about half the
+        // pane so long paths like `deployment/pkgsinfo/.../...yaml` fit
+        // without truncating. HSplitView still lets the user drag the
+        // split either way.
         GeometryReader { geometry in
-            let leftWidth = max(320, geometry.size.width / 3)
+            let leftWidth = max(440, geometry.size.width * 0.5)
             HSplitView {
                 VStack(spacing: 0) {
                     panelTabs
@@ -254,7 +255,7 @@ struct GitView: View {
                     }
                     focusedPanelContents
                 }
-                .frame(minWidth: 320, idealWidth: leftWidth, maxWidth: 640)
+                .frame(minWidth: 380, idealWidth: leftWidth, maxWidth: 900)
 
                 Group {
                     switch state.focusedPanel {
