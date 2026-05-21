@@ -423,7 +423,7 @@ private struct BuildProjectDetail: View {
             optionToggle(
                 "Skip import prompt",
                 "Don't prompt to munkiimport the built package afterwards.",
-                $buildOptions.noImport
+                $buildOptions.skipImport
             )
             optionToggle(
                 "Quiet",

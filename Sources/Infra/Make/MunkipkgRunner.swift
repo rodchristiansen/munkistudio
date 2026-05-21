@@ -136,11 +136,18 @@ public final class MunkipkgRunner: MunkipkgService {
         let name = project.buildInfo.name
         let packageFileName = name.hasSuffix(".pkg") ? name : name + ".pkg"
         let productURL = project.buildDirectory.appending(path: packageFileName)
-        let arguments = ["--build"] + options.arguments + [projectDirectory.path]
+        let baseArguments = options.arguments
+        let wantsSkipImport = options.skipImport
 
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    var arguments = ["--build"] + baseArguments
+                    if wantsSkipImport,
+                       let flag = await Self.resolveSkipImportFlag(executable: executable) {
+                        arguments.append(flag)
+                    }
+                    arguments.append(projectDirectory.path)
                     for try await event in ProcessRunner.stream(
                         executable,
                         arguments: arguments,
@@ -169,6 +176,48 @@ public final class MunkipkgRunner: MunkipkgService {
             // stream and terminates the `munkipkg` child.
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// Cache of the flag spelling this `munkipkg` accepts for
+    /// suppressing the post-build import prompt. Per-executable so a
+    /// Settings change re-detects. `nil` value means "no flag works —
+    /// run without it" so we don't probe again.
+    private static let importFlagCache = ImportFlagCache()
+
+    private actor ImportFlagCache {
+        private var values: [String: String?] = [:]
+        func value(for path: String) -> (cached: Bool, value: String?) {
+            if let entry = values[path] { return (true, entry) }
+            return (false, nil)
+        }
+        func set(_ value: String?, for path: String) { values[path] = value }
+    }
+
+    /// The flag name (`--skip-import` or `--no-import`) the installed
+    /// `munkipkg` advertises in `--help`, or `nil` if neither is present.
+    /// Callers should omit the flag when this returns `nil` rather than
+    /// blocking the build.
+    private static func resolveSkipImportFlag(executable: URL) async -> String? {
+        let path = executable.path
+        let lookup = await importFlagCache.value(for: path)
+        if lookup.cached { return lookup.value }
+        guard FileManager.default.isExecutableFile(atPath: path),
+              let output = try? await ProcessRunner.run(executable, arguments: ["--help"])
+        else {
+            await importFlagCache.set(nil, for: path)
+            return nil
+        }
+        let help = output.stdout + "\n" + output.stderr
+        let resolved: String?
+        if help.contains("--skip-import") {
+            resolved = "--skip-import"
+        } else if help.contains("--no-import") {
+            resolved = "--no-import"
+        } else {
+            resolved = nil
+        }
+        await importFlagCache.set(resolved, for: path)
+        return resolved
     }
 
     public func version() async -> String? {
