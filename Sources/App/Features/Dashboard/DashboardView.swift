@@ -29,7 +29,7 @@ struct DashboardView: View {
     @State private var missingDeveloperCount: Int = 0
     @State private var unhashedCount: Int = 0
     @State private var forcedInstallCount: Int = 0
-    @ScaledMetric(relativeTo: .caption) private var shaColumnWidth: CGFloat = 70
+    @ScaledMetric(relativeTo: .callout) private var shaColumnWidth: CGFloat = 78
 
     var body: some View {
         ScrollView {
@@ -288,18 +288,18 @@ struct DashboardView: View {
                 Spacer()
             }
             .padding(.bottom, 8)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(largestPackages, id: \.id) { record in
                     Button {
                         openPackage(record)
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(record.pkginfo.name)
-                                .font(.callout)
+                                .font(.body)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                             Text(Self.formatBytes(Self.sizeBytes(record)))
-                                .font(.caption.monospacedDigit())
+                                .font(.callout.monospacedDigit())
                                 .foregroundStyle(.tertiary)
                         }
                         .contentShape(.rect)
@@ -321,13 +321,13 @@ struct DashboardView: View {
                 Spacer()
             }
             .padding(.bottom, 8)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(topDevelopers, id: \.0) { entry in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(entry.0).font(.callout).lineLimit(1)
+                        Text(entry.0).font(.body).lineLimit(1)
                         Spacer(minLength: 0)
                         Text("\(entry.1)")
-                            .font(.caption.monospacedDigit())
+                            .font(.callout.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -346,13 +346,13 @@ struct DashboardView: View {
                 Spacer()
             }
             .padding(.bottom, 8)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(topCategories, id: \.0) { entry in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(entry.0).font(.callout).lineLimit(1)
+                        Text(entry.0).font(.body).lineLimit(1)
                         Spacer(minLength: 0)
                         Text("\(entry.1)")
-                            .font(.caption.monospacedDigit())
+                            .font(.callout.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -375,28 +375,28 @@ struct DashboardView: View {
             }
             .padding(.bottom, 6)
             Text("Not referenced by any manifest's install / uninstall / featured / default / optional list.")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 8)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(orphanPackages.prefix(8), id: \.id) { record in
                     Button {
                         openPackage(record)
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(record.pkginfo.name)
-                                .font(.callout)
+                                .font(.body)
                                 .lineLimit(1)
                             if let version = record.pkginfo.version {
                                 Text(version)
-                                    .font(.caption.monospaced())
+                                    .font(.callout.monospaced())
                                     .foregroundStyle(.tertiary)
                             }
                             Spacer(minLength: 0)
                             let bytes = Self.sizeBytes(record)
                             if bytes > 0 {
                                 Text(Self.formatBytes(bytes))
-                                    .font(.caption.monospacedDigit())
+                                    .font(.callout.monospacedDigit())
                                     .foregroundStyle(.tertiary)
                             }
                         }
@@ -406,7 +406,7 @@ struct DashboardView: View {
                 }
                 if orphanPackages.count > 8 {
                     Text("…and \(orphanPackages.count - 8) more")
-                        .font(.caption2)
+                        .font(.callout)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -458,17 +458,17 @@ struct DashboardView: View {
     private func recentPackageRow(_ record: PkginfoRecord) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(record.pkginfo.name)
-                .font(.callout)
+                .font(.body)
                 .lineLimit(1)
             if let version = record.pkginfo.version {
                 Text(version)
-                    .font(.caption.monospaced())
+                    .font(.callout.monospaced())
                     .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
             if let date = record.modifiedAt {
                 Text(relative(date))
-                    .font(.caption.monospaced())
+                    .font(.callout.monospaced())
                     .foregroundStyle(.tertiary)
             }
         }
@@ -508,12 +508,12 @@ struct DashboardView: View {
     private func recentManifestRow(_ record: ManifestRecord) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(record.manifest.manifestName)
-                .font(.callout)
+                .font(.body)
                 .lineLimit(1)
             Spacer(minLength: 0)
             if let date = record.modifiedAt {
                 Text(relative(date))
-                    .font(.caption.monospaced())
+                    .font(.callout.monospaced())
                     .foregroundStyle(.tertiary)
             }
         }
@@ -790,19 +790,19 @@ struct DashboardView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(recentCommits.prefix(5)) { commit in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(String(commit.sha.prefix(8)))
-                                .font(.caption.monospaced())
+                                .font(.callout.monospaced())
                                 .foregroundStyle(.tertiary)
                                 .frame(width: shaColumnWidth, alignment: .leading)
                             Text(commit.subject)
-                                .font(.callout)
+                                .font(.body)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text(relative(commit.date))
-                                .font(.caption.monospaced())
+                                .font(.callout.monospaced())
                                 .foregroundStyle(.tertiary)
                         }
                     }
