@@ -136,7 +136,7 @@ private struct BuildSettingsView: View {
             } header: {
                 Text("munkipkg Tool")
             } footer: {
-                Text("MunkiStudio targets the Swift munkipkg fork — YAML build-info, --no-import and --env support. Download & Install fetches the latest release from GitHub and installs it to /usr/local/munki (asks for your password). Leave the path blank to use that standard location.")
+                Text("MunkiStudio targets the Swift munkipkg fork — YAML build-info, skip-import, and --env support. Build also works with the stock python munkipkg; the import-suppression flag is auto-detected from --help. Download & Install fetches the latest fork release and installs it to /usr/local/munki (asks for your password). Leave the path blank to use that standard location.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -25,8 +25,11 @@ public struct MunkipkgBuildOptions: Sendable, Hashable {
     public var skipNotarization: Bool
     /// `--skip-stapling`
     public var skipStapling: Bool
-    /// `--no-import`
-    public var noImport: Bool
+    /// Suppress the post-build munkiimport prompt. The actual CLI flag
+    /// (`--skip-import` vs `--no-import`) is resolved by the runner from
+    /// the installed `munkipkg`'s own help text — if neither is supported
+    /// the build still runs, the flag is simply omitted.
+    public var skipImport: Bool
     /// `--quiet`
     public var quiet: Bool
     /// `--env <path>` — blank auto-detects `.env` in the project.
@@ -36,26 +39,26 @@ public struct MunkipkgBuildOptions: Sendable, Hashable {
         exportBomInfo: Bool = false,
         skipNotarization: Bool = false,
         skipStapling: Bool = false,
-        noImport: Bool = true,
+        skipImport: Bool = true,
         quiet: Bool = false,
         envPath: String = ""
     ) {
         self.exportBomInfo = exportBomInfo
         self.skipNotarization = skipNotarization
         self.skipStapling = skipStapling
-        self.noImport = noImport
+        self.skipImport = skipImport
         self.quiet = quiet
         self.envPath = envPath
     }
 
-    /// The munkipkg flags for these options — without `--build` or the
-    /// project path.
+    /// The munkipkg flags this options struct can express on its own —
+    /// the import-suppression flag is left to the runner, which picks a
+    /// spelling the installed binary actually accepts.
     public var arguments: [String] {
         var args: [String] = []
         if exportBomInfo { args.append("--export-bom-info") }
         if skipNotarization { args.append("--skip-notarization") }
         if skipStapling { args.append("--skip-stapling") }
-        if noImport { args.append("--no-import") }
         if quiet { args.append("--quiet") }
         let env = envPath.trimmingCharacters(in: .whitespaces)
         if !env.isEmpty { args.append(contentsOf: ["--env", env]) }
