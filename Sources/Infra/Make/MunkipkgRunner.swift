@@ -136,14 +136,14 @@ public final class MunkipkgRunner: MunkipkgService {
         let name = project.buildInfo.name
         let packageFileName = name.hasSuffix(".pkg") ? name : name + ".pkg"
         let productURL = project.buildDirectory.appending(path: packageFileName)
-        let want = options
         let baseArguments = options.arguments
+        let wantsSkipImport = options.skipImport
 
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     var arguments = ["--build"] + baseArguments
-                    if want.skipImport,
+                    if wantsSkipImport,
                        let flag = await Self.resolveSkipImportFlag(executable: executable) {
                         arguments.append(flag)
                     }
