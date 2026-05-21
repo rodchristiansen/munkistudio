@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import Core
 import Infra
 
@@ -92,7 +91,7 @@ struct GitFilesPanel: View {
             .disabled(!isKnown)
         Button("Open in External Editor") { openExternally(relativePath: relativePath) }
         if let url = fileURL {
-            let apps = NSWorkspace.shared.urlsForApplications(toOpen: url)
+            let apps = Workspace.applications(toOpen: url)
             if !apps.isEmpty {
                 Menu("Open With") {
                     ForEach(apps, id: \.self) { appURL in
@@ -149,17 +148,17 @@ struct GitFilesPanel: View {
 
     private func openExternally(relativePath: String) {
         guard let url = state.info?.workTreeRoot.appending(path: relativePath) else { return }
-        NSWorkspace.shared.open(url)
+        Workspace.open(url)
     }
 
     private func open(relativePath: String, withApp appURL: URL) {
         guard let url = state.info?.workTreeRoot.appending(path: relativePath) else { return }
-        NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration())
+        Workspace.open([url], with: appURL)
     }
 
     private func revealInFinder(relativePath: String) {
         guard let url = state.info?.workTreeRoot.appending(path: relativePath) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        Workspace.reveal([url])
     }
 
     private func copyAbsolutePath(relativePath: String) {
@@ -168,8 +167,7 @@ struct GitFilesPanel: View {
     }
 
     private func copyToPasteboard(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        Workspace.copyToPasteboard(text)
     }
 
     private func stage(relativePath: String) async {
@@ -501,8 +499,7 @@ struct GitCommitsPanel: View {
     }
 
     private func copyToPasteboard(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        Workspace.copyToPasteboard(text)
     }
 
     /// Run `git format-patch -1 --stdout <sha>` and put the result on the

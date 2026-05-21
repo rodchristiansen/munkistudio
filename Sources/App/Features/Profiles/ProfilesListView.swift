@@ -63,7 +63,7 @@ struct ProfilesListView: View {
                 Text("Scanned \(directoryPath) — found no .mobileconfig files.")
             } actions: {
                 Button("Reveal Folder") {
-                    if let directoryURL { NSWorkspace.shared.activateFileViewerSelecting([directoryURL]) }
+                    if let directoryURL { Workspace.reveal([directoryURL]) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import Core
 import Infra
 
@@ -743,7 +742,7 @@ private extension GitView {
     func openSelectedInEditor() {
         guard let info = state.info, let path = state.primaryFileSelection else { return }
         let url = info.workTreeRoot.appending(path: path)
-        NSWorkspace.shared.open(url)
+        Workspace.open(url)
     }
 
     /// Discard the changes to every selected file. The confirmation

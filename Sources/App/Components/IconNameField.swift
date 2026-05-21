@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import Core
 
 /// `icon_name` editor: a thumbnail of the resolved icon next to a
@@ -13,7 +12,7 @@ struct IconNameField: View {
     /// Used when no `icon_name` is set: Munki resolves to `<name>.png`.
     let packageName: String
 
-    @State private var nsImage: NSImage?
+    @State private var image: Image?
     @State private var customMode: Bool = false
     @State private var generating: Bool = false
     @State private var generateError: String?
@@ -283,8 +282,8 @@ struct IconNameField: View {
 
     private var thumbnail: some View {
         Group {
-            if let nsImage {
-                Image(nsImage: nsImage)
+            if let image {
+                image
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
@@ -306,13 +305,13 @@ struct IconNameField: View {
     private func loadImage() {
         let resolvedName = iconName ?? "\(packageName).png"
         // Read the bytes ourselves so a freshly regenerated icon always
-        // replaces a stale image rather than serving a cached NSImage.
+        // replaces a stale image rather than serving a cached decode.
         guard let repo = store.repository,
               let data = try? Data(contentsOf: repo.iconsURL.appending(path: resolvedName)) else {
-            nsImage = nil
+            image = nil
             return
         }
-        nsImage = NSImage(data: data)
+        image = Workspace.loadImage(data: data)
     }
 }
 
@@ -320,12 +319,12 @@ struct IconNameField: View {
 /// long list only reads the icons actually scrolled into view.
 private struct IconThumbnail: View {
     let url: URL?
-    @State private var image: NSImage?
+    @State private var image: Image?
 
     var body: some View {
         Group {
             if let image {
-                Image(nsImage: image)
+                image
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
@@ -342,7 +341,7 @@ private struct IconThumbnail: View {
                 image = nil
                 return
             }
-            image = NSImage(data: data)
+            image = Workspace.loadImage(data: data)
         }
     }
 }
