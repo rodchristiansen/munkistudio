@@ -250,6 +250,31 @@ public final class ShellGitService: GitService {
         }
     }
 
+    public func applyPatch(
+        in info: GitRepositoryInfo,
+        patch: String,
+        cached: Bool,
+        reverse: Bool
+    ) async throws {
+        var arguments = ["apply", "--whitespace=nowarn"]
+        if cached { arguments.append("--cached") }
+        if reverse { arguments.append("--reverse") }
+        arguments.append("-")
+        let result = try await ProcessRunner.run(
+            gitURL,
+            arguments: arguments,
+            in: info.workTreeRoot,
+            input: Data(patch.utf8)
+        )
+        guard result.exitCode == 0 else {
+            throw RepositoryError.process(
+                name: "git apply",
+                exitCode: result.exitCode,
+                output: result.stderr.isEmpty ? result.stdout : result.stderr
+            )
+        }
+    }
+
     public func unstage(in info: GitRepositoryInfo, relativePaths: [String]) async throws {
         guard !relativePaths.isEmpty else { return }
         let result = try await ProcessRunner.run(

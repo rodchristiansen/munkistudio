@@ -212,10 +212,26 @@ struct GitView: View {
                 .frame(minWidth: 320, idealWidth: leftWidth, maxWidth: 640)
 
                 Group {
-                    if state.focusedPanel == .hooks {
+                    switch state.focusedPanel {
+                    case .hooks:
                         GitHookDetailPane(state: state)
-                    } else {
-                        DiffPane(text: state.diffText)
+                    case .files:
+                        DiffView(
+                            text: state.diffText,
+                            mode: .workingTree,
+                            anyStaged: focusedFileStaged,
+                            onStageHunk: { file, hunk in
+                                Task { await applyChunk(file: file, hunk: hunk, cached: true, reverse: false) }
+                            },
+                            onUnstageHunk: { file, hunk in
+                                Task { await applyChunk(file: file, hunk: hunk, cached: true, reverse: true) }
+                            },
+                            onDiscardHunk: { file, hunk in
+                                Task { await applyChunk(file: file, hunk: hunk, cached: false, reverse: true) }
+                            }
+                        )
+                    case .history:
+                        CommitDetailView(text: state.diffText, commit: focusedCommit)
                     }
                 }
                 .frame(minWidth: 320)
@@ -565,6 +581,44 @@ private extension GitView {
         return result?.stdout ?? ""
     }
 
+    /// `true` when the currently focused file is staged — drives the
+    /// rich diff's hunk button label between "Stage Chunk" and
+    /// "Unstage Chunk".
+    var focusedFileStaged: Bool {
+        guard let path = state.primaryFileSelection else { return false }
+        return state.files.first { $0.relativePath == path }?.staged == true
+    }
+
+    /// The commit whose patch is currently rendered in the history pane.
+    var focusedCommit: GitCommit? {
+        guard let sha = state.commitSelection else { return nil }
+        return state.commits.first { $0.sha == sha }
+    }
+
+    /// Apply a single hunk through `git apply`, then refresh the file
+    /// list + diff so the UI reflects the new index/working-tree state.
+    /// `cached`/`reverse` switch between stage / unstage / discard.
+    func applyChunk(file: DiffFile, hunk: DiffHunk, cached: Bool, reverse: Bool) async {
+        guard let info = state.info else { return }
+        let patch = file.patch(forHunk: hunk)
+        do {
+            try await store.services.git.applyPatch(
+                in: info,
+                patch: patch,
+                cached: cached,
+                reverse: reverse
+            )
+            await refresh()
+        } catch {
+            let action: String = {
+                if cached && !reverse { return "Stage chunk" }
+                if cached && reverse { return "Unstage chunk" }
+                return "Discard chunk"
+            }()
+            note("\(action) failed: \(error.localizedDescription)", kind: .error)
+        }
+    }
+
     /// Toggle staging across every file in the multi-select. If all
     /// of them are currently staged the action unstages the lot;
     /// otherwise it stages every one (treating any unstaged item as
@@ -779,32 +833,3 @@ private extension GitView {
     }
 }
 
-// MARK: Diff pane
-
-struct DiffPane: View {
-    let text: String
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                    let s = String(line)
-                    Text(s)
-                        .font(.system(.callout, design: .monospaced))
-                        .foregroundStyle(color(for: s))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 8)
-                        .textSelection(.enabled)
-                }
-            }
-            .padding(.vertical, 6)
-        }
-    }
-
-    private func color(for line: String) -> Color {
-        if line.hasPrefix("+") && !line.hasPrefix("+++") { return .green }
-        if line.hasPrefix("-") && !line.hasPrefix("---") { return .red }
-        if line.hasPrefix("@@") { return .blue }
-        return .primary
-    }
-}
