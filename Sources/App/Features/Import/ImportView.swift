@@ -66,7 +66,12 @@ struct ImportView: View {
             .padding(40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { receiveDrop($0) }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !urls.isEmpty else { return false }
+            importStore.handle(droppedURLs: urls)
+            resolveQueueTemplates()
+            return true
+        } isTargeted: { isTargeted = $0 }
     }
 
     // MARK: Batch queue
@@ -112,35 +117,16 @@ struct ImportView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { receiveDrop($0) }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !urls.isEmpty else { return false }
+            importStore.handle(droppedURLs: urls)
+            resolveQueueTemplates()
+            return true
+        } isTargeted: { isTargeted = $0 }
         .task { resolveQueueTemplates() }
     }
 
-    // MARK: Drop / pick
-
-    private func receiveDrop(_ providers: [NSItemProvider]) -> Bool {
-        Task { @MainActor in
-            var urls: [URL] = []
-            for provider in providers {
-                if let url = await loadFileURL(from: provider) {
-                    urls.append(url)
-                }
-            }
-            if !urls.isEmpty {
-                importStore.handle(droppedURLs: urls)
-                resolveQueueTemplates()
-            }
-        }
-        return true
-    }
-
-    private func loadFileURL(from provider: NSItemProvider) async -> URL? {
-        await withCheckedContinuation { continuation in
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                continuation.resume(returning: url)
-            }
-        }
-    }
+    // MARK: Pick
 
     private func pickFiles() {
         let panel = NSOpenPanel()
