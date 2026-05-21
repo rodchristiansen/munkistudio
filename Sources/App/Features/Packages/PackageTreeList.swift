@@ -150,7 +150,7 @@ struct PackageTreeList: View {
                 Button {
                     Task { await toggleCatalog(name, on: record) }
                 } label: {
-                    Label(name, systemImage: current.contains(name) ? "checkmark" : "")
+                    selectableLabel(name, isSelected: current.contains(name))
                 }
             }
         }
@@ -163,7 +163,7 @@ struct PackageTreeList: View {
         Button {
             Task { await setCategory(nil, on: record) }
         } label: {
-            Label("(none)", systemImage: current == nil ? "checkmark" : "")
+            selectableLabel("(none)", isSelected: current == nil)
         }
         if !names.isEmpty {
             Divider()
@@ -171,7 +171,7 @@ struct PackageTreeList: View {
                 Button {
                     Task { await setCategory(name, on: record) }
                 } label: {
-                    Label(name, systemImage: current == name ? "checkmark" : "")
+                    selectableLabel(name, isSelected: current == name)
                 }
             }
         }
@@ -184,7 +184,7 @@ struct PackageTreeList: View {
         Button {
             Task { await setDeveloper(nil, on: record) }
         } label: {
-            Label("(none)", systemImage: current == nil ? "checkmark" : "")
+            selectableLabel("(none)", isSelected: current == nil)
         }
         if !names.isEmpty {
             Divider()
@@ -192,9 +192,22 @@ struct PackageTreeList: View {
                 Button {
                     Task { await setDeveloper(name, on: record) }
                 } label: {
-                    Label(name, systemImage: current == name ? "checkmark" : "")
+                    selectableLabel(name, isSelected: current == name)
                 }
             }
+        }
+    }
+
+    /// A menu-row label that shows a `checkmark` glyph when selected
+    /// and plain text otherwise. Avoids `Label(_:systemImage: "")` —
+    /// SwiftUI renders an empty symbol name as a missing-symbol glyph
+    /// on some macOS builds, leaving an inconsistent leading gap.
+    @ViewBuilder
+    private func selectableLabel(_ name: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(name, systemImage: "checkmark")
+        } else {
+            Text(name)
         }
     }
 
