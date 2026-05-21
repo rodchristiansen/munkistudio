@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 /// Menu-bar commands. Currently just the standard "Open…" and "Reload"
 /// entries; more land as features come online.
@@ -9,7 +8,10 @@ struct MunkiStudioCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("Open Repository…") {
-                openRepository()
+                // `Commands` aren't `View`s — no `.fileImporter` here.
+                // Bounce through `RepositoryStore` so `ContentView` (a
+                // real view) can present the picker.
+                store.openRepositoryPickerRequested = true
             }
             .keyboardShortcut("o", modifiers: .command)
         }
@@ -36,14 +38,4 @@ struct MunkiStudioCommands: Commands {
         #endif
     }
 
-    @MainActor
-    private func openRepository() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await store.open(rootURL: url) }
-        }
-    }
 }

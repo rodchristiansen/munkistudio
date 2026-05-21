@@ -1,6 +1,7 @@
 import SwiftUI
 import Core
 import AppKit
+import UniformTypeIdentifiers
 
 /// Root view. Shows the repo picker until one is opened, then a
 /// three-column `NavigationSplitView` whose middle / detail columns
@@ -22,6 +23,22 @@ struct ContentView: View {
         .sheet(isPresented: onboardingPresented) {
             OnboardingView()
         }
+        .fileImporter(
+            isPresented: openRepositoryPresented,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { await store.open(rootURL: url) }
+            }
+        }
+    }
+
+    private var openRepositoryPresented: Binding<Bool> {
+        Binding(
+            get: { store.openRepositoryPickerRequested },
+            set: { store.openRepositoryPickerRequested = $0 }
+        )
     }
 
     /// Drives the first-run onboarding sheet. Any dismissal — finishing,

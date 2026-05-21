@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import Core
 import Infra
 
@@ -18,6 +19,7 @@ struct PromoterView: View {
     @State private var pendingEarly: PromotionCandidate?
     @State private var showRulesSheet = false
     @State private var showRecipesSheet = false
+    @State private var pickingDeploymentFolder = false
     /// Cached candidate list. Recomputed only when pkginfo count or
     /// rule set changes — the full O(N×M) match is too expensive to
     /// rerun on every render with thousands of pkginfos.
@@ -61,6 +63,13 @@ struct PromoterView: View {
                     }
                 )
             }
+        }
+        .fileImporter(
+            isPresented: $pickingDeploymentFolder,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            receiveDeploymentFolder(result)
         }
         .sheet(isPresented: $showRecipesSheet) {
             sheetWrapper(title: "AutoPkg Recipes") {
@@ -319,16 +328,12 @@ struct PromoterView: View {
     }
 
     private func chooseDeploymentFolder() {
-        @Bindable var bindable = settings
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
-        panel.message = "Select the AutoPkg deployment folder containing promoter.yml. This is independent of your Munki repository folder."
-        if panel.runModal() == .OK, let url = panel.url {
-            bindable.autopkgDeploymentPath = url.path
-        }
+        pickingDeploymentFolder = true
+    }
+
+    private func receiveDeploymentFolder(_ result: Result<[URL], any Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        settings.autopkgDeploymentPath = url.path
     }
 
     // MARK: Bindings & state

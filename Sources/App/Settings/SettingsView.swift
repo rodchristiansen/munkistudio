@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import Core
 
 /// Content of the Preferences window (Cmd-,). A `TabView` so each future
@@ -35,7 +34,7 @@ private struct FeatureSettingsView: View {
                 HStack {
                     TextField("Deployment folder", text: $settings.autopkgDeploymentPath,
                               prompt: Text("Folder containing promoter.yml"))
-                    Button("Choose…") { chooseFolder(into: $settings.autopkgDeploymentPath) }
+                    PathChooserButton.folder(path: $settings.autopkgDeploymentPath)
                 }
                 .disabled(!settings.enablePromoterTab)
                 TextField("Hidden catalogs", text: $settings.promoterHiddenCatalogs,
@@ -53,7 +52,7 @@ private struct FeatureSettingsView: View {
                 HStack {
                     TextField("Profiles folder", text: $settings.profilesDirectoryPath,
                               prompt: Text("Folder of .mobileconfig files"))
-                    Button("Choose…") { chooseFolder(into: $settings.profilesDirectoryPath) }
+                    PathChooserButton.folder(path: $settings.profilesDirectoryPath)
                 }
                 .disabled(!settings.enableProfilesTab)
             } header: {
@@ -69,15 +68,6 @@ private struct FeatureSettingsView: View {
         .frame(minHeight: 360)
     }
 
-    private func chooseFolder(into binding: Binding<String>) {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            binding.wrappedValue = url.path
-        }
-    }
 }
 
 // MARK: - Build
@@ -98,7 +88,7 @@ private struct BuildSettingsView: View {
                 HStack {
                     TextField("Projects folder", text: $settings.munkipkgProjectsPath,
                               prompt: Text("Path to a folder of munkipkg projects"))
-                    Button("Choose…") { chooseFolder(into: $settings.munkipkgProjectsPath) }
+                    PathChooserButton.folder(path: $settings.munkipkgProjectsPath)
                 }
             } header: {
                 Text("munkipkg Projects")
@@ -123,7 +113,7 @@ private struct BuildSettingsView: View {
                 HStack {
                     TextField("Executable", text: $settings.munkipkgExecutablePath,
                               prompt: Text("/usr/local/munki/munkipkg"))
-                    Button("Choose…") { chooseExecutable(into: $settings.munkipkgExecutablePath) }
+                    PathChooserButton.file(types: [.unixExecutable, .executable], path: $settings.munkipkgExecutablePath)
                 }
                 HStack {
                     Button("Download & Install munkipkg") { Task { await install() } }
@@ -172,26 +162,6 @@ private struct BuildSettingsView: View {
         }
     }
 
-    private func chooseExecutable(into binding: Binding<String>) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        if panel.runModal() == .OK, let url = panel.url {
-            binding.wrappedValue = url.path
-        }
-    }
-
-    private func chooseFolder(into binding: Binding<String>) {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            binding.wrappedValue = url.path
-        }
-    }
 }
 
 // MARK: - General
