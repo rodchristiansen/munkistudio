@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Row-based editor for `included_manifests`. Mirrors the
 /// ``ManifestItemListEditor`` shape but without a conditional dropdown:
@@ -18,13 +17,10 @@ struct IncludedManifestsEditor: View {
                     name: name,
                     onRemove: { values.remove(at: index) }
                 )
-                .onDrag {
-                    NSItemProvider(object: name as NSString)
+                .draggable(name)
+                .dropDestination(for: String.self) { dropped, _ in
+                    reorder(dropped: dropped, targetIndex: index)
                 }
-                .onDrop(
-                    of: [.plainText],
-                    delegate: ReorderDelegate(targetIndex: index, values: $values)
-                )
             }
             addRow
         }
@@ -46,6 +42,20 @@ struct IncludedManifestsEditor: View {
     private func add(_ name: String) {
         guard !values.contains(name) else { return }
         values.append(name)
+    }
+
+    /// Drop the dragged name(s) at `targetIndex`. Plain reorder when
+    /// the dragged value is already in the list; ignored when it isn't
+    /// — typed entry happens through the add-row picker, not drops.
+    @discardableResult
+    private func reorder(dropped: [String], targetIndex: Int) -> Bool {
+        guard let name = dropped.first,
+              let sourceIndex = values.firstIndex(of: name),
+              sourceIndex != targetIndex else { return false }
+        values.remove(at: sourceIndex)
+        let insertion = targetIndex > sourceIndex ? targetIndex - 1 : targetIndex
+        values.insert(name, at: min(insertion, values.count))
+        return true
     }
 }
 
@@ -78,24 +88,3 @@ private struct IncludedManifestRow: View {
     }
 }
 
-private struct ReorderDelegate: DropDelegate {
-    let targetIndex: Int
-    @Binding var values: [String]
-
-    func dropEntered(info: DropInfo) {
-        guard let provider = info.itemProviders(for: [.plainText]).first else { return }
-        let target = targetIndex
-        _ = provider.loadObject(ofClass: NSString.self) { [$values] value, _ in
-            guard let name = value as? String else { return }
-            Task { @MainActor in
-                guard let sourceIndex = $values.wrappedValue.firstIndex(of: name),
-                      sourceIndex != target else { return }
-                $values.wrappedValue.remove(at: sourceIndex)
-                let insertion = target > sourceIndex ? target - 1 : target
-                $values.wrappedValue.insert(name, at: insertion)
-            }
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool { true }
-}

@@ -1,6 +1,5 @@
 import SwiftUI
 import Core
-import UniformTypeIdentifiers
 
 /// Row-based editor for a manifest's install lists (managed_installs,
 /// managed_uninstalls, managed_updates, optional_installs, featured_items).
@@ -53,15 +52,18 @@ struct ManifestItemListEditor: View {
                     onRemove: { remove(entry) },
                     onMoveTo: { newConditionPath in move(entry, to: newConditionPath) }
                 )
-                .onDrag {
-                    NSItemProvider(object: entry.id as NSString)
-                } preview: {
-                    Text(entry.name).padding(6).background(.regularMaterial, in: .rect(cornerRadius: 6))
+                .draggable(entry.id) {
+                    Text(entry.name)
+                        .padding(6)
+                        .background(.regularMaterial, in: .rect(cornerRadius: 6))
                 }
-                .onDrop(
-                    of: [.plainText],
-                    delegate: DropReorderDelegate(target: entry, all: entries, perform: reorder)
-                )
+                .dropDestination(for: String.self) { dropped, _ in
+                    guard let id = dropped.first,
+                          let source = entries.first(where: { $0.id == id }),
+                          source.id != entry.id else { return false }
+                    reorder(source, before: entry)
+                    return true
+                }
             }
             addRow
         }
@@ -322,26 +324,6 @@ private struct ManifestItemRow: View {
         guard let path = entry.conditionPath else { return "" }
         return conditionOptions.first { $0.path == path }?.label ?? ""
     }
-}
-
-// MARK: Drop reordering
-
-private struct DropReorderDelegate: DropDelegate {
-    let target: Entry
-    let all: [Entry]
-    let perform: (Entry, Entry) -> Void
-
-    func dropEntered(info: DropInfo) {
-        guard let provider = info.itemProviders(for: [.plainText]).first else { return }
-        _ = provider.loadObject(ofClass: NSString.self) { value, _ in
-            guard let id = value as? String,
-                  let source = all.first(where: { $0.id == id }),
-                  source.id != target.id else { return }
-            Task { @MainActor in perform(source, target) }
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool { true }
 }
 
 // MARK: Models
