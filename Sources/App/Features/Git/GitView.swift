@@ -44,6 +44,52 @@ struct GitView: View {
         }
         .task(id: store.gitInfo?.workTreeRoot) { await loadAll() }
         .sheet(isPresented: Bindable(state).helpVisible) { GitHelpSheet() }
+        .alert(
+            discardTitle(for: state.discardRequest),
+            isPresented: discardPresented,
+            presenting: state.discardRequest
+        ) { request in
+            Button("Discard", role: .destructive) {
+                state.discardRequest = nil
+                Task { await performDiscard(request.paths) }
+            }
+            Button("Cancel", role: .cancel) {
+                state.discardRequest = nil
+            }
+        } message: { request in
+            Text(discardMessage(for: request))
+        }
+        .alert(
+            "Git index is locked",
+            isPresented: indexLockPresented,
+            presenting: state.indexLockRequest
+        ) { request in
+            Button("Show holder…") {
+                Task { await showHolder(for: request) }
+            }
+            Button("Delete lock file", role: .destructive) {
+                deleteLockAndRetry(for: request)
+            }
+            Button("Cancel", role: .cancel) {
+                cancelIndexLock(for: request)
+            }
+        } message: { request in
+            Text("\(request.message)\n\nLock file: \(IndexLockRecovery.lockURL(in: request.workTreeRoot).path)")
+        }
+        .alert(
+            "Lock holder",
+            isPresented: indexLockHolderPresented,
+            presenting: state.indexLockHolder
+        ) { holder in
+            Button("Delete lock file", role: .destructive) {
+                deleteHolderAndRetry(holder)
+            }
+            Button("Cancel", role: .cancel) {
+                state.indexLockHolder = nil
+            }
+        } message: { holder in
+            Text(holderMessage(for: holder))
+        }
         .focusable()
         .focused($paneFocused)
         .focusEffectDisabled()
@@ -456,7 +502,7 @@ private extension GitView {
             if state.focusedPanel == .files { openSelectedInEditor() }
             return .handled
         case "d":
-            if state.focusedPanel == .files { Task { await discardSelected() } }
+            if state.focusedPanel == .files { discardSelected() }
             return .handled
         case "?":
             state.helpVisible.toggle()
@@ -627,22 +673,19 @@ private extension GitView {
         _ error: any Error,
         action: String,
         info: GitRepositoryInfo,
-        retry: @escaping () async -> Void
+        retry: @escaping @Sendable () async -> Void
     ) async {
         let message = error.localizedDescription
         guard IndexLockRecovery.matches(message: message) else {
             note("\(action) failed: \(message)", kind: .error)
             return
         }
-        switch IndexLockRecovery.present(workTreeRoot: info.workTreeRoot, message: message) {
-        case .deleted:
-            note("Removed .git/index.lock — retrying \(action.lowercased())…", kind: .info)
-            await retry()
-        case .cancelled:
-            note("\(action) failed: \(message)", kind: .error)
-        case .failed(let why):
-            note(why, kind: .error)
-        }
+        state.indexLockRequest = GitPaneState.IndexLockRequest(
+            workTreeRoot: info.workTreeRoot,
+            message: message,
+            action: action,
+            retry: retry
+        )
     }
 
     func runCommit() async {
@@ -751,22 +794,117 @@ private extension GitView {
     /// hits — `git checkout --` is irreversible and we don't want
     /// surprise mass-discards because the keyboard shortcut fired
     /// against a wider selection than the user remembered.
-    func discardSelected() async {
-        guard state.info != nil, !state.fileSelection.isEmpty else { return }
-        let paths = state.fileSelection.sorted()
-        let alert = NSAlert()
-        if paths.count == 1 {
-            alert.messageText = "Discard changes to \(paths[0])?"
-        } else {
-            alert.messageText = "Discard changes to \(paths.count) files?"
-        }
-        alert.informativeText = paths.count == 1
+    // MARK: SwiftUI alert state helpers
+
+    private var discardPresented: Binding<Bool> {
+        Binding(
+            get: { state.discardRequest != nil },
+            set: { if !$0 { state.discardRequest = nil } }
+        )
+    }
+
+    private var indexLockPresented: Binding<Bool> {
+        Binding(
+            get: { state.indexLockRequest != nil },
+            set: { if !$0 { state.indexLockRequest = nil } }
+        )
+    }
+
+    private var indexLockHolderPresented: Binding<Bool> {
+        Binding(
+            get: { state.indexLockHolder != nil },
+            set: { if !$0 { state.indexLockHolder = nil } }
+        )
+    }
+
+    private func discardTitle(for request: GitPaneState.DiscardRequest?) -> String {
+        guard let request else { return "" }
+        return request.paths.count == 1
+            ? "Discard changes to \(request.paths[0])?"
+            : "Discard changes to \(request.paths.count) files?"
+    }
+
+    private func discardMessage(for request: GitPaneState.DiscardRequest) -> String {
+        request.paths.count == 1
             ? "This is irreversible."
-            : "This is irreversible. Files:\n\n" + paths.joined(separator: "\n")
-        alert.addButton(withTitle: "Discard")
-        alert.addButton(withTitle: "Cancel")
-        alert.alertStyle = .warning
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+            : "This is irreversible. Files:\n\n" + request.paths.joined(separator: "\n")
+    }
+
+    /// Probe `lsof` for who holds the lock, then swap the recovery
+    /// alert for the holder-detail alert.
+    private func showHolder(for request: GitPaneState.IndexLockRequest) async {
+        let lockURL = IndexLockRecovery.lockURL(in: request.workTreeRoot)
+        let retry = request.retry
+        state.indexLockRequest = nil
+        switch await IndexLockRecovery.inspectHolder(lockURL: lockURL) {
+        case .ok(let output):
+            state.indexLockHolder = .init(
+                lockURL: lockURL,
+                lsofOutput: output,
+                retry: retry
+            )
+        case .lookupFailed(let why):
+            note(why, kind: .error)
+        }
+    }
+
+    private func deleteLockAndRetry(for request: GitPaneState.IndexLockRequest) {
+        let lockURL = IndexLockRecovery.lockURL(in: request.workTreeRoot)
+        let retry = request.retry
+        let action = request.action
+        state.indexLockRequest = nil
+        switch IndexLockRecovery.deleteLock(lockURL: lockURL) {
+        case .deleted:
+            note("Removed .git/index.lock — retrying \(action.lowercased())…", kind: .info)
+            Task { await retry() }
+        case .failed(let why):
+            note(why, kind: .error)
+        }
+    }
+
+    private func cancelIndexLock(for request: GitPaneState.IndexLockRequest) {
+        note("\(request.action) failed: \(request.message)", kind: .error)
+        state.indexLockRequest = nil
+    }
+
+    private func deleteHolderAndRetry(_ holder: GitPaneState.IndexLockHolder) {
+        let retry = holder.retry
+        let lockURL = holder.lockURL
+        state.indexLockHolder = nil
+        switch IndexLockRecovery.deleteLock(lockURL: lockURL) {
+        case .deleted:
+            note("Removed .git/index.lock — retrying…", kind: .info)
+            Task { await retry() }
+        case .failed(let why):
+            note(why, kind: .error)
+        }
+    }
+
+    private func holderMessage(for holder: GitPaneState.IndexLockHolder) -> String {
+        if holder.lsofOutput.isEmpty {
+            return """
+                No process currently has \(holder.lockURL.lastPathComponent) open.
+
+                The lock was likely left behind by a crashed git command. Safe to delete.
+                """
+        }
+        return """
+            lsof reports:
+
+            \(holder.lsofOutput)
+
+            Quit that process before deleting the lock, or delete it now if you know it's safe.
+            """
+    }
+
+    func discardSelected() {
+        guard state.info != nil, !state.fileSelection.isEmpty else { return }
+        state.discardRequest = .init(paths: state.fileSelection.sorted())
+    }
+
+    /// Runs after the user confirms a discard via the SwiftUI alert.
+    func performDiscard(_ paths: [String]) async {
+        guard !paths.isEmpty else { return }
         let summary = paths.count == 1
             ? "Discarded \(paths[0])"
             : "Discarded \(paths.count) files"

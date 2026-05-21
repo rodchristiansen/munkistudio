@@ -70,7 +70,41 @@ final class GitPaneState {
     var filterVisible: Bool = false
     var filter: String = ""
 
+    /// Set to drive the SwiftUI .alert that confirms a destructive
+    /// `git checkout -- <path…>` ("Discard changes"). Carries the
+    /// target paths so the alert can present them inline.
+    var discardRequest: DiscardRequest?
+
+    /// Pending IndexLockRecovery flow — both panels reach into this
+    /// when they hit an index.lock failure. The view layer renders the
+    /// recovery alert (and any follow-up "show holder" panel) from this
+    /// state, then calls `retry` on success.
+    var indexLockRequest: IndexLockRequest?
+    /// Result of probing `lsof` for the lock holder — populated by the
+    /// "Show holder…" action so the secondary alert can render it.
+    var indexLockHolder: IndexLockHolder?
+
     enum StatusKind { case info, success, error }
+
+    struct DiscardRequest: Equatable, Identifiable {
+        let id = UUID()
+        let paths: [String]
+    }
+
+    struct IndexLockRequest: Identifiable {
+        let id = UUID()
+        let workTreeRoot: URL
+        let message: String
+        let action: String
+        let retry: @Sendable () async -> Void
+    }
+
+    struct IndexLockHolder: Identifiable {
+        let id = UUID()
+        let lockURL: URL
+        let lsofOutput: String
+        let retry: @Sendable () async -> Void
+    }
 
     // MARK: Filtered views (used by the lists)
 
