@@ -1,6 +1,5 @@
 import SwiftUI
 import Core
-import AppKit
 import CoreServices
 
 /// Full-width Build section. A fixed-width munkipkg project list on the
@@ -135,7 +134,7 @@ struct BuildView: View {
             buildToken += 1
         }
         Button("Reveal in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([project.directoryURL])
+            Workspace.reveal([project.directoryURL])
         }
         Divider()
         Button("Rename…") { startRename(project) }
@@ -373,7 +372,7 @@ private struct BuildProjectDetail: View {
                 if building { ProgressView().controlSize(.small) }
                 if let builtPackageURL {
                     Button {
-                        NSWorkspace.shared.activateFileViewerSelecting([builtPackageURL])
+                        Workspace.reveal([builtPackageURL])
                     } label: {
                         Label("Reveal in Finder", systemImage: "folder")
                     }
@@ -986,7 +985,7 @@ private struct PayloadSection: View {
             .help("Delete")
             .disabled(selection == nil)
             Button {
-                NSWorkspace.shared.activateFileViewerSelecting([payloadURL])
+                Workspace.reveal([payloadURL])
             } label: {
                 Image(systemName: "arrow.up.forward.app")
             }
@@ -1056,7 +1055,7 @@ private struct PayloadSection: View {
         switch action {
         case .newFolder: newFolder(in: node)
         case .addFiles: addFiles(to: node)
-        case .reveal: NSWorkspace.shared.activateFileViewerSelecting([node.url])
+        case .reveal: Workspace.reveal([node.url])
         case .rename: renameNode = node; renameText = node.name
         case .delete: delete(node)
         case .edit: beginEditing(node)
@@ -1076,7 +1075,7 @@ private struct PayloadSection: View {
         // would write U+FFFD replacements back over a binary plist,
         // a Latin-1 config, etc. Hand those to the system editor.
         guard let text = String(data: data, encoding: .utf8) else {
-            NSWorkspace.shared.open(node.url)
+            Workspace.open(node.url)
             return
         }
         editingText = text
@@ -1271,7 +1270,7 @@ private struct PayloadTreeRow: View {
             } else if isPayloadTextFile(node.url) {
                 perform(.edit, node)
             } else {
-                NSWorkspace.shared.open(node.url)
+                Workspace.open(node.url)
             }
         }
         .contextMenu {
@@ -1282,18 +1281,13 @@ private struct PayloadTreeRow: View {
                 if isPayloadTextFile(node.url) {
                     Button("Edit") { perform(.edit, node) }
                 }
-                Button("Open") { NSWorkspace.shared.open(node.url) }
-                let apps = NSWorkspace.shared.urlsForApplications(toOpen: node.url)
+                Button("Open") { Workspace.open(node.url) }
+                let apps = Workspace.applications(toOpen: node.url)
                 if !apps.isEmpty {
                     Menu("Open With") {
                         ForEach(apps, id: \.self) { app in
                             Button(FileManager.default.displayName(atPath: app.path)) {
-                                NSWorkspace.shared.open(
-                                    [node.url],
-                                    withApplicationAt: app,
-                                    configuration: NSWorkspace.OpenConfiguration(),
-                                    completionHandler: nil
-                                )
+                                Workspace.open([node.url], with: app)
                             }
                         }
                     }

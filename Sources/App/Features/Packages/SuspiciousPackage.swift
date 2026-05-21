@@ -1,6 +1,4 @@
-import AppKit
-import Foundation
-import UniformTypeIdentifiers
+import SwiftUI
 
 /// Integration with Mother's Ruin Software's free "Suspicious Package"
 /// inspector. Lets an admin open a pkginfo's `.pkg` installer item to
@@ -13,16 +11,14 @@ enum SuspiciousPackage {
     static let downloadPageURL = URL(string: "https://www.mothersruin.com/software/SuspiciousPackage/")!
 
     /// The system icon macOS uses for `.pkg` installer files.
-    static let pkgFileIcon: NSImage = {
-        if let type = UTType(filenameExtension: "pkg") {
-            return NSWorkspace.shared.icon(for: type)
-        }
-        return NSWorkspace.shared.icon(forFile: "/System")
-    }()
+    @MainActor
+    static var pkgFileIcon: Image {
+        Workspace.fileIcon(forExtension: "pkg")
+    }
 
     /// Location of the installed app, or `nil` when it isn't installed.
     static var applicationURL: URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+        Workspace.application(bundleIdentifier: bundleID)
     }
 
     static var isInstalled: Bool { applicationURL != nil }
@@ -35,19 +31,17 @@ enum SuspiciousPackage {
 
     /// Open `fileURL` in Suspicious Package. Returns `false` when the app
     /// isn't installed — the caller should then offer the download page.
+    @MainActor
     @discardableResult
     static func open(_ fileURL: URL) -> Bool {
         guard let app = applicationURL else { return false }
-        NSWorkspace.shared.open(
-            [fileURL],
-            withApplicationAt: app,
-            configuration: NSWorkspace.OpenConfiguration()
-        )
+        Workspace.open([fileURL], with: app)
         return true
     }
 
     /// Open the vendor download page in the default browser.
+    @MainActor
     static func openDownloadPage() {
-        NSWorkspace.shared.open(downloadPageURL)
+        Workspace.open(downloadPageURL)
     }
 }

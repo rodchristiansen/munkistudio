@@ -3,6 +3,10 @@ import AppKit
 import UniformTypeIdentifiers
 import Core
 
+// AppKit is still imported on this branch only for the few remaining
+// NSOpenPanel sites in this file; the feature/swiftui-file-importer
+// branch removes those.
+
 /// Right column of the Profiles tab — monospaced XML editor with a
 /// status strip above. The strip shows a one-line valid / N issues
 /// summary; clicking the chevron expands the per-issue list with line
@@ -99,7 +103,7 @@ private struct ProfileEditor: View {
             signatureChip
             Spacer(minLength: 12)
             Button {
-                NSWorkspace.shared.activateFileViewerSelecting([record.fileURL])
+                Workspace.reveal([record.fileURL])
             } label: {
                 Image(systemName: "magnifyingglass")
             }
@@ -155,7 +159,7 @@ private struct ProfileEditor: View {
 
     /// Offer to open the profile in a dedicated editor. Detects each
     /// candidate's installed bundle URL when the menu opens and either
-    /// hands the file to that app via `NSWorkspace` or, when the app is
+    /// hands the file to that app via `Workspace.open(_:with:)` or, when the app is
     /// missing, deep-links to its download page. An "Other…" entry
     /// falls through to a standard NSOpenPanel chooser so the user can
     /// pick any installed app the system suggests for `.mobileconfig`.
@@ -180,7 +184,7 @@ private struct ProfileEditor: View {
             } else {
                 Button("Get iMazing Profile Editor…") {
                     if let url = URL(string: "https://imazing.com/profile-editor") {
-                        NSWorkspace.shared.open(url)
+                        Workspace.open(url)
                     }
                 }
             }
@@ -192,7 +196,7 @@ private struct ProfileEditor: View {
             } else {
                 Button("Get Low Profile…") {
                     if let url = URL(string: "https://github.com/ninxsoft/LowProfile") {
-                        NSWorkspace.shared.open(url)
+                        Workspace.open(url)
                     }
                 }
             }
@@ -207,12 +211,7 @@ private struct ProfileEditor: View {
     }
 
     private func open(in appURL: URL) {
-        let configuration = NSWorkspace.OpenConfiguration()
-        NSWorkspace.shared.open(
-            [record.fileURL],
-            withApplicationAt: appURL,
-            configuration: configuration
-        )
+        Workspace.open([record.fileURL], with: appURL)
     }
 
     private func chooseAndOpen() {
@@ -235,7 +234,7 @@ private struct ProfileEditor: View {
     /// more robust than hardcoding one.
     private static func installedApp(bundleIDs: [String]) -> URL? {
         for id in bundleIDs {
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+            if let url = Workspace.application(bundleIdentifier: id) {
                 return url
             }
         }

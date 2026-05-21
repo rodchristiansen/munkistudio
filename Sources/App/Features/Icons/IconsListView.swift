@@ -46,8 +46,8 @@ struct IconDetailView: View {
         if let asset = selected {
             VStack {
                 if let imageData,
-                   let image = NSImage(data: imageData) {
-                    Image(nsImage: image)
+                   let image = Workspace.loadImage(data: imageData) {
+                    image
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: 280, maxHeight: 280)
@@ -83,4 +83,3 @@ struct IconDetailView: View {
     }
 }
 
-import AppKit

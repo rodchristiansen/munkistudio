@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import Core
 
 /// Tabbed pkginfo editor with five panels, each telling one story:
@@ -346,7 +345,7 @@ private struct OverviewTab: View {
                             Button {
                                 inspectInstaller()
                             } label: {
-                                Image(nsImage: SuspiciousPackage.pkgFileIcon)
+                                SuspiciousPackage.pkgFileIcon
                                     .resizable()
                                     .frame(width: 18, height: 18)
                                     .accessibilityHidden(true)
@@ -446,7 +445,7 @@ private struct OverviewTab: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button {
-                            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                            Workspace.reveal([fileURL])
                         } label: {
                             Image(systemName: "folder")
                         }

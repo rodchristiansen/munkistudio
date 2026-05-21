@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import Yams
 
 /// Plain-text editor for a single configuration file (`promoter.yml`,
@@ -69,7 +68,7 @@ struct PromoterFileEditor: View {
                     .truncationMode(.middle)
             }
             Button {
-                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                Workspace.reveal([fileURL])
             } label: { Label("Reveal", systemImage: "magnifyingglass") }
             .disabled(status != .ready)
             .help("Reveal in Finder")
