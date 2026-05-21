@@ -118,7 +118,7 @@ struct ManifestTreeList: View {
                 Button {
                     Task { await toggleCatalog(name, on: record) }
                 } label: {
-                    Label(name, systemImage: current.contains(name) ? "checkmark" : "")
+                    selectableLabel(name, isSelected: current.contains(name))
                 }
             }
         }
@@ -139,9 +139,22 @@ struct ManifestTreeList: View {
                 Button {
                     Task { await toggleIncluded(name, on: record) }
                 } label: {
-                    Label(name, systemImage: current.contains(name) ? "checkmark" : "")
+                    selectableLabel(name, isSelected: current.contains(name))
                 }
             }
+        }
+    }
+
+    /// Menu row that shows a `checkmark` glyph when selected and plain
+    /// text otherwise. Avoids `Label(_:systemImage: "")` — SwiftUI
+    /// renders an empty symbol name as a missing-symbol glyph on some
+    /// macOS builds.
+    @ViewBuilder
+    private func selectableLabel(_ name: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(name, systemImage: "checkmark")
+        } else {
+            Text(name)
         }
     }
 
