@@ -370,6 +370,7 @@ private struct OverviewTab: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                 }
+                Toggle("On demand", isOn: Bindings.optionalBool($draft.onDemand))
             }
             .cardStyle()
         }
@@ -592,6 +593,11 @@ private struct InstallTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 0) {
+                CardSectionHeader("Options")
+                Toggle("Unattended install", isOn: Bindings.optionalBool($draft.unattendedInstall))
+                    .cardStyle()
+            }
+            VStack(alignment: .leading, spacing: 0) {
                 CardSectionHeader("Items to copy")
                 ItemsToCopyTable(items: Bindings.bindArray($draft.itemsToCopy))
                     .cardStyle()
@@ -687,6 +693,8 @@ private struct UninstallTab: View {
                         .labelsHidden()
                     }
                     Toggle("Uninstallable", isOn: Bindings.optionalBool($draft.uninstallable))
+                    Toggle("Unattended uninstall", isOn: Bindings.optionalBool($draft.unattendedUninstall))
+                    Toggle("Autoremove", isOn: Bindings.optionalBool($draft.autoremove))
                 }
                 .cardStyle()
             }
@@ -835,15 +843,11 @@ private struct AdvancedTab: View {
                 GridItem(.flexible(), alignment: .leading)
             ]
             LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                Toggle("Autoremove", isOn: Bindings.optionalBool($draft.autoremove))
                 Toggle("Apple update item", isOn: Bindings.optionalBool($draft.appleItem))
                 Toggle("Suppress bundle relocation", isOn: Bindings.optionalBool($draft.suppressBundleRelocation))
                 Toggle("Allow untrusted signature", isOn: Bindings.optionalBool($draft.allowUntrusted))
                 Toggle("Precache", isOn: Bindings.optionalBool($draft.precache))
                 Toggle("Featured", isOn: Bindings.optionalBool($draft.featured))
-                Toggle("Unattended install", isOn: Bindings.optionalBool($draft.unattendedInstall))
-                Toggle("Unattended uninstall", isOn: Bindings.optionalBool($draft.unattendedUninstall))
-                Toggle("On demand", isOn: Bindings.optionalBool($draft.onDemand))
             }
             .cardStyle()
         }
