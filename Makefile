@@ -113,15 +113,21 @@ $(APP_BUNDLE): FORCE | $(BUILD_DIR)
 	@mkdir -p $(APP_MACOS) $(APP_RESOURCES)
 	cp $(BIN_PATH) $(APP_MACOS)/$(APP_NAME)
 	@chmod +x $(APP_MACOS)/$(APP_NAME)
-	@# SwiftPM emits a `<App>_<Target>.bundle` next to the executable
-	@# for every target that declares `resources:` (Infra ships the
-	@# vendored Payloads.yaml). Bundle.module looks them up inside
-	@# Contents/Resources at runtime, so copy whatever SwiftPM built
-	@# alongside the binary or the app traps on launch.
+	@# SwiftPM emits each target's resources as a flat `<App>_<Target>.bundle`
+	@# directory next to the executable — no Info.plist, no Contents/.
+	@# The hardened runtime + notarization seal can't validate that shape
+	@# on a fresh Mac, so the app launches cleanly on the dev machine
+	@# (launch-services cache) and crashes everywhere else. Re-shape into a
+	@# proper macOS bundle (Contents/Resources/ + minimal Info.plist) via
+	@# scripts/embed-resource-bundle.sh before embedding. Test fixture
+	@# bundles (*Tests*.bundle) never belong in a shipped app — skip them.
 	@for bundle in .build/$(CONFIGURATION)/*.bundle; do \
 	    [ -e "$$bundle" ] || continue; \
-	    echo "Embedding resource bundle $$(basename $$bundle)"; \
-	    cp -R "$$bundle" "$(APP_RESOURCES)/"; \
+	    case "$$(basename "$$bundle")" in *Tests*.bundle) \
+	        echo "Skipping test bundle $$(basename "$$bundle")"; continue;; esac; \
+	    echo "Embedding resource bundle $$(basename "$$bundle")"; \
+	    ./scripts/embed-resource-bundle.sh \
+	        "$$bundle" "$(APP_RESOURCES)" "$(BUNDLE_ID)"; \
 	done
 	@./scripts/render-info-plist.sh \
 	    $(INFO_PLIST) \
@@ -141,6 +147,17 @@ $(APP_BUNDLE): FORCE | $(BUILD_DIR)
 	else \
 	    echo "No app icon at $(ICON_SRC) — building without one."; \
 	fi
+	@# Sign every embedded resource bundle before the outer .app so the
+	@# outer seal covers their CodeResources hashes. Without this the
+	@# notarized .pkg installs cleanly but the app dies on first launch on
+	@# any Mac other than the developer's. Fail the recipe on the first
+	@# nested-bundle signing error so we never seal a half-signed tree.
+	@for bundle in $(APP_RESOURCES)/*.bundle; do \
+	    [ -e "$$bundle" ] || continue; \
+	    codesign --force --options runtime \
+	        --sign "$(SIGN_IDENTITY)" \
+	        "$$bundle" || exit 1; \
+	done
 	codesign --force --options runtime \
 	    --entitlements $(ENTITLEMENTS) \
 	    --sign "$(SIGN_IDENTITY)" \
@@ -166,6 +183,16 @@ dist: pkg verify
 # a secure timestamp — notarization rejects ad-hoc or untimestamped code.
 sign-app: check-signing-config release
 	@echo "Signing $(APP_BUNDLE)"
+	@# Same as the dev build: sign nested resource bundles first so the
+	@# outer seal includes them and on-launch validation succeeds on Macs
+	@# other than the developer's. Fail fast — notarization would reject
+	@# the package anyway, better to surface the codesign error inline.
+	@for bundle in $(APP_RESOURCES)/*.bundle; do \
+	    [ -e "$$bundle" ] || continue; \
+	    codesign --force --options runtime --timestamp \
+	        --sign "$(SIGNING_IDENTITY_APP)" \
+	        "$$bundle" || exit 1; \
+	done
 	codesign --force --options runtime --timestamp \
 	    --entitlements $(ENTITLEMENTS) \
 	    --sign "$(SIGNING_IDENTITY_APP)" \
