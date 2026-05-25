@@ -116,16 +116,55 @@ final class TestingStore {
     func validate(
         entry: ChecklistEntry,
         snapshot: RepositorySnapshot,
-        service: any TestingService
+        repository: MunkiRepository,
+        services: AppServices,
+        munkipkgProjectsFolder: URL?
     ) async {
         guard let record = snapshot.pkginfos.first(where: { $0.pkginfo.name == entry.packageName }) else {
             errorMessage = "No pkginfo found for \(entry.packageName)."
             return
         }
         phase = .validating(packageName: entry.packageName)
-        let result = await service.validate(record, in: snapshot)
-        resultsByEntry[entry.id] = result
+
+        // Phase A: schema + script lint.
+        var combined = await services.testing.validate(record, in: snapshot)
+
+        // Phase B.1: build, only when a munkipkg project with the same
+        // name as the package is reachable.
+        if let folder = munkipkgProjectsFolder,
+           let project = await Self.findMunkipkgProject(
+                named: record.pkginfo.name,
+                in: folder,
+                via: services.munkipkg
+           ) {
+            let buildStep = await services.testing.validateBuild(
+                project: project,
+                munkipkg: services.munkipkg
+            )
+            combined.steps.append(buildStep)
+        }
+
+        // Phase B.2: artifact validation against the deployed pkgs/.
+        let artifactStep = await services.testing.validateBuildArtifact(record, in: repository)
+        combined.steps.append(artifactStep)
+
+        combined.finishedAt = Date()
+        resultsByEntry[entry.id] = combined
         phase = .ready
+    }
+
+    private static func findMunkipkgProject(
+        named name: String,
+        in folder: URL,
+        via service: any MunkipkgService
+    ) async -> MunkipkgProject? {
+        do {
+            let projects = try await service.projects(in: folder)
+            return projects.first { $0.name == name }
+                ?? projects.first { $0.buildInfo.name == name }
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Autofix

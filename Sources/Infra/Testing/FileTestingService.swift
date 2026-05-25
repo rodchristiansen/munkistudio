@@ -139,6 +139,159 @@ public struct FileTestingService: TestingService {
         )
     }
 
+    // MARK: - Phase B steps
+
+    public func validateBuild(
+        project: MunkipkgProject,
+        munkipkg: any MunkipkgService
+    ) async -> TestingStepResult {
+        let started = Date()
+        var messages: [String] = []
+        var severity: TestingStepResult.Severity = .success
+        var success = false
+        var capturedProduct: URL?
+
+        do {
+            for try await event in munkipkg.build(
+                project,
+                options: MunkipkgBuildOptions(skipImport: true, quiet: true)
+            ) {
+                switch event {
+                case .line(let line):
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        messages.append(trimmed)
+                    }
+                case .finished(let exitCode, let productURL):
+                    capturedProduct = productURL
+                    if exitCode == 0, let productURL {
+                        success = true
+                        messages.append("Built \(productURL.lastPathComponent).")
+                    } else {
+                        severity = .error
+                        messages.append("munkipkg exited \(exitCode).")
+                    }
+                }
+            }
+        } catch {
+            severity = .error
+            messages.append("munkipkg failed: \(error.localizedDescription)")
+        }
+
+        // Trim noise: keep the last ~20 lines so the inspector stays
+        // readable; full output lives in the Build tab.
+        if messages.count > 20 {
+            let dropped = messages.count - 20
+            messages = ["… \(dropped) earlier lines omitted"] + messages.suffix(20)
+        }
+
+        if success, capturedProduct == nil {
+            severity = max(severity, .warning)
+            messages.append("Build reported success but produced no .pkg URL.")
+        }
+
+        return TestingStepResult(
+            kind: .build,
+            title: "Build (munkipkg)",
+            success: success && severity != .error,
+            severity: severity,
+            messages: messages,
+            duration: Date().timeIntervalSince(started)
+        )
+    }
+
+    public func validateBuildArtifact(
+        _ record: PkginfoRecord,
+        in repository: MunkiRepository
+    ) async -> TestingStepResult {
+        let started = Date()
+        var messages: [String] = []
+        var severity: TestingStepResult.Severity = .success
+
+        guard let relative = record.pkginfo.installerItemLocation,
+              !relative.isEmpty
+        else {
+            return TestingStepResult(
+                kind: .buildArtifact,
+                title: "Build artifact",
+                success: true,
+                severity: .info,
+                messages: ["pkginfo has no installer_item_location — nothing to check."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        let artifactURL = repository.pkgsURL.appending(path: relative)
+        let path = artifactURL.path
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: path) else {
+            return TestingStepResult(
+                kind: .buildArtifact,
+                title: "Build artifact",
+                success: false,
+                severity: .error,
+                messages: ["Missing artifact at pkgs/\(relative)."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        if let attrs = try? manager.attributesOfItem(atPath: path),
+           let size = attrs[.size] as? NSNumber {
+            let formatter = ByteCountFormatter()
+            formatter.allowedUnits = [.useMB, .useGB]
+            formatter.countStyle = .file
+            messages.append("Size: \(formatter.string(fromByteCount: size.int64Value)).")
+            if size.int64Value == 0 {
+                messages.append("Artifact is 0 bytes.")
+                severity = .error
+            }
+        }
+
+        // Signature check — only meaningful for `.pkg`. Skip DMGs.
+        if artifactURL.pathExtension.lowercased() == "pkg" {
+            let signatureResult = await Self.runPkgutilCheck(path: path)
+            messages.append(contentsOf: signatureResult.messages)
+            severity = max(severity, signatureResult.severity)
+        } else {
+            messages.append("Skipping signature check for .\(artifactURL.pathExtension).")
+        }
+
+        return TestingStepResult(
+            kind: .buildArtifact,
+            title: "Build artifact",
+            success: severity != .error,
+            severity: severity,
+            messages: messages,
+            duration: Date().timeIntervalSince(started)
+        )
+    }
+
+    private static func runPkgutilCheck(path: String) async -> (messages: [String], severity: TestingStepResult.Severity) {
+        await withCheckedContinuation { continuation in
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/pkgutil")
+            task.arguments = ["--check-signature", path]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe
+            do {
+                try task.run()
+                task.waitUntilExit()
+                let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+                let output = String(decoding: data, as: UTF8.self)
+                let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let summary = trimmed.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? trimmed
+                if task.terminationStatus == 0 {
+                    continuation.resume(returning: (["Signature: \(summary)"], .success))
+                } else {
+                    continuation.resume(returning: (["pkgutil exited \(task.terminationStatus): \(summary)"], .warning))
+                }
+            } catch {
+                continuation.resume(returning: (["pkgutil unavailable: \(error.localizedDescription)"], .warning))
+            }
+        }
+    }
+
     // MARK: - Autofix
 
     public func proposeAutofixes(

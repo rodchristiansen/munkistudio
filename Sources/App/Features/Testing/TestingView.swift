@@ -96,12 +96,21 @@ struct TestingView: View {
     }
 
     private func runSelected() async {
-        guard let entry = localStore.selectedEntry else { return }
+        guard let entry = localStore.selectedEntry,
+              let repository = store.repository else { return }
         await localStore.validate(
             entry: entry,
             snapshot: store.snapshot,
-            service: store.services.testing
+            repository: repository,
+            services: store.services,
+            munkipkgProjectsFolder: munkipkgProjectsFolderURL
         )
+    }
+
+    private var munkipkgProjectsFolderURL: URL? {
+        let path = settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
     private func save() async {
@@ -125,11 +134,13 @@ struct TestingView: View {
         }
         let ok = await store.applyPkginfoEdit(proposal.pkginfo, to: record)
         localStore.cancelAutofix()
-        if ok {
+        if ok, let repository = store.repository {
             await localStore.validate(
                 entry: entry,
                 snapshot: store.snapshot,
-                service: store.services.testing
+                repository: repository,
+                services: store.services,
+                munkipkgProjectsFolder: munkipkgProjectsFolderURL
             )
         }
     }

@@ -28,6 +28,22 @@ public protocol TestingService: Sendable {
         in snapshot: RepositorySnapshot
     ) async -> AutofixProposal?
 
+    /// Phase B.1: run a real `munkipkg --build` against `project` and
+    /// surface the result as a single step. Streams the output and
+    /// collapses it into one ``TestingStepResult`` for the timeline.
+    func validateBuild(
+        project: MunkipkgProject,
+        munkipkg: any MunkipkgService
+    ) async -> TestingStepResult
+
+    /// Phase B.2: check the deployed `.pkg` / `.dmg` for the pkginfo's
+    /// `installer_item_location` — existence, size, and (for `.pkg`)
+    /// `pkgutil --check-signature`.
+    func validateBuildArtifact(
+        _ record: PkginfoRecord,
+        in repository: MunkiRepository
+    ) async -> TestingStepResult
+
     /// Load the checklist for a repository. Missing file → empty store.
     func loadChecklist(in repository: MunkiRepository) async throws -> ChecklistStore
 
@@ -115,7 +131,8 @@ public struct TestingStepResult: Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable, Hashable, Codable {
         case schema          // pkginfo required fields, catalog membership, arch
         case scriptLint      // pre/postinstall script smells
-        case buildArtifact   // .pkg present + signed (Phase B)
+        case build           // munkipkg --build (Phase B.1)
+        case buildArtifact   // .pkg present + signed (Phase B.2)
         case install         // ephemeral install (Phase C)
         case installsCheck   // walk installs[] inside guest (Phase C)
         case uninstall       // uninstall test (Phase C)
