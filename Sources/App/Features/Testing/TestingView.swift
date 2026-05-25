@@ -98,12 +98,21 @@ struct TestingView: View {
     private func runSelected() async {
         guard let entry = localStore.selectedEntry,
               let repository = store.repository else { return }
+        let configuration = TestEnvironmentFactory.Configuration(settings: settings)
+        let environment: (any TestEnvironment)?
+        do {
+            environment = try await TestEnvironmentFactory.make(configuration: configuration)
+        } catch {
+            localStore.errorMessage = error.localizedDescription
+            return
+        }
         await localStore.validate(
             entry: entry,
             snapshot: store.snapshot,
             repository: repository,
             services: store.services,
-            munkipkgProjectsFolder: munkipkgProjectsFolderURL
+            munkipkgProjectsFolder: munkipkgProjectsFolderURL,
+            environment: environment
         )
     }
 
@@ -135,12 +144,15 @@ struct TestingView: View {
         let ok = await store.applyPkginfoEdit(proposal.pkginfo, to: record)
         localStore.cancelAutofix()
         if ok, let repository = store.repository {
+            // After autofix we only re-run static checks; the env-driven
+            // steps are expensive and the user can re-validate when ready.
             await localStore.validate(
                 entry: entry,
                 snapshot: store.snapshot,
                 repository: repository,
                 services: store.services,
-                munkipkgProjectsFolder: munkipkgProjectsFolderURL
+                munkipkgProjectsFolder: munkipkgProjectsFolderURL,
+                environment: nil
             )
         }
     }

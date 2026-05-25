@@ -292,6 +292,257 @@ public struct FileTestingService: TestingService {
         }
     }
 
+    // MARK: - Phase C steps (env-driven)
+
+    public func validateInstall(
+        _ record: PkginfoRecord,
+        in repository: MunkiRepository,
+        environment: any TestEnvironment
+    ) async -> TestingStepResult {
+        let started = Date()
+        var messages: [String] = []
+        var severity: TestingStepResult.Severity = .success
+
+        guard let relative = record.pkginfo.installerItemLocation, !relative.isEmpty else {
+            return TestingStepResult(
+                kind: .install,
+                title: "Install",
+                success: true,
+                severity: .info,
+                messages: ["pkginfo has no installer_item_location — nothing to install."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        let localURL = repository.pkgsURL.appending(path: relative)
+        guard FileManager.default.fileExists(atPath: localURL.path) else {
+            return TestingStepResult(
+                kind: .install,
+                title: "Install",
+                success: false,
+                severity: .error,
+                messages: ["Missing local artifact at pkgs/\(relative)."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        // Copy into the guest's /tmp under its original filename.
+        let guestPath = "/tmp/\(localURL.lastPathComponent)"
+        do {
+            try await environment.copyFile(from: localURL, toGuestPath: guestPath)
+            messages.append("Copied artifact to \(guestPath).")
+        } catch {
+            return TestingStepResult(
+                kind: .install,
+                title: "Install",
+                success: false,
+                severity: .error,
+                messages: ["Couldn't copy artifact into \(environment.displayName): \(error.localizedDescription)"],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        // Run installer(8). Falls back to a friendly message for .dmg
+        // payloads, which need a different flow (mount + drag-copy or
+        // installer against an inner .pkg) that v1 doesn't tackle.
+        if localURL.pathExtension.lowercased() != "pkg" {
+            return TestingStepResult(
+                kind: .install,
+                title: "Install",
+                success: true,
+                severity: .warning,
+                messages: messages + ["Skipping `.\(localURL.pathExtension)` — only .pkg installs are wired in v1."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        do {
+            let result = try await environment.runCommand(
+                "/usr/bin/sudo",
+                arguments: ["/usr/sbin/installer", "-pkg", guestPath, "-target", "/"]
+            )
+            messages.append("installer exited \(result.exitCode).")
+            let tail = Self.tail(of: result.stdout, lines: 6)
+            if !tail.isEmpty { messages.append(tail) }
+            if !result.success {
+                severity = .error
+                let errTail = Self.tail(of: result.stderr, lines: 4)
+                if !errTail.isEmpty { messages.append(errTail) }
+            }
+        } catch {
+            severity = .error
+            messages.append("Install command failed: \(error.localizedDescription)")
+        }
+
+        return TestingStepResult(
+            kind: .install,
+            title: "Install",
+            success: severity != .error,
+            severity: severity,
+            messages: messages,
+            duration: Date().timeIntervalSince(started)
+        )
+    }
+
+    public func validateInstallsArray(
+        _ record: PkginfoRecord,
+        environment: any TestEnvironment
+    ) async -> TestingStepResult {
+        let started = Date()
+        let installs = record.pkginfo.installs ?? []
+        guard !installs.isEmpty else {
+            return TestingStepResult(
+                kind: .installsCheck,
+                title: "installs[] check",
+                success: true,
+                severity: .info,
+                messages: ["pkginfo has no installs[] entries to verify."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        var messages: [String] = []
+        var severity: TestingStepResult.Severity = .success
+        var passed = 0
+        var failed = 0
+
+        for item in installs {
+            let path = item.path
+            let result: CommandResult?
+            do {
+                // `test -e` exits 0 if the path exists (file, dir,
+                // symlink). Bundles and applications are directories.
+                result = try await environment.runCommand(
+                    "/bin/test",
+                    arguments: ["-e", path]
+                )
+            } catch {
+                messages.append("✘ \(path) — \(error.localizedDescription)")
+                severity = .error
+                failed += 1
+                continue
+            }
+            if result?.success == true {
+                messages.append("✓ \(path)")
+                passed += 1
+            } else {
+                messages.append("✘ \(path) — missing")
+                severity = .error
+                failed += 1
+            }
+        }
+
+        messages.insert("\(passed) found, \(failed) missing.", at: 0)
+        return TestingStepResult(
+            kind: .installsCheck,
+            title: "installs[] check",
+            success: failed == 0,
+            severity: severity,
+            messages: messages,
+            duration: Date().timeIntervalSince(started)
+        )
+    }
+
+    public func validateUninstall(
+        _ record: PkginfoRecord,
+        environment: any TestEnvironment
+    ) async -> TestingStepResult {
+        let started = Date()
+        let pkginfo = record.pkginfo
+        let method = (pkginfo.uninstallMethod ?? "").trimmingCharacters(in: .whitespaces)
+        let script = pkginfo.uninstallScript ?? ""
+
+        // No method configured and no script — nothing to do.
+        if method.isEmpty && script.isEmpty {
+            return TestingStepResult(
+                kind: .uninstall,
+                title: "Uninstall",
+                success: true,
+                severity: .info,
+                messages: ["No uninstall method or uninstall_script configured."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        // v1: only the uninstall_script path is wired.
+        let effectiveScript = script.isEmpty ? nil : script
+        guard let scriptBody = effectiveScript else {
+            return TestingStepResult(
+                kind: .uninstall,
+                title: "Uninstall",
+                success: true,
+                severity: .warning,
+                messages: ["uninstall_method='\(method)' isn't implemented in v1 — only uninstall_script runs today."],
+                duration: Date().timeIntervalSince(started)
+            )
+        }
+
+        // Drop the script into the guest, chmod +x, run it as root.
+        let guestScript = "/tmp/munkistudio-uninstall-\(UUID().uuidString.prefix(8)).sh"
+        var messages: [String] = []
+        var severity: TestingStepResult.Severity = .success
+
+        do {
+            try await Self.writeRemoteScript(
+                scriptBody,
+                toGuestPath: guestScript,
+                via: environment
+            )
+            let result = try await environment.runCommand(
+                "/usr/bin/sudo",
+                arguments: ["/bin/sh", guestScript]
+            )
+            messages.append("uninstall_script exited \(result.exitCode).")
+            let tail = Self.tail(of: result.stdout, lines: 6)
+            if !tail.isEmpty { messages.append(tail) }
+            if !result.success {
+                severity = .error
+                let errTail = Self.tail(of: result.stderr, lines: 4)
+                if !errTail.isEmpty { messages.append(errTail) }
+            }
+        } catch {
+            severity = .error
+            messages.append("Uninstall failed: \(error.localizedDescription)")
+        }
+
+        return TestingStepResult(
+            kind: .uninstall,
+            title: "Uninstall",
+            success: severity != .error,
+            severity: severity,
+            messages: messages,
+            duration: Date().timeIntervalSince(started)
+        )
+    }
+
+    // MARK: - Helpers
+
+    /// Drop a script body into the guest via a temp file on the host
+    /// (most env backends only know how to copy files, not stream
+    /// stdin), then `scp` / copy it across.
+    private static func writeRemoteScript(
+        _ body: String,
+        toGuestPath: String,
+        via environment: any TestEnvironment
+    ) async throws {
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appending(path: "munkistudio-script-\(UUID().uuidString).sh")
+        try body.data(using: .utf8)?.write(to: tempURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        try await environment.copyFile(from: tempURL, toGuestPath: toGuestPath)
+        _ = try? await environment.runCommand("/bin/chmod", arguments: ["+x", toGuestPath])
+    }
+
+    /// Trim a multi-line string to the last N lines, prefixed with an
+    /// "…" indicator when content was elided.
+    private static func tail(of text: String, lines: Int) -> String {
+        let all = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard all.count > lines else { return text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let kept = all.suffix(lines).joined(separator: "\n")
+        return "… \(all.count - lines) earlier lines omitted\n" + kept
+    }
+
     // MARK: - Autofix
 
     public func proposeAutofixes(

@@ -44,6 +44,32 @@ public protocol TestingService: Sendable {
         in repository: MunkiRepository
     ) async -> TestingStepResult
 
+    /// Phase C.3: install the package inside `environment`. Copies the
+    /// artifact under `repository.pkgsURL` into the guest and runs
+    /// `installer(8)`; captures exit status + the tail of the log.
+    func validateInstall(
+        _ record: PkginfoRecord,
+        in repository: MunkiRepository,
+        environment: any TestEnvironment
+    ) async -> TestingStepResult
+
+    /// Phase C.3: walk the pkginfo's `installs[]` array inside the
+    /// guest, asserting each path / bundle is present after the
+    /// install step.
+    func validateInstallsArray(
+        _ record: PkginfoRecord,
+        environment: any TestEnvironment
+    ) async -> TestingStepResult
+
+    /// Phase C.3: run the configured uninstall path inside the guest.
+    /// v1 understands `uninstall_method: uninstall_script` (and
+    /// implicit `uninstall_script` presence); other methods report
+    /// "not implemented" until they're added.
+    func validateUninstall(
+        _ record: PkginfoRecord,
+        environment: any TestEnvironment
+    ) async -> TestingStepResult
+
     /// Load the checklist for a repository. Missing file → empty store.
     func loadChecklist(in repository: MunkiRepository) async throws -> ChecklistStore
 

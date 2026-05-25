@@ -118,7 +118,8 @@ final class TestingStore {
         snapshot: RepositorySnapshot,
         repository: MunkiRepository,
         services: AppServices,
-        munkipkgProjectsFolder: URL?
+        munkipkgProjectsFolder: URL?,
+        environment: (any TestEnvironment)?
     ) async {
         guard let record = snapshot.pkginfos.first(where: { $0.pkginfo.name == entry.packageName }) else {
             errorMessage = "No pkginfo found for \(entry.packageName)."
@@ -148,9 +149,85 @@ final class TestingStore {
         let artifactStep = await services.testing.validateBuildArtifact(record, in: repository)
         combined.steps.append(artifactStep)
 
+        // Phase C: env-driven install / installs[] / uninstall steps.
+        // Only runs when the user has chosen an environment.
+        if let environment {
+            await runEnvSteps(
+                record: record,
+                repository: repository,
+                services: services,
+                environment: environment,
+                into: &combined
+            )
+        }
+
         combined.finishedAt = Date()
         resultsByEntry[entry.id] = combined
         phase = .ready
+    }
+
+    private func runEnvSteps(
+        record: PkginfoRecord,
+        repository: MunkiRepository,
+        services: AppServices,
+        environment: any TestEnvironment,
+        into result: inout TestingResult
+    ) async {
+        // Prepare the env. A failure here is itself a step result —
+        // we don't throw past the run loop.
+        let prepareStart = Date()
+        do {
+            try await environment.prepare()
+            result.steps.append(
+                TestingStepResult(
+                    kind: .install,
+                    title: "Environment ready",
+                    success: true,
+                    severity: .info,
+                    messages: ["Prepared \(environment.displayName)."],
+                    duration: Date().timeIntervalSince(prepareStart)
+                )
+            )
+        } catch {
+            result.steps.append(
+                TestingStepResult(
+                    kind: .install,
+                    title: "Environment ready",
+                    success: false,
+                    severity: .error,
+                    messages: ["prepare() failed: \(error.localizedDescription)"],
+                    duration: Date().timeIntervalSince(prepareStart)
+                )
+            )
+            await environment.teardown()
+            return
+        }
+
+        let install = await services.testing.validateInstall(
+            record,
+            in: repository,
+            environment: environment
+        )
+        result.steps.append(install)
+
+        // Only proceed to the installs[] / uninstall checks if the
+        // install step succeeded — otherwise we'd be testing against
+        // a half-installed guest.
+        if install.success {
+            let installs = await services.testing.validateInstallsArray(
+                record,
+                environment: environment
+            )
+            result.steps.append(installs)
+
+            let uninstall = await services.testing.validateUninstall(
+                record,
+                environment: environment
+            )
+            result.steps.append(uninstall)
+        }
+
+        await environment.teardown()
     }
 
     private static func findMunkipkgProject(
