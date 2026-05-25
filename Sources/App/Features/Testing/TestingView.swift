@@ -39,10 +39,33 @@ struct TestingView: View {
                         .disabled(localStore.checklist.items.allSatisfy { $0.status != .untested })
 
                         Button {
+                            Task { await prepareAutofix() }
+                        } label: {
+                            Label("Autofix…", systemImage: "wand.and.stars")
+                        }
+                        .disabled(localStore.selectedEntry == nil)
+
+                        Button {
                             Task { await save() }
                         } label: {
                             Label("Save checklist", systemImage: "tray.and.arrow.down")
                         }
+                    }
+                }
+                .sheet(isPresented: Binding(
+                    get: { localStore.pendingAutofix != nil },
+                    set: { if !$0 { localStore.cancelAutofix() } }
+                )) {
+                    if let proposal = localStore.pendingAutofix,
+                       let entry = localStore.selectedEntry {
+                        AutofixSheet(
+                            entry: entry,
+                            proposal: proposal,
+                            onApply: {
+                                Task { await applyAutofix(proposal: proposal, entry: entry) }
+                            },
+                            onCancel: { localStore.cancelAutofix() }
+                        )
                     }
                 }
                 .task(id: repository.rootURL.path) {
@@ -84,6 +107,101 @@ struct TestingView: View {
     private func save() async {
         guard let repository = store.repository else { return }
         await localStore.save(repository: repository, service: store.services.testing)
+    }
+
+    private func prepareAutofix() async {
+        guard let entry = localStore.selectedEntry else { return }
+        await localStore.prepareAutofix(
+            for: entry,
+            snapshot: store.snapshot,
+            service: store.services.testing
+        )
+    }
+
+    private func applyAutofix(proposal: AutofixProposal, entry: ChecklistEntry) async {
+        guard let record = store.snapshot.pkginfos.first(where: { $0.pkginfo.name == entry.packageName }) else {
+            localStore.cancelAutofix()
+            return
+        }
+        let ok = await store.applyPkginfoEdit(proposal.pkginfo, to: record)
+        localStore.cancelAutofix()
+        if ok {
+            await localStore.validate(
+                entry: entry,
+                snapshot: store.snapshot,
+                service: store.services.testing
+            )
+        }
+    }
+}
+
+// MARK: - Autofix sheet
+
+private struct AutofixSheet: View {
+    let entry: ChecklistEntry
+    let proposal: AutofixProposal
+    let onApply: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Autofix proposal").font(.headline)
+                    Text(entry.packageName).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(proposal.changes) { change in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(change.field)
+                                .font(.system(.body, design: .monospaced))
+                                .fontWeight(.semibold)
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("−")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(.red)
+                                Text(change.before)
+                                    .font(.system(.body, design: .monospaced))
+                                    .textSelection(.enabled)
+                            }
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("+")
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundStyle(.green)
+                                Text(change.after)
+                                    .font(.system(.body, design: .monospaced))
+                                    .textSelection(.enabled)
+                            }
+                            Text(change.rationale)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                .padding(.vertical)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Apply", action: onApply)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        }
+        .frame(minWidth: 520, minHeight: 360)
     }
 }
 

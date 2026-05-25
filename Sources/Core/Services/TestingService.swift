@@ -19,11 +19,59 @@ public protocol TestingService: Sendable {
         in snapshot: RepositorySnapshot
     ) async -> TestingResult
 
+    /// Propose safe autofixes for a single pkginfo (Phase A.5). Returns
+    /// `nil` when no autofix-able warning applies. The proposal carries
+    /// the updated `Pkginfo` ready to write — the caller (UI) is in
+    /// charge of confirming and persisting.
+    func proposeAutofixes(
+        for record: PkginfoRecord,
+        in snapshot: RepositorySnapshot
+    ) async -> AutofixProposal?
+
     /// Load the checklist for a repository. Missing file → empty store.
     func loadChecklist(in repository: MunkiRepository) async throws -> ChecklistStore
 
-    /// Persist a checklist back to disk under `.munkistudio/`.
+    /// Persist a checklist back to disk under `.munkistudio/`. Implementations
+    /// also write a Markdown view next to the canonical JSON so the file
+    /// reviews well in PR diffs.
     func saveChecklist(_ store: ChecklistStore, in repository: MunkiRepository) async throws
+}
+
+// MARK: - Autofix
+
+/// A bundle of automatic edits a `TestingService` is willing to apply
+/// to one pkginfo. Each `AutofixChange` is one field-level edit with a
+/// rationale so the UI can render a reviewable diff.
+public struct AutofixProposal: Sendable, Hashable {
+    public var pkginfo: Pkginfo
+    public var changes: [AutofixChange]
+
+    public init(pkginfo: Pkginfo, changes: [AutofixChange]) {
+        self.pkginfo = pkginfo
+        self.changes = changes
+    }
+}
+
+public struct AutofixChange: Sendable, Hashable, Identifiable {
+    public var id: UUID
+    public var field: String
+    public var before: String
+    public var after: String
+    public var rationale: String
+
+    public init(
+        id: UUID = UUID(),
+        field: String,
+        before: String,
+        after: String,
+        rationale: String
+    ) {
+        self.id = id
+        self.field = field
+        self.before = before
+        self.after = after
+        self.rationale = rationale
+    }
 }
 
 // MARK: - Result types

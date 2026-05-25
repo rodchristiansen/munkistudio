@@ -33,6 +33,10 @@ final class TestingStore {
     var phase: Phase = .idle
     var errorMessage: String?
 
+    /// Pending autofix proposal awaiting user confirmation. Set by
+    /// ``prepareAutofix(for:)``; cleared when the sheet dismisses.
+    var pendingAutofix: AutofixProposal?
+
     var selectedEntry: ChecklistEntry? {
         guard let selectedEntryID else { return nil }
         return checklist.items.first { $0.id == selectedEntryID }
@@ -122,6 +126,27 @@ final class TestingStore {
         let result = await service.validate(record, in: snapshot)
         resultsByEntry[entry.id] = result
         phase = .ready
+    }
+
+    // MARK: - Autofix
+
+    func prepareAutofix(
+        for entry: ChecklistEntry,
+        snapshot: RepositorySnapshot,
+        service: any TestingService
+    ) async {
+        guard let record = snapshot.pkginfos.first(where: { $0.pkginfo.name == entry.packageName }) else {
+            errorMessage = "No pkginfo found for \(entry.packageName)."
+            return
+        }
+        pendingAutofix = await service.proposeAutofixes(for: record, in: snapshot)
+        if pendingAutofix == nil {
+            errorMessage = "Nothing to autofix on \(entry.packageName)."
+        }
+    }
+
+    func cancelAutofix() {
+        pendingAutofix = nil
     }
 
     // MARK: - Checklist edits
