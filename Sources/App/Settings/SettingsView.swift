@@ -202,6 +202,15 @@ private struct TestingSettingsView: View {
         if let path = await detector.locate() {
             let version = await detector.version() ?? "installed"
             tartStatus = .present(version: version, path: path)
+            // One-time promotion: when Tart shows up and the env is
+            // still at the default "none", flip to "tart" so the user
+            // doesn't have to. We don't repeat this — if they switch
+            // back to "none" later it stays sticky.
+            if !settings.testingEnvironmentAutoFlipped,
+               settings.testingEnvironmentRaw == "none" {
+                settings.testingEnvironmentRaw = "tart"
+                settings.testingEnvironmentAutoFlipped = true
+            }
         } else {
             tartStatus = .missing
         }

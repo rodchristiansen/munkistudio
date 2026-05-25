@@ -76,12 +76,13 @@ struct TestingView: View {
                             .disabled(localStore.checklist.items.isEmpty)
                         }
                     }
-                    // Persistence: flush the checklist (JSON + Markdown).
+                    // Export: write the checklist (JSON + Markdown) so the
+                    // team can review it in PRs.
                     ToolbarItemGroup {
                         Button {
                             Task { await save() }
                         } label: {
-                            Label("Save checklist", systemImage: "tray.and.arrow.down")
+                            Label("Export", systemImage: "square.and.arrow.up")
                         }
                         .labelStyle(.titleAndIcon)
                     }
@@ -134,11 +135,12 @@ struct TestingView: View {
               let repository = store.repository else { return }
         let configuration = TestEnvironmentFactory.Configuration(settings: settings)
         let environment: (any TestEnvironment)?
+        var environmentError: String?
         do {
             environment = try await TestEnvironmentFactory.make(configuration: configuration)
         } catch {
-            localStore.errorMessage = error.localizedDescription
-            return
+            environment = nil
+            environmentError = error.localizedDescription
         }
         await localStore.validate(
             entry: entry,
@@ -147,6 +149,7 @@ struct TestingView: View {
             services: store.services,
             munkipkgProjectsFolder: munkipkgProjectsFolderURL,
             environment: environment,
+            environmentError: environmentError,
             tester: effectiveTester
         )
     }

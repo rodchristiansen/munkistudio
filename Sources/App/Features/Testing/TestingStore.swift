@@ -137,6 +137,7 @@ final class TestingStore {
         services: AppServices,
         munkipkgProjectsFolder: URL?,
         environment: (any TestEnvironment)?,
+        environmentError: String? = nil,
         tester: String
     ) async {
         guard let record = snapshot.pkginfos.first(where: { $0.pkginfo.name == entry.packageName }) else {
@@ -168,7 +169,9 @@ final class TestingStore {
         combined.steps.append(artifactStep)
 
         // Phase C: env-driven install / installs[] / uninstall steps.
-        // Only runs when the user has chosen an environment.
+        // When env construction failed (no base image, Tart missing, …)
+        // we add a single info step explaining the skip so the timeline
+        // still tells the whole story.
         if let environment {
             await runEnvSteps(
                 record: record,
@@ -176,6 +179,16 @@ final class TestingStore {
                 services: services,
                 environment: environment,
                 into: &combined
+            )
+        } else if let environmentError {
+            combined.steps.append(
+                TestingStepResult(
+                    kind: .install,
+                    title: "Install environment",
+                    success: true,
+                    severity: .info,
+                    messages: ["Skipped: \(environmentError)"]
+                )
             )
         }
 

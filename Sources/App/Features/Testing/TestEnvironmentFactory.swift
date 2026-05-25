@@ -15,9 +15,9 @@ enum TestEnvironmentFactory {
         var errorDescription: String? {
             switch self {
             case .tartUnavailable:
-                return "Tart isn't installed or isn't on PATH. Install Tart (https://tart.run) and try again."
+                return "Tart isn't installed or isn't on PATH. Install Tart and try again."
             case .missingBaseImage:
-                return "No Tart base image configured — set one in Settings → Features → Testing."
+                return "No Tart base image configured — set one in Settings → Testing."
             }
         }
     }

@@ -120,6 +120,14 @@ final class AppSettings {
         didSet { defaults.set(tartSSHUser, forKey: Key.tartSSHUser) }
     }
 
+    /// Set the first time MunkiStudio sees Tart installed and promotes
+    /// the install environment from "none" to "tart" automatically. The
+    /// flag exists so a user who deliberately switches back to "none"
+    /// later won't keep getting flipped again on every Tart probe.
+    var testingEnvironmentAutoFlipped: Bool {
+        didSet { defaults.set(testingEnvironmentAutoFlipped, forKey: Key.testingEnvironmentAutoFlipped) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -156,6 +164,8 @@ final class AppSettings {
             defaults.string(forKey: Key.tartBaseImage) ?? ""
         self.tartSSHUser =
             defaults.string(forKey: Key.tartSSHUser) ?? "admin"
+        self.testingEnvironmentAutoFlipped =
+            defaults.bool(forKey: Key.testingEnvironmentAutoFlipped)
     }
 
     private enum Key {
@@ -175,5 +185,6 @@ final class AppSettings {
         static let testingEnvironmentRaw = "MunkiStudio.settings.testingEnvironment"
         static let tartBaseImage = "MunkiStudio.settings.tartBaseImage"
         static let tartSSHUser = "MunkiStudio.settings.tartSSHUser"
+        static let testingEnvironmentAutoFlipped = "MunkiStudio.settings.testingEnvironmentAutoFlipped"
     }
 }
