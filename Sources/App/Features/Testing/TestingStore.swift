@@ -136,7 +136,8 @@ final class TestingStore {
         repository: MunkiRepository,
         services: AppServices,
         munkipkgProjectsFolder: URL?,
-        environment: (any TestEnvironment)?
+        environment: (any TestEnvironment)?,
+        tester: String
     ) async {
         guard let record = snapshot.pkginfos.first(where: { $0.pkginfo.name == entry.packageName }) else {
             errorMessage = "No pkginfo found for \(entry.packageName)."
@@ -180,7 +181,37 @@ final class TestingStore {
 
         combined.finishedAt = Date()
         resultsByEntry[entry.id] = combined
+        applyStatusFromResult(combined, to: entry.id, tester: tester)
         phase = .ready
+    }
+
+    /// Roll up a `TestingResult` into a `ChecklistStatus` and stamp the
+    /// entry. Errors → fail, any warnings → warning, otherwise pass.
+    /// Leaves `tester` unset if the caller didn't supply a name (we don't
+    /// guess on the user's behalf).
+    private func applyStatusFromResult(
+        _ result: TestingResult,
+        to entryID: UUID,
+        tester: String
+    ) {
+        guard let index = checklist.items.firstIndex(where: { $0.id == entryID }) else { return }
+        let status: ChecklistStatus
+        if result.failed > 0 {
+            status = .fail
+        } else if result.warnings > 0 {
+            status = .warning
+        } else if result.total > 0 {
+            status = .pass
+        } else {
+            return  // empty result — leave the row alone
+        }
+        var entry = checklist.items[index]
+        entry.status = status
+        entry.testedAt = result.finishedAt
+        if !tester.trimmingCharacters(in: .whitespaces).isEmpty {
+            entry.tester = tester
+        }
+        checklist.items[index] = entry
     }
 
     private func runEnvSteps(
@@ -269,7 +300,8 @@ final class TestingStore {
     func validateAll(
         snapshot: RepositorySnapshot,
         repository: MunkiRepository,
-        services: AppServices
+        services: AppServices,
+        tester: String
     ) async {
         bulkTask?.cancel()
         let task = Task { @MainActor [weak self] in
@@ -277,7 +309,8 @@ final class TestingStore {
             await self.runBulk(
                 snapshot: snapshot,
                 repository: repository,
-                services: services
+                services: services,
+                tester: tester
             )
         }
         bulkTask = task
@@ -293,7 +326,8 @@ final class TestingStore {
     private func runBulk(
         snapshot: RepositorySnapshot,
         repository: MunkiRepository,
-        services: AppServices
+        services: AppServices,
+        tester: String
     ) async {
         let entries = checklist.items
         let total = entries.count
@@ -312,6 +346,7 @@ final class TestingStore {
             combined.steps.append(artifact)
             combined.finishedAt = Date()
             resultsByEntry[entry.id] = combined
+            applyStatusFromResult(combined, to: entry.id, tester: tester)
             results.append(combined)
         }
 

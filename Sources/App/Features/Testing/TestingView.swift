@@ -130,8 +130,14 @@ struct TestingView: View {
             repository: repository,
             services: store.services,
             munkipkgProjectsFolder: munkipkgProjectsFolderURL,
-            environment: environment
+            environment: environment,
+            tester: effectiveTester
         )
+    }
+
+    private var effectiveTester: String {
+        let configured = settings.testerName.trimmingCharacters(in: .whitespaces)
+        return configured.isEmpty ? NSFullUserName() : configured
     }
 
     private var munkipkgProjectsFolderURL: URL? {
@@ -150,7 +156,8 @@ struct TestingView: View {
         await localStore.validateAll(
             snapshot: store.snapshot,
             repository: repository,
-            services: store.services
+            services: store.services,
+            tester: effectiveTester
         )
     }
 
@@ -179,7 +186,8 @@ struct TestingView: View {
                 repository: repository,
                 services: store.services,
                 munkipkgProjectsFolder: munkipkgProjectsFolderURL,
-                environment: nil
+                environment: nil,
+                tester: effectiveTester
             )
         }
     }

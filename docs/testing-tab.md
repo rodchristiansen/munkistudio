@@ -13,6 +13,22 @@ Living document for the Testing pane. Captures what we ported from Cimian's `qua
 
 Lives end-to-end behind **Settings → Features → Testing**: enable the tab, pick an install environment, set a tester name. Checklist and results files land under `.munkistudio/` for the team to commit.
 
+## Quickstart
+
+1. **Settings → Features → Testing** — enable the tab, fill in your name (used for checklist attribution).
+2. Optional but recommended: pick a **munkipkg projects folder** in Settings → Build. The Testing run will discover the project that matches a package's name and run a real build as part of validation.
+3. Optional for install testing: pick the **Tart** install environment, set a base image like `ghcr.io/cirruslabs/macos-sequoia-base:latest`, and confirm the **Tart status** row shows a version. Install Tart from <https://tart.run> if missing.
+4. Open the Testing tab. The checklist auto-syncs to the open repo's pkginfos.
+5. Pick a package and click **Validate**. The timeline runs:
+   - schema check + script lint (Phase A, always)
+   - autofix proposal sheet when applicable (`wand.and.stars`)
+   - munkipkg build (when a matching project is configured)
+   - build-artifact existence + signature (`pkgutil --check-signature`)
+   - install / `installs[]` / uninstall inside the chosen environment
+6. The row status auto-updates to **pass / warning / fail** from the run.
+7. **Validate all** runs the static + artifact pipeline across every package sequentially. It writes a JSON run file under `.munkistudio/testing-results/run-<ISO>.json` and shows a summary banner with a Reveal-in-Finder button.
+8. **Save checklist** writes both `.munkistudio/testing-checklist.json` (canonical) and `.munkistudio/testing-checklist.md` (human view). Commit them.
+
 ---
 
 ## 1 · What we are porting from Cimian

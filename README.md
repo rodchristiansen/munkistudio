@@ -35,6 +35,12 @@ Tests/     # CoreTests, InfraTests
   the plist/YAML file is always the source of truth.
 - **Git commit composer** built on libgit2 (reads) + shelled `git` (writes), so
   hooks, signing, SSH-agent and Keychain credentials all work.
+- **Testing tab** — adapted from Cimian's `quality/` system. Per-package
+  schema check, script lint, optional `munkipkg` build + artifact validation,
+  ephemeral install testing in a Tart macOS VM (install / `installs[]` /
+  uninstall), and a repo-local checklist that round-trips between
+  `.munkistudio/testing-checklist.json` and a Markdown view for PR review.
+  Enable under **Settings → Features → Testing**. See `docs/testing-tab.md`.
 
 ## License
 
