@@ -67,10 +67,24 @@ private struct FeatureSettingsView: View {
                 TextField("Your name", text: $settings.testerName,
                           prompt: Text("Attributed to checklist updates"))
                     .disabled(!settings.enableTestingTab)
+
+                Picker("Install environment", selection: $settings.testingEnvironmentRaw) {
+                    Text("None (skip install steps)").tag("none")
+                    Text("Host Mac (smoke test only)").tag("host")
+                    Text("Tart (ephemeral macOS VM)").tag("tart")
+                }
+                .disabled(!settings.enableTestingTab)
+
+                TextField("Tart base image", text: $settings.tartBaseImage,
+                          prompt: Text("e.g. ghcr.io/cirruslabs/macos-sequoia-base:latest"))
+                    .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
+                TextField("Tart SSH user", text: $settings.tartSSHUser,
+                          prompt: Text("admin"))
+                    .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
             } header: {
                 Text("Testing")
             } footer: {
-                Text("Phase A: pkginfo schema validation and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Later phases add ephemeral install testing in macOS VMs.")
+                Text("Phase A/B: pkginfo schema validation, script lint, optional build via munkipkg, build-artifact check, and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Phase C uses Tart to clone an ephemeral macOS guest per install test — Apple's licensing caps macOS guests at 2 concurrent per host.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

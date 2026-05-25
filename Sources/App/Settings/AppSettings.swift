@@ -100,6 +100,26 @@ final class AppSettings {
         didSet { defaults.set(testerName, forKey: Key.testerName) }
     }
 
+    /// Backend the Testing pane uses for install steps. `.none` skips
+    /// all install steps; `.host` runs against the admin's Mac (smoke
+    /// testing only); `.tart` spins up an ephemeral macOS guest per run.
+    var testingEnvironmentRaw: String {
+        didSet { defaults.set(testingEnvironmentRaw, forKey: Key.testingEnvironmentRaw) }
+    }
+
+    /// Tart base image used as the source for ephemeral clones — either
+    /// a local VM name (`tart list`) or a remote ref
+    /// (`ghcr.io/cirruslabs/macos-sequoia-base:latest`).
+    var tartBaseImage: String {
+        didSet { defaults.set(tartBaseImage, forKey: Key.tartBaseImage) }
+    }
+
+    /// SSH user inside the Tart guest. The base image is expected to
+    /// have the admin's authorized_keys set up for this account.
+    var tartSSHUser: String {
+        didSet { defaults.set(tartSSHUser, forKey: Key.tartSSHUser) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -130,6 +150,12 @@ final class AppSettings {
             defaults.bool(forKey: Key.enableTestingTab)
         self.testerName =
             defaults.string(forKey: Key.testerName) ?? ""
+        self.testingEnvironmentRaw =
+            defaults.string(forKey: Key.testingEnvironmentRaw) ?? "none"
+        self.tartBaseImage =
+            defaults.string(forKey: Key.tartBaseImage) ?? ""
+        self.tartSSHUser =
+            defaults.string(forKey: Key.tartSSHUser) ?? "admin"
     }
 
     private enum Key {
@@ -146,5 +172,8 @@ final class AppSettings {
         static let profilesDirectoryPath = "MunkiStudio.settings.profilesDirectoryPath"
         static let enableTestingTab = "MunkiStudio.settings.enableTestingTab"
         static let testerName = "MunkiStudio.settings.testerName"
+        static let testingEnvironmentRaw = "MunkiStudio.settings.testingEnvironment"
+        static let tartBaseImage = "MunkiStudio.settings.tartBaseImage"
+        static let tartSSHUser = "MunkiStudio.settings.tartSSHUser"
     }
 }
