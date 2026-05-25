@@ -17,8 +17,8 @@ struct TestingView: View {
                 VStack(spacing: 0) {
                     BulkBanner(state: $localStore)
                     HSplitView {
-                        ChecklistColumn(state: $localStore)
-                            .frame(minWidth: 260, idealWidth: 300, maxHeight: .infinity)
+                        ChecklistColumn(state: $localStore, pkginfoByName: pkginfoByName)
+                            .frame(minWidth: 260, idealWidth: 320, maxHeight: .infinity)
                         StepTimelineColumn(state: $localStore)
                             .frame(minWidth: 320, maxHeight: .infinity)
                         DetailInspectorColumn(state: $localStore)
@@ -31,13 +31,22 @@ struct TestingView: View {
                     // Per-package workflow: run the validation pipeline on
                     // the selected row, propose safe autofixes for it.
                     ToolbarItemGroup {
-                        Button {
-                            Task { await runSelected() }
-                        } label: {
-                            Label("Validate", systemImage: "checkmark.seal")
+                        if localStore.isValidatingSingle {
+                            Button(role: .cancel) {
+                                localStore.cancelValidation()
+                            } label: {
+                                Label("Stop", systemImage: "stop.circle")
+                            }
+                            .labelStyle(.titleAndIcon)
+                        } else {
+                            Button {
+                                Task { await runSelected() }
+                            } label: {
+                                Label("Validate", systemImage: "checkmark.seal")
+                            }
+                            .labelStyle(.titleAndIcon)
+                            .disabled(localStore.selectedEntry == nil)
                         }
-                        .labelStyle(.titleAndIcon)
-                        .disabled(localStore.selectedEntry == nil)
 
                         Button {
                             Task { await prepareAutofix() }
@@ -45,7 +54,7 @@ struct TestingView: View {
                             Label("Autofix", systemImage: "wand.and.stars")
                         }
                         .labelStyle(.titleAndIcon)
-                        .disabled(localStore.selectedEntry == nil)
+                        .disabled(localStore.selectedEntry == nil || localStore.isValidatingSingle)
                     }
                     // Navigation: jump to the next untested entry.
                     ToolbarItemGroup {
@@ -142,21 +151,39 @@ struct TestingView: View {
             environment = nil
             environmentError = error.localizedDescription
         }
-        await localStore.validate(
-            entry: entry,
-            snapshot: store.snapshot,
-            repository: repository,
-            services: store.services,
-            munkipkgProjectsFolder: munkipkgProjectsFolderURL,
-            environment: environment,
-            environmentError: environmentError,
-            tester: effectiveTester
-        )
+        let tester = effectiveTester
+        let folder = munkipkgProjectsFolderURL
+        let task = Task { @MainActor in
+            await localStore.validate(
+                entry: entry,
+                snapshot: store.snapshot,
+                repository: repository,
+                services: store.services,
+                munkipkgProjectsFolder: folder,
+                environment: environment,
+                environmentError: environmentError,
+                tester: tester
+            )
+        }
+        localStore.setValidateTask(task)
+        await task.value
+        localStore.setValidateTask(nil)
     }
 
     private var effectiveTester: String {
         let configured = settings.testerName.trimmingCharacters(in: .whitespaces)
         return configured.isEmpty ? NSFullUserName() : configured
+    }
+
+    private var pkginfoByName: [String: Pkginfo] {
+        var lookup: [String: Pkginfo] = [:]
+        for record in store.snapshot.pkginfos {
+            // Repos with multi-version pkginfos for the same name collapse
+            // to the latest record seen — good enough for grouping by
+            // category/developer.
+            lookup[record.pkginfo.name] = record.pkginfo
+        }
+        return lookup
     }
 
     private var munkipkgProjectsFolderURL: URL? {
@@ -372,6 +399,7 @@ private struct AutofixSheet: View {
 private struct ChecklistColumn: View {
     @Binding var state: TestingStore
     @Environment(AppSettings.self) private var settings
+    let pkginfoByName: [String: Pkginfo]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -383,7 +411,38 @@ private struct ChecklistColumn: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.tertiary)
+                TextField("Search", text: $state.searchQuery)
+                    .textFieldStyle(.plain)
+                if !state.searchQuery.isEmpty {
+                    Button { state.searchQuery = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
+
+            Picker("Group", selection: $state.groupBy) {
+                ForEach(TestingStore.GroupBy.allCases, id: \.self) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
 
             Divider()
 
@@ -391,24 +450,26 @@ private struct ChecklistColumn: View {
                 get: { state.selectedEntryID },
                 set: { state.selectedEntryID = $0 }
             )) {
-                ForEach(state.checklist.items) { entry in
-                    HStack(spacing: 8) {
-                        Image(systemName: entry.status.systemImage)
-                            .foregroundStyle(entry.status.tint)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.packageName).font(.body)
-                            if let version = entry.version {
-                                Text(version).font(.caption).foregroundStyle(.secondary)
+                ForEach(groups, id: \.title) { group in
+                    if state.groupBy == .none {
+                        ForEach(group.items) { entry in
+                            row(for: entry).tag(entry.id)
+                        }
+                    } else {
+                        Section {
+                            ForEach(group.items) { entry in
+                                row(for: entry).tag(entry.id)
+                            }
+                        } header: {
+                            HStack {
+                                Text(group.title).font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text("\(group.items.count)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
-                        Spacer()
-                        if let testedAt = entry.testedAt {
-                            Text(testedAt, format: .relative(presentation: .numeric))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
                     }
-                    .tag(entry.id)
                 }
             }
             .listStyle(.inset)
@@ -416,8 +477,79 @@ private struct ChecklistColumn: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func row(for entry: ChecklistEntry) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: entry.status.systemImage)
+                .foregroundStyle(entry.status.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.packageName).font(.body)
+                if let version = entry.version {
+                    Text(version).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if let testedAt = entry.testedAt {
+                Text(testedAt, format: .relative(presentation: .numeric))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     private var passCount: Int {
         state.checklist.items.filter { $0.status == .pass }.count
+    }
+
+    private struct Group: Equatable {
+        var title: String
+        var items: [ChecklistEntry]
+    }
+
+    /// Apply the search filter then bucket the result by the selected
+    /// grouping. The flat "All" case is returned as a single nameless
+    /// bucket so the view's `ForEach(groups)` shape stays uniform.
+    private var groups: [Group] {
+        let query = state.searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let filtered: [ChecklistEntry]
+        if query.isEmpty {
+            filtered = state.checklist.items
+        } else {
+            filtered = state.checklist.items.filter {
+                $0.packageName.lowercased().contains(query)
+            }
+        }
+
+        switch state.groupBy {
+        case .none:
+            return [Group(title: "All", items: filtered)]
+        case .category:
+            return bucketed(filtered) { pkginfoByName[$0.packageName]?.category ?? "Uncategorized" }
+        case .developer:
+            return bucketed(filtered) { pkginfoByName[$0.packageName]?.developer ?? "Unknown" }
+        case .status:
+            let order: [ChecklistStatus] = [.fail, .warning, .pass, .untested]
+            let grouped = Dictionary(grouping: filtered) { $0.status }
+            return order.compactMap { status in
+                guard let items = grouped[status], !items.isEmpty else { return nil }
+                return Group(title: status.title, items: items.sorted {
+                    $0.packageName.localizedCaseInsensitiveCompare($1.packageName) == .orderedAscending
+                })
+            }
+        }
+    }
+
+    private func bucketed(
+        _ items: [ChecklistEntry],
+        by keyFor: (ChecklistEntry) -> String
+    ) -> [Group] {
+        let grouped = Dictionary(grouping: items, by: keyFor)
+        return grouped
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { key, items in
+                Group(title: key, items: items.sorted {
+                    $0.packageName.localizedCaseInsensitiveCompare($1.packageName) == .orderedAscending
+                })
+            }
     }
 }
 
@@ -440,7 +572,22 @@ private struct StepTimelineColumn: View {
 
             Divider()
 
-            if let result = state.selectedResult {
+            if let stage = state.validationStage, state.isValidatingSingle {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(stage).font(.callout)
+                    Spacer()
+                    Text("Click Stop in the toolbar to cancel")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
+                Divider()
+            }
+
+            if let result = state.selectedResult, !result.steps.isEmpty {
                 List {
                     Section {
                         ForEach(result.steps) { step in
@@ -461,9 +608,11 @@ private struct StepTimelineColumn: View {
                 .listStyle(.inset)
             } else if state.selectedEntry != nil {
                 ContentUnavailableView(
-                    "Not validated yet",
-                    systemImage: "play.circle",
-                    description: Text("Click Validate in the toolbar to run the schema checks.")
+                    state.isValidatingSingle ? "Validating…" : "Not validated yet",
+                    systemImage: state.isValidatingSingle ? "hourglass" : "play.circle",
+                    description: Text(state.isValidatingSingle
+                                      ? "Steps will appear here as they complete."
+                                      : "Click Validate in the toolbar to run the schema checks.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

@@ -33,6 +33,49 @@ final class TestingStore {
     /// Set while a bulk-validate run is cancellable.
     private var bulkTask: Task<Void, Never>?
 
+    /// Reference to the in-flight single-package validate task so the
+    /// user can cancel it from the toolbar. Set by ``setValidateTask``
+    /// and cleared on exit.
+    private var validateTask: Task<Void, Never>?
+
+    /// Free-text filter for the checklist column.
+    var searchQuery: String = ""
+
+    /// How the checklist column groups rows.
+    var groupBy: GroupBy = .none
+
+    /// Human-readable label for the step currently in flight. Drives
+    /// the "Validating … (current stage)" affordance.
+    var validationStage: String?
+
+    enum GroupBy: String, CaseIterable, Hashable {
+        case none, category, developer, status
+        var title: String {
+            switch self {
+            case .none:      "All"
+            case .category:  "Category"
+            case .developer: "Developer"
+            case .status:    "Status"
+            }
+        }
+    }
+
+    var isValidatingSingle: Bool {
+        if case .validating = phase { return true }
+        return false
+    }
+
+    func setValidateTask(_ task: Task<Void, Never>?) {
+        validateTask = task
+    }
+
+    func cancelValidation() {
+        validateTask?.cancel()
+        validateTask = nil
+        validationStage = nil
+        phase = .ready
+    }
+
     /// Repository whose checklist is currently loaded. Used to detect
     /// stale state when the user switches repos.
     var loadedRepoURL: URL?
@@ -145,12 +188,27 @@ final class TestingStore {
             return
         }
         phase = .validating(packageName: entry.packageName)
+        validationStage = "Schema check"
+
+        // Seed a placeholder so the timeline isn't empty during the
+        // long Phase B/C waits — the user gets immediate feedback that
+        // something is running.
+        resultsByEntry[entry.id] = TestingResult(
+            packageName: entry.packageName,
+            pkginfoURL: record.fileURL,
+            steps: [],
+            startedAt: Date(),
+            finishedAt: Date()
+        )
 
         // Phase A: schema + script lint.
         var combined = await services.testing.validate(record, in: snapshot)
+        resultsByEntry[entry.id] = combined
+        if Task.isCancelled { return }
 
         // Phase B.1: build, only when a munkipkg project with the same
         // name as the package is reachable.
+        validationStage = "Build (munkipkg)"
         if let folder = munkipkgProjectsFolder,
            let project = await Self.findMunkipkgProject(
                 named: record.pkginfo.name,
@@ -162,11 +220,16 @@ final class TestingStore {
                 munkipkg: services.munkipkg
             )
             combined.steps.append(buildStep)
+            resultsByEntry[entry.id] = combined
         }
+        if Task.isCancelled { return }
 
         // Phase B.2: artifact validation against the deployed pkgs/.
+        validationStage = "Build artifact"
         let artifactStep = await services.testing.validateBuildArtifact(record, in: repository)
         combined.steps.append(artifactStep)
+        resultsByEntry[entry.id] = combined
+        if Task.isCancelled { return }
 
         // Phase C: env-driven install / installs[] / uninstall steps.
         // When env construction failed (no base image, Tart missing, …)
@@ -195,6 +258,7 @@ final class TestingStore {
         combined.finishedAt = Date()
         resultsByEntry[entry.id] = combined
         applyStatusFromResult(combined, to: entry.id, tester: tester)
+        validationStage = nil
         phase = .ready
     }
 
@@ -234,8 +298,11 @@ final class TestingStore {
         environment: any TestEnvironment,
         into result: inout TestingResult
     ) async {
+        let entryID = checklist.items.first(where: { $0.packageName == result.packageName })?.id
+
         // Prepare the env. A failure here is itself a step result —
         // we don't throw past the run loop.
+        validationStage = "Preparing \(environment.displayName)"
         let prepareStart = Date()
         do {
             try await environment.prepare()
@@ -249,6 +316,7 @@ final class TestingStore {
                     duration: Date().timeIntervalSince(prepareStart)
                 )
             )
+            if let entryID { resultsByEntry[entryID] = result }
         } catch {
             result.steps.append(
                 TestingStepResult(
@@ -260,34 +328,42 @@ final class TestingStore {
                     duration: Date().timeIntervalSince(prepareStart)
                 )
             )
+            if let entryID { resultsByEntry[entryID] = result }
             await environment.teardown()
             return
         }
 
+        validationStage = "Install"
         let install = await services.testing.validateInstall(
             record,
             in: repository,
             environment: environment
         )
         result.steps.append(install)
+        if let entryID { resultsByEntry[entryID] = result }
 
         // Only proceed to the installs[] / uninstall checks if the
         // install step succeeded — otherwise we'd be testing against
         // a half-installed guest.
         if install.success {
+            validationStage = "Check installs[]"
             let installs = await services.testing.validateInstallsArray(
                 record,
                 environment: environment
             )
             result.steps.append(installs)
+            if let entryID { resultsByEntry[entryID] = result }
 
+            validationStage = "Uninstall"
             let uninstall = await services.testing.validateUninstall(
                 record,
                 environment: environment
             )
             result.steps.append(uninstall)
+            if let entryID { resultsByEntry[entryID] = result }
         }
 
+        validationStage = "Tearing down VM"
         await environment.teardown()
     }
 

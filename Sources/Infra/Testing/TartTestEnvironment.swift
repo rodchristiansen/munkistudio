@@ -142,8 +142,14 @@ public actor TartTestEnvironment: TestEnvironment {
     }
 
     private func waitForSSH(at ip: String) async throws {
-        let deadline = Date().addingTimeInterval(60)
+        // 180s instead of 60s — first-boot Tart guests can take longer
+        // to bring sshd up than the prior budget allowed, especially
+        // when macOS is doing first-run setup tasks in the background.
+        let deadline = Date().addingTimeInterval(180)
         while Date() < deadline {
+            if Task.isCancelled {
+                throw TestEnvironmentError("Cancelled while waiting for sshd.")
+            }
             let result = try? await HostTestEnvironment.run(
                 command: "/usr/bin/ssh",
                 arguments: [
@@ -158,7 +164,7 @@ public actor TartTestEnvironment: TestEnvironment {
             if result?.exitCode == 0 { return }
             try? await Task.sleep(for: .seconds(2))
         }
-        throw TestEnvironmentError("Timed out waiting for sshd in Tart guest.")
+        throw TestEnvironmentError("Timed out waiting for sshd in Tart guest after 180s. The base image may not have admin SSH keys baked in, or local-network permission was denied (System Settings → Privacy & Security → Local Network → MunkiStudio).")
     }
 
     /// Quote a single token for safe inclusion in a remote shell command.
