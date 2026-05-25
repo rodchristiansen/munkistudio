@@ -34,6 +34,19 @@ public struct TartDetector: Sendable {
         return line.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Path to the Homebrew binary on this Mac, or `nil` if Homebrew
+    /// isn't installed. Apps launched from Finder don't see Homebrew on
+    /// `PATH` — checking the canonical install locations directly is
+    /// far more reliable than shelling out to `which brew`.
+    public func locateHomebrew() async -> String? {
+        let candidates = [
+            "/opt/homebrew/bin/brew",   // Apple Silicon
+            "/usr/local/bin/brew"        // Intel
+        ]
+        let fm = FileManager.default
+        return candidates.first { fm.isExecutableFile(atPath: $0) }
+    }
+
     /// List of VMs known to the local Tart store — useful when the user
     /// picks a base image. Output of `tart list --format json` is
     /// parsed; an empty array is returned on any failure so the UI

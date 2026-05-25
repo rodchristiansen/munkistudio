@@ -463,18 +463,18 @@ public struct FileTestingService: TestingService {
             exists = probe.success
         } catch {
             return InstallsCheckOutcome(
-                line: "✘ \(path) — \(error.localizedDescription)",
+                line: "fail \(path) - \(error.localizedDescription)",
                 result: .error
             )
         }
         guard exists else {
-            return InstallsCheckOutcome(line: "✘ \(path) — missing", result: .missing)
+            return InstallsCheckOutcome(line: "miss \(path) - missing", result: .missing)
         }
 
         let type = (item.type ?? "").lowercased()
         let wantsBundleProbe = type == "application" || type == "bundle"
         guard wantsBundleProbe else {
-            return InstallsCheckOutcome(line: "✓ \(path)", result: .pass)
+            return InstallsCheckOutcome(line: "pass \(path)", result: .pass)
         }
 
         // For app/bundle paths, read Info.plist via `defaults read` so we
@@ -507,7 +507,7 @@ public struct FileTestingService: TestingService {
         }
 
         let detailString = detail.isEmpty ? "" : " — " + detail.joined(separator: ", ")
-        let glyph = status == .pass ? "✓" : "⚠"
+        let glyph = status == .pass ? "pass" : "warn"
         return InstallsCheckOutcome(
             line: "\(glyph) \(path)\(detailString)",
             result: status
@@ -657,13 +657,13 @@ public struct FileTestingService: TestingService {
                     arguments: ["/usr/sbin/pkgutil", "--forget", id]
                 )
                 if result.success {
-                    messages.append("✓ pkgutil --forget \(id)")
+                    messages.append("pass pkgutil --forget \(id)")
                 } else {
-                    messages.append("✘ pkgutil --forget \(id) — exit \(result.exitCode)")
+                    messages.append("fail pkgutil --forget \(id) - exit \(result.exitCode)")
                     severity = max(severity, .error)
                 }
             } catch {
-                messages.append("✘ pkgutil --forget \(id) — \(error.localizedDescription)")
+                messages.append("fail pkgutil --forget \(id) - \(error.localizedDescription)")
                 severity = max(severity, .error)
             }
         }
@@ -862,17 +862,17 @@ public struct FileTestingService: TestingService {
         lines.append("")
         lines.append("Canonical store: `.munkistudio/testing-checklist.json` (this file is auto-generated).")
         lines.append("")
-        lines.append("**\(totals.pass) ✅ pass** · **\(totals.warning) ⚠️ warning** · **\(totals.fail) ❌ fail** · **\(totals.untested) ⚪ untested** · total \(totals.total)")
+        lines.append("**\(totals.pass) pass** · **\(totals.warning) warning** · **\(totals.fail) fail** · **\(totals.untested) untested** · total \(totals.total)")
         lines.append("")
         lines.append("| Package | Version | Status | Tester | Tested | Notes |")
         lines.append("|---|---|---|---|---|---|")
         for entry in store.items {
             let symbol: String
             switch entry.status {
-            case .untested: symbol = "⚪ untested"
-            case .pass:     symbol = "✅ pass"
-            case .warning:  symbol = "⚠️ warning"
-            case .fail:     symbol = "❌ fail"
+            case .untested: symbol = "untested"
+            case .pass:     symbol = "pass"
+            case .warning:  symbol = "warning"
+            case .fail:     symbol = "fail"
             }
             let version = entry.version ?? "—"
             let tester = (entry.tester?.isEmpty == false ? entry.tester! : "—")

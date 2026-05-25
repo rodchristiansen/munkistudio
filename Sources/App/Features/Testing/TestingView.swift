@@ -18,13 +18,15 @@ struct TestingView: View {
                     BulkBanner(state: $localStore)
                     HSplitView {
                         ChecklistColumn(state: $localStore)
-                            .frame(minWidth: 260, idealWidth: 300)
+                            .frame(minWidth: 260, idealWidth: 300, maxHeight: .infinity)
                         StepTimelineColumn(state: $localStore)
-                            .frame(minWidth: 320)
+                            .frame(minWidth: 320, maxHeight: .infinity)
                         DetailInspectorColumn(state: $localStore)
-                            .frame(minWidth: 280, idealWidth: 360)
+                            .frame(minWidth: 280, idealWidth: 360, maxHeight: .infinity)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .toolbar {
                     ToolbarItemGroup {
                         Button {
