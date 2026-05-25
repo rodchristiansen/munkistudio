@@ -405,34 +405,26 @@ public struct FileTestingService: TestingService {
         var severity: TestingStepResult.Severity = .success
         var passed = 0
         var failed = 0
+        var mismatched = 0
 
         for item in installs {
-            let path = item.path
-            let result: CommandResult?
-            do {
-                // `test -e` exits 0 if the path exists (file, dir,
-                // symlink). Bundles and applications are directories.
-                result = try await environment.runCommand(
-                    "/bin/test",
-                    arguments: ["-e", path]
-                )
-            } catch {
-                messages.append("✘ \(path) — \(error.localizedDescription)")
-                severity = .error
-                failed += 1
-                continue
-            }
-            if result?.success == true {
-                messages.append("✓ \(path)")
+            let outcome = await Self.verifyInstallsEntry(item, in: environment)
+            messages.append(outcome.line)
+            switch outcome.result {
+            case .pass:
                 passed += 1
-            } else {
-                messages.append("✘ \(path) — missing")
-                severity = .error
+            case .versionMismatch:
+                mismatched += 1
+                severity = max(severity, .warning)
+            case .missing, .error:
                 failed += 1
+                severity = max(severity, .error)
             }
         }
 
-        messages.insert("\(passed) found, \(failed) missing.", at: 0)
+        var summary = "\(passed) passed, \(failed) missing"
+        if mismatched > 0 { summary += ", \(mismatched) version mismatch" }
+        messages.insert(summary, at: 0)
         return TestingStepResult(
             kind: .installsCheck,
             title: "installs[] check",
@@ -443,17 +435,118 @@ public struct FileTestingService: TestingService {
         )
     }
 
+    private enum InstallsCheckResult {
+        case pass
+        case versionMismatch
+        case missing
+        case error
+    }
+
+    private struct InstallsCheckOutcome {
+        var line: String
+        var result: InstallsCheckResult
+    }
+
+    /// Verify one ``InstallsItem`` against the guest. Defaults to a path
+    /// existence check; for `application` / `bundle` types we also
+    /// compare CFBundleIdentifier / CFBundleShortVersionString when the
+    /// pkginfo provides them — that's the bar Munki actually uses to
+    /// decide whether the app is installed.
+    private static func verifyInstallsEntry(
+        _ item: InstallsItem,
+        in environment: any TestEnvironment
+    ) async -> InstallsCheckOutcome {
+        let path = item.path
+        let exists: Bool
+        do {
+            let probe = try await environment.runCommand("/bin/test", arguments: ["-e", path])
+            exists = probe.success
+        } catch {
+            return InstallsCheckOutcome(
+                line: "✘ \(path) — \(error.localizedDescription)",
+                result: .error
+            )
+        }
+        guard exists else {
+            return InstallsCheckOutcome(line: "✘ \(path) — missing", result: .missing)
+        }
+
+        let type = (item.type ?? "").lowercased()
+        let wantsBundleProbe = type == "application" || type == "bundle"
+        guard wantsBundleProbe else {
+            return InstallsCheckOutcome(line: "✓ \(path)", result: .pass)
+        }
+
+        // For app/bundle paths, read Info.plist via `defaults read` so we
+        // don't depend on Spotlight indexing inside an ephemeral guest.
+        let plistPath = "\(path)/Contents/Info"
+        var detail: [String] = []
+        var status: InstallsCheckResult = .pass
+
+        if let expectedID = item.cfBundleIdentifier, !expectedID.isEmpty {
+            let actual = await Self.readDefault(plistPath, key: "CFBundleIdentifier", in: environment)
+            if actual == expectedID {
+                detail.append("id=\(actual)")
+            } else {
+                detail.append("id expected=\(expectedID) got=\(actual ?? "<missing>")")
+                status = .versionMismatch
+            }
+        }
+
+        if let expectedVersion = item.cfBundleShortVersionString ?? item.cfBundleVersion,
+           !expectedVersion.isEmpty {
+            let key = item.cfBundleShortVersionString != nil
+                ? "CFBundleShortVersionString" : "CFBundleVersion"
+            let actual = await Self.readDefault(plistPath, key: key, in: environment)
+            if actual == expectedVersion {
+                detail.append("\(key)=\(actual)")
+            } else {
+                detail.append("\(key) expected=\(expectedVersion) got=\(actual ?? "<missing>")")
+                status = .versionMismatch
+            }
+        }
+
+        let detailString = detail.isEmpty ? "" : " — " + detail.joined(separator: ", ")
+        let glyph = status == .pass ? "✓" : "⚠"
+        return InstallsCheckOutcome(
+            line: "\(glyph) \(path)\(detailString)",
+            result: status
+        )
+    }
+
+    /// Read one key from a guest plist via `defaults read`. Returns the
+    /// trimmed value on success, `nil` on failure.
+    private static func readDefault(
+        _ plistPath: String,
+        key: String,
+        in environment: any TestEnvironment
+    ) async -> String? {
+        let result = try? await environment.runCommand(
+            "/usr/bin/defaults",
+            arguments: ["read", plistPath, key]
+        )
+        guard let result, result.success else { return nil }
+        let value = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
     public func validateUninstall(
         _ record: PkginfoRecord,
         environment: any TestEnvironment
     ) async -> TestingStepResult {
         let started = Date()
         let pkginfo = record.pkginfo
-        let method = (pkginfo.uninstallMethod ?? "").trimmingCharacters(in: .whitespaces)
+        let method = (pkginfo.uninstallMethod ?? "").trimmingCharacters(in: .whitespaces).lowercased()
         let script = pkginfo.uninstallScript ?? ""
 
-        // No method configured and no script — nothing to do.
-        if method.isEmpty && script.isEmpty {
+        // Decide which path to run. Explicit uninstall_method wins; else
+        // a present uninstall_script implies uninstall_script.
+        let effectiveMethod: UninstallPath
+        if method == "uninstall_script" || (method.isEmpty && !script.isEmpty) {
+            effectiveMethod = .script
+        } else if method == "removepackages" {
+            effectiveMethod = .removePackages
+        } else if method.isEmpty && script.isEmpty {
             return TestingStepResult(
                 kind: .uninstall,
                 title: "Uninstall",
@@ -462,32 +555,49 @@ public struct FileTestingService: TestingService {
                 messages: ["No uninstall method or uninstall_script configured."],
                 duration: Date().timeIntervalSince(started)
             )
-        }
-
-        // v1: only the uninstall_script path is wired.
-        let effectiveScript = script.isEmpty ? nil : script
-        guard let scriptBody = effectiveScript else {
+        } else {
             return TestingStepResult(
                 kind: .uninstall,
                 title: "Uninstall",
                 success: true,
                 severity: .warning,
-                messages: ["uninstall_method='\(method)' isn't implemented in v1 — only uninstall_script runs today."],
+                messages: ["uninstall_method='\(method)' isn't implemented yet — supported: uninstall_script, removepackages."],
                 duration: Date().timeIntervalSince(started)
             )
         }
 
-        // Drop the script into the guest, chmod +x, run it as root.
+        switch effectiveMethod {
+        case .script:
+            return await runScriptUninstall(
+                body: script,
+                environment: environment,
+                startedAt: started
+            )
+        case .removePackages:
+            return await runRemovePackagesUninstall(
+                receipts: pkginfo.receipts ?? [],
+                environment: environment,
+                startedAt: started
+            )
+        }
+    }
+
+    private enum UninstallPath {
+        case script
+        case removePackages
+    }
+
+    private func runScriptUninstall(
+        body: String,
+        environment: any TestEnvironment,
+        startedAt: Date
+    ) async -> TestingStepResult {
         let guestScript = "/tmp/munkistudio-uninstall-\(UUID().uuidString.prefix(8)).sh"
         var messages: [String] = []
         var severity: TestingStepResult.Severity = .success
 
         do {
-            try await Self.writeRemoteScript(
-                scriptBody,
-                toGuestPath: guestScript,
-                via: environment
-            )
+            try await Self.writeRemoteScript(body, toGuestPath: guestScript, via: environment)
             let result = try await environment.runCommand(
                 "/usr/bin/sudo",
                 arguments: ["/bin/sh", guestScript]
@@ -507,11 +617,65 @@ public struct FileTestingService: TestingService {
 
         return TestingStepResult(
             kind: .uninstall,
-            title: "Uninstall",
+            title: "Uninstall (uninstall_script)",
             success: severity != .error,
             severity: severity,
             messages: messages,
-            duration: Date().timeIntervalSince(started)
+            duration: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    /// `uninstall_method: removepackages` — `pkgutil --forget` every
+    /// package ID from the pkginfo's `receipts[]`. We don't try to
+    /// remove the installed files themselves; that's what `removepackages`
+    /// actually does in Munki, but v1 stops at forgetting receipts so
+    /// the test stays bounded and reversible.
+    private func runRemovePackagesUninstall(
+        receipts: [Receipt],
+        environment: any TestEnvironment,
+        startedAt: Date
+    ) async -> TestingStepResult {
+        let ids = receipts.compactMap(\.packageid).filter { !$0.isEmpty }
+        guard !ids.isEmpty else {
+            return TestingStepResult(
+                kind: .uninstall,
+                title: "Uninstall (removepackages)",
+                success: false,
+                severity: .error,
+                messages: ["uninstall_method='removepackages' but no receipts[] are declared."],
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+
+        var messages: [String] = []
+        var severity: TestingStepResult.Severity = .success
+
+        for id in ids {
+            do {
+                let result = try await environment.runCommand(
+                    "/usr/bin/sudo",
+                    arguments: ["/usr/sbin/pkgutil", "--forget", id]
+                )
+                if result.success {
+                    messages.append("✓ pkgutil --forget \(id)")
+                } else {
+                    messages.append("✘ pkgutil --forget \(id) — exit \(result.exitCode)")
+                    severity = max(severity, .error)
+                }
+            } catch {
+                messages.append("✘ pkgutil --forget \(id) — \(error.localizedDescription)")
+                severity = max(severity, .error)
+            }
+        }
+
+        messages.insert("\(ids.count) receipt\(ids.count == 1 ? "" : "s") to forget.", at: 0)
+        return TestingStepResult(
+            kind: .uninstall,
+            title: "Uninstall (removepackages)",
+            success: severity != .error,
+            severity: severity,
+            messages: messages,
+            duration: Date().timeIntervalSince(startedAt)
         )
     }
 

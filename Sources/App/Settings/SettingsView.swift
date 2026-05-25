@@ -1,5 +1,6 @@
 import SwiftUI
 import Core
+import Infra
 
 /// Content of the Preferences window (Cmd-,). A `TabView` so each future
 /// feature can contribute its own pane without restructuring this view.
@@ -62,38 +63,98 @@ private struct FeatureSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section {
-                Toggle("Enable Testing tab", isOn: $settings.enableTestingTab)
-                TextField("Your name", text: $settings.testerName,
-                          prompt: Text("Attributed to checklist updates"))
-                    .disabled(!settings.enableTestingTab)
-
-                Picker("Install environment", selection: $settings.testingEnvironmentRaw) {
-                    Text("None (skip install steps)").tag("none")
-                    Text("Host Mac (smoke test only)").tag("host")
-                    Text("Tart (ephemeral macOS VM)").tag("tart")
-                }
-                .disabled(!settings.enableTestingTab)
-
-                TextField("Tart base image", text: $settings.tartBaseImage,
-                          prompt: Text("e.g. ghcr.io/cirruslabs/macos-sequoia-base:latest"))
-                    .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
-                TextField("Tart SSH user", text: $settings.tartSSHUser,
-                          prompt: Text("admin"))
-                    .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
-            } header: {
-                Text("Testing")
-            } footer: {
-                Text("Phase A/B: pkginfo schema validation, script lint, optional build via munkipkg, build-artifact check, and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Phase C uses Tart to clone an ephemeral macOS guest per install test — Apple's licensing caps macOS guests at 2 concurrent per host.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            TestingSettingsSection()
         }
         .formStyle(.grouped)
         .scenePadding()
         .frame(minHeight: 360)
     }
 
+}
+
+// MARK: - Testing section
+
+private struct TestingSettingsSection: View {
+    @Environment(AppSettings.self) private var settings
+
+    @State private var tartStatus: TartStatus = .checking
+    @State private var refreshingTart = false
+
+    enum TartStatus: Equatable {
+        case checking
+        case missing
+        case present(version: String, path: String)
+    }
+
+    var body: some View {
+        @Bindable var settings = settings
+        Section {
+            Toggle("Enable Testing tab", isOn: $settings.enableTestingTab)
+            TextField("Your name", text: $settings.testerName,
+                      prompt: Text("Attributed to checklist updates"))
+                .disabled(!settings.enableTestingTab)
+
+            Picker("Install environment", selection: $settings.testingEnvironmentRaw) {
+                Text("None (skip install steps)").tag("none")
+                Text("Host Mac (smoke test only)").tag("host")
+                Text("Tart (ephemeral macOS VM)").tag("tart")
+            }
+            .disabled(!settings.enableTestingTab)
+
+            TextField("Tart base image", text: $settings.tartBaseImage,
+                      prompt: Text("e.g. ghcr.io/cirruslabs/macos-sequoia-base:latest"))
+                .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
+            TextField("Tart SSH user", text: $settings.tartSSHUser,
+                      prompt: Text("admin"))
+                .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
+
+            LabeledContent("Tart status") {
+                HStack(spacing: 6) {
+                    switch tartStatus {
+                    case .checking:
+                        ProgressView().controlSize(.small)
+                        Text("Checking…").foregroundStyle(.secondary)
+                    case .missing:
+                        Label("Not installed", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Link("Install Tart", destination: URL(string: "https://tart.run")!)
+                            .font(.caption)
+                    case .present(let version, _):
+                        Label(version, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Spacer()
+                    if refreshingTart {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Refresh") { Task { await refreshTartStatus() } }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                    }
+                }
+            }
+        } header: {
+            Text("Testing")
+        } footer: {
+            Text("Phase A/B: pkginfo schema validation, script lint, optional build via munkipkg, build-artifact check, and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Phase C uses Tart to clone an ephemeral macOS guest per install test — Apple's licensing caps macOS guests at 2 concurrent per host.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .task { await refreshTartStatus() }
+    }
+
+    @MainActor
+    private func refreshTartStatus() async {
+        refreshingTart = true
+        defer { refreshingTart = false }
+        let detector = TartDetector()
+        if let path = await detector.locate() {
+            let version = await detector.version() ?? "installed"
+            tartStatus = .present(version: version, path: path)
+        } else {
+            tartStatus = .missing
+        }
+    }
 }
 
 // MARK: - Build

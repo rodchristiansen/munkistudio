@@ -14,13 +14,16 @@ struct TestingView: View {
     var body: some View {
         Group {
             if let repository = store.repository {
-                HSplitView {
-                    ChecklistColumn(state: $localStore)
-                        .frame(minWidth: 260, idealWidth: 300)
-                    StepTimelineColumn(state: $localStore)
-                        .frame(minWidth: 320)
-                    DetailInspectorColumn(state: $localStore)
-                        .frame(minWidth: 280, idealWidth: 360)
+                VStack(spacing: 0) {
+                    BulkBanner(state: $localStore)
+                    HSplitView {
+                        ChecklistColumn(state: $localStore)
+                            .frame(minWidth: 260, idealWidth: 300)
+                        StepTimelineColumn(state: $localStore)
+                            .frame(minWidth: 320)
+                        DetailInspectorColumn(state: $localStore)
+                            .frame(minWidth: 280, idealWidth: 360)
+                    }
                 }
                 .toolbar {
                     ToolbarItemGroup {
@@ -179,6 +182,91 @@ struct TestingView: View {
                 environment: nil
             )
         }
+    }
+}
+
+// MARK: - Bulk banner
+
+/// Sits above the three-column body. Shows either the live progress of
+/// a "Validate all" run or the rolled-up summary of the most recent one.
+/// Collapses to nothing when neither applies.
+private struct BulkBanner: View {
+    @Binding var state: TestingStore
+
+    var body: some View {
+        Group {
+            if case let .validatingAll(current, total, packageName) = state.phase {
+                progressBar(current: current, total: total, packageName: packageName)
+            } else if let summary = state.bulkSummary {
+                summaryBar(summary: summary)
+            }
+        }
+    }
+
+    private func progressBar(current: Int, total: Int, packageName: String) -> some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Validating \(current) of \(total)").font(.callout)
+            Text("·").foregroundStyle(.tertiary)
+            Text(packageName)
+                .font(.system(.callout, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            ProgressView(value: Double(current), total: Double(max(total, 1)))
+                .progressViewStyle(.linear)
+                .frame(width: 180)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.thinMaterial)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func summaryBar(summary: TestingStore.BulkSummary) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: summary.failed == 0
+                  ? "checkmark.seal.fill"
+                  : "exclamationmark.triangle.fill")
+                .foregroundStyle(summary.failed == 0 ? .green : .orange)
+            Text(summary.headline).font(.callout)
+            if let url = summary.exportURL {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Label("Reveal in Finder", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+            Spacer()
+            Text(summary.finishedAt, style: .relative)
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            Button {
+                state.bulkSummary = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.thinMaterial)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+private extension TestingStore.BulkSummary {
+    var headline: String {
+        var parts: [String] = ["\(total) packages"]
+        if passed > 0 { parts.append("\(passed) passed") }
+        if warnings > 0 { parts.append("\(warnings) with warnings") }
+        if failed > 0 { parts.append("\(failed) failed") }
+        return parts.joined(separator: " · ")
     }
 }
 
