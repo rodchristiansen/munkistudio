@@ -50,6 +50,21 @@ struct TestingView: View {
                         } label: {
                             Label("Save checklist", systemImage: "tray.and.arrow.down")
                         }
+
+                        if localStore.isBulkValidating {
+                            Button(role: .cancel) {
+                                localStore.cancelBulk()
+                            } label: {
+                                Label("Stop", systemImage: "stop.circle")
+                            }
+                        } else {
+                            Button {
+                                Task { await runAll() }
+                            } label: {
+                                Label("Validate all", systemImage: "checkmark.seal.text.page")
+                            }
+                            .disabled(localStore.checklist.items.isEmpty)
+                        }
                     }
                 }
                 .sheet(isPresented: Binding(
@@ -125,6 +140,15 @@ struct TestingView: View {
     private func save() async {
         guard let repository = store.repository else { return }
         await localStore.save(repository: repository, service: store.services.testing)
+    }
+
+    private func runAll() async {
+        guard let repository = store.repository else { return }
+        await localStore.validateAll(
+            snapshot: store.snapshot,
+            repository: repository,
+            services: store.services
+        )
     }
 
     private func prepareAutofix() async {

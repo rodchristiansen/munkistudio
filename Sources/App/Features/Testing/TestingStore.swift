@@ -13,8 +13,25 @@ final class TestingStore {
     enum Phase: Equatable {
         case idle
         case validating(packageName: String)
+        case validatingAll(current: Int, total: Int, packageName: String)
         case ready
     }
+
+    /// Outcome of the most recent bulk-validate run, surfaced as a
+    /// banner above the checklist.
+    struct BulkSummary: Equatable {
+        var total: Int
+        var passed: Int
+        var failed: Int
+        var warnings: Int
+        var exportURL: URL?
+        var finishedAt: Date
+    }
+
+    var bulkSummary: BulkSummary?
+
+    /// Set while a bulk-validate run is cancellable.
+    private var bulkTask: Task<Void, Never>?
 
     /// Repository whose checklist is currently loaded. Used to detect
     /// stale state when the user switches repos.
@@ -242,6 +259,83 @@ final class TestingStore {
         } catch {
             return nil
         }
+    }
+
+    // MARK: - Bulk validate
+
+    /// Run static-only validation (Phases A + B.2; build is skipped to
+    /// keep bulk runs fast) across every checklist entry sequentially.
+    /// On finish, write a JSON results file and surface a summary.
+    func validateAll(
+        snapshot: RepositorySnapshot,
+        repository: MunkiRepository,
+        services: AppServices
+    ) async {
+        bulkTask?.cancel()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.runBulk(
+                snapshot: snapshot,
+                repository: repository,
+                services: services
+            )
+        }
+        bulkTask = task
+        await task.value
+    }
+
+    func cancelBulk() {
+        bulkTask?.cancel()
+        bulkTask = nil
+        phase = .ready
+    }
+
+    private func runBulk(
+        snapshot: RepositorySnapshot,
+        repository: MunkiRepository,
+        services: AppServices
+    ) async {
+        let entries = checklist.items
+        let total = entries.count
+        guard total > 0 else { return }
+
+        var results: [TestingResult] = []
+        for (index, entry) in entries.enumerated() {
+            if Task.isCancelled { break }
+            phase = .validatingAll(current: index + 1, total: total, packageName: entry.packageName)
+
+            guard let record = snapshot.pkginfos.first(where: { $0.pkginfo.name == entry.packageName }) else {
+                continue
+            }
+            var combined = await services.testing.validate(record, in: snapshot)
+            let artifact = await services.testing.validateBuildArtifact(record, in: repository)
+            combined.steps.append(artifact)
+            combined.finishedAt = Date()
+            resultsByEntry[entry.id] = combined
+            results.append(combined)
+        }
+
+        var exportURL: URL?
+        do {
+            exportURL = try await services.testing.exportResults(results, in: repository)
+        } catch {
+            errorMessage = "Couldn't export results: \(error.localizedDescription)"
+        }
+
+        bulkSummary = BulkSummary(
+            total: results.count,
+            passed: results.filter(\.success).count,
+            failed: results.filter { !$0.success }.count,
+            warnings: results.filter { $0.warnings > 0 }.count,
+            exportURL: exportURL,
+            finishedAt: Date()
+        )
+        phase = .ready
+    }
+
+    var isBulkValidating: Bool {
+        if case .validatingAll = phase { return true }
+        return false
     }
 
     // MARK: - Autofix

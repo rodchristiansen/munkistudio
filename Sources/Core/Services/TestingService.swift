@@ -70,6 +70,15 @@ public protocol TestingService: Sendable {
         environment: any TestEnvironment
     ) async -> TestingStepResult
 
+    /// Write a per-run JSON results document under
+    /// `.munkistudio/testing-results/`. Returns the URL of the written
+    /// file so the UI can offer "Reveal in Finder" affordances.
+    @discardableResult
+    func exportResults(
+        _ results: [TestingResult],
+        in repository: MunkiRepository
+    ) async throws -> URL
+
     /// Load the checklist for a repository. Missing file → empty store.
     func loadChecklist(in repository: MunkiRepository) async throws -> ChecklistStore
 
@@ -121,7 +130,7 @@ public struct AutofixChange: Sendable, Hashable, Identifiable {
 /// One full Testing run on one package: ordered step results plus
 /// aggregate counters. Mirrors the C# `QaResult` shape in
 /// `fleetmate-windows`.
-public struct TestingResult: Sendable, Hashable, Identifiable {
+public struct TestingResult: Sendable, Hashable, Identifiable, Codable {
     public var packageName: String
     public var pkginfoURL: URL
     public var steps: [TestingStepResult]
@@ -153,7 +162,7 @@ public struct TestingResult: Sendable, Hashable, Identifiable {
 
 /// One step in a Testing run. `messages` are user-facing; `details` is a
 /// free-form bag the UI's detail inspector can render in raw form.
-public struct TestingStepResult: Sendable, Hashable, Identifiable {
+public struct TestingStepResult: Sendable, Hashable, Identifiable, Codable {
     public enum Kind: String, Sendable, Hashable, Codable {
         case schema          // pkginfo required fields, catalog membership, arch
         case scriptLint      // pre/postinstall script smells

@@ -606,6 +606,37 @@ public struct FileTestingService: TestingService {
         return AutofixProposal(pkginfo: pkginfo, changes: changes)
     }
 
+    // MARK: - Results export
+
+    public func exportResults(
+        _ results: [TestingResult],
+        in repository: MunkiRepository
+    ) async throws -> URL {
+        let directory = repository.rootURL
+            .appending(path: ".munkistudio")
+            .appending(path: "testing-results")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "")
+        let url = directory.appending(path: "run-\(stamp).json")
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+
+        let envelope = TestingRunEnvelope(
+            generatedAt: Date(),
+            total: results.count,
+            passed: results.filter(\.success).count,
+            failed: results.filter { !$0.success }.count,
+            results: results
+        )
+        let data = try encoder.encode(envelope)
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
     // MARK: - Checklist
 
     public func loadChecklist(in repository: MunkiRepository) async throws -> ChecklistStore {
@@ -697,6 +728,17 @@ public struct FileTestingService: TestingService {
         lines.append("")
         return lines.joined(separator: "\n")
     }
+}
+
+/// JSON envelope written by ``FileTestingService/exportResults`` — a
+/// stable shape CI / ReportMate / a future CLI can read without
+/// reaching into per-result fields directly.
+private struct TestingRunEnvelope: Codable {
+    var generatedAt: Date
+    var total: Int
+    var passed: Int
+    var failed: Int
+    var results: [TestingResult]
 }
 
 private struct ChecklistTotals {

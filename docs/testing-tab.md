@@ -1,6 +1,17 @@
 # Testing tab — design notes
 
-Living document for ROADMAP item **#6 Testing / QA tab — XL (phased)**. Captures what we are porting from Cimian's `quality/` system, what changes for Munki/macOS, and the runtime architecture for isolated install testing.
+Living document for the Testing pane. Captures what we ported from Cimian's `quality/` system, what changes for Munki/macOS, and the runtime architecture for isolated install testing.
+
+## Status at a glance
+
+| Phase | Scope | Status |
+|---|---|---|
+| A | Schema check, script lint, repo-local checklist (JSON + Markdown view), autofix v1 | **Shipped** |
+| B | Build via `munkipkg`, artifact validation (`pkgutil --check-signature` etc.) | **Shipped** |
+| C | `TestEnvironment` protocol, Tart + Host runners, install / installs[] / uninstall steps | **Shipped (spike)** — requires Tart + a configured base image at runtime |
+| D | Bulk "Validate all", JSON results export under `.munkistudio/testing-results/` | **Shipped** |
+
+Lives end-to-end behind **Settings → Features → Testing**: enable the tab, pick an install environment, set a tester name. Checklist and results files land under `.munkistudio/` for the team to commit.
 
 ---
 
