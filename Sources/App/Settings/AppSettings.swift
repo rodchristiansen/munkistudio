@@ -87,6 +87,19 @@ final class AppSettings {
         didSet { defaults.set(profilesDirectoryPath, forKey: Key.profilesDirectoryPath) }
     }
 
+    /// Show the Testing tab. Off by default — opt-in from Settings →
+    /// Features. Phase A surface is schema validation + a repo-local
+    /// checklist; Phase C adds ephemeral install testing in Tart VMs.
+    var enableTestingTab: Bool {
+        didSet { defaults.set(enableTestingTab, forKey: Key.enableTestingTab) }
+    }
+
+    /// Display name attributed to checklist updates ("last tested by …").
+    /// Empty = derive from the local user account at write time.
+    var testerName: String {
+        didSet { defaults.set(testerName, forKey: Key.testerName) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -113,6 +126,10 @@ final class AppSettings {
             defaults.bool(forKey: Key.enableProfilesTab)
         self.profilesDirectoryPath =
             defaults.string(forKey: Key.profilesDirectoryPath) ?? ""
+        self.enableTestingTab =
+            defaults.bool(forKey: Key.enableTestingTab)
+        self.testerName =
+            defaults.string(forKey: Key.testerName) ?? ""
     }
 
     private enum Key {
@@ -127,5 +144,7 @@ final class AppSettings {
         static let promoterHiddenCatalogs = "MunkiStudio.settings.promoterHiddenCatalogs"
         static let enableProfilesTab = "MunkiStudio.settings.enableProfilesTab"
         static let profilesDirectoryPath = "MunkiStudio.settings.profilesDirectoryPath"
+        static let enableTestingTab = "MunkiStudio.settings.enableTestingTab"
+        static let testerName = "MunkiStudio.settings.testerName"
     }
 }

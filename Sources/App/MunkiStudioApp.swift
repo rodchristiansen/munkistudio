@@ -37,7 +37,8 @@ struct MunkiStudioApp: SwiftUI.App {
             iconImporter: IconImporterRunner(),
             repoClean: RepoCleanRunner(),
             repoCleanHistory: RepoCleanHistoryStore(),
-            promoter: FilePromoterService(packages: packages)
+            promoter: FilePromoterService(packages: packages),
+            testing: FileTestingService()
         )
         _store = State(wrappedValue: RepositoryStore(services: services))
     }
@@ -117,4 +118,5 @@ struct AppServices: Sendable {
     let repoClean: any RepoCleanService
     let repoCleanHistory: any RepoCleanHistoryService
     let promoter: any PromoterService
+    let testing: any TestingService
 }

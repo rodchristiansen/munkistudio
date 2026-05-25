@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Core
 
 /// `NSViewRepresentable` wrapping `NSTextView` so we get:
 /// - real internal scrolling (SwiftUI's `TextEditor` plus a separate

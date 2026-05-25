@@ -62,6 +62,18 @@ private struct FeatureSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Enable Testing tab", isOn: $settings.enableTestingTab)
+                TextField("Your name", text: $settings.testerName,
+                          prompt: Text("Attributed to checklist updates"))
+                    .disabled(!settings.enableTestingTab)
+            } header: {
+                Text("Testing")
+            } footer: {
+                Text("Phase A: pkginfo schema validation and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Later phases add ephemeral install testing in macOS VMs.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scenePadding()

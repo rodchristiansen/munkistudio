@@ -1,13 +1,12 @@
 import Foundation
-import SwiftUI
 
 /// Languages we recognize in pkginfo scripts. Detection runs on the
 /// shebang first, then on simple content heuristics so a Python script
 /// with no shebang still gets the right keyword set.
-enum ScriptLanguage: String, CaseIterable, Sendable {
+public enum ScriptLanguage: String, CaseIterable, Sendable {
     case bash, zsh, sh, python, ruby, perl, applescript, swift, plainText, xml
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .bash: "Bash"
         case .zsh: "Zsh"
@@ -25,14 +24,14 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
     /// True for interpreted scripts that should carry a `#!` shebang.
     /// Markup and compiled-language sources should not be flagged for a
     /// missing shebang.
-    var expectsShebang: Bool {
+    public var expectsShebang: Bool {
         switch self {
         case .bash, .zsh, .sh, .python, .ruby, .perl: true
         case .applescript, .swift, .plainText, .xml: false
         }
     }
 
-    static func detect(in source: String) -> ScriptLanguage {
+    public static func detect(in source: String) -> ScriptLanguage {
         let firstLine = source.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
         if firstLine.hasPrefix("#!") {
             let lower = firstLine.lowercased()
@@ -45,16 +44,12 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
             if lower.contains("swift") { return .swift }
             if lower.hasSuffix("/sh") || lower.hasSuffix(" sh") { return .sh }
         }
-        // XML / property list — no shebang, opens with an XML prolog,
-        // doctype, or root element.
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("<?xml")
             || trimmed.hasPrefix("<!DOCTYPE")
             || trimmed.hasPrefix("<plist") {
             return .xml
         }
-        // Fall back to content heuristics. `import` + `def`/`class` =
-        // python; `puts` / `end` = ruby; `tell application` = AppleScript.
         if source.range(of: #"^\s*(def |class |from \w+ import|import \w+)"#,
                         options: [.regularExpression, .anchored]) != nil {
             return .python
@@ -71,7 +66,7 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
     }
 
     /// Keywords highlighted as the "keyword" colour.
-    var keywords: [String] {
+    public var keywords: [String] {
         switch self {
         case .bash, .zsh, .sh:
             ["if", "then", "else", "elif", "fi", "for", "while", "do", "done",
@@ -108,7 +103,7 @@ enum ScriptLanguage: String, CaseIterable, Sendable {
     }
 
     /// Single-line comment prefix.
-    var lineCommentPrefix: String? {
+    public var lineCommentPrefix: String? {
         switch self {
         case .bash, .zsh, .sh, .python, .ruby, .perl: "#"
         case .swift: "//"

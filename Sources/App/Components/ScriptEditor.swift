@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Core
 
 /// Always-expanded script editor.
 ///
