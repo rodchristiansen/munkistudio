@@ -2,15 +2,26 @@ import SwiftUI
 import Core
 import Infra
 
-/// Content of the Preferences window (Cmd-,). A `TabView` so each future
-/// feature can contribute its own pane without restructuring this view.
+/// Content of the Preferences window (Cmd-,). Each feature gets its
+/// own tab so settings stay grouped with what they actually affect.
+/// Every pane shares ``Self/paneMinHeight`` so the window doesn't
+/// jump around when switching between short tabs (General, Git) and
+/// tall ones (Testing) — width is fixed too.
 struct SettingsView: View {
+    /// Height matches the tallest pane (Testing) so the window stays
+    /// the same size across tabs.
+    static let paneMinHeight: CGFloat = 520
+
     var body: some View {
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gearshape") }
-            FeatureSettingsView()
-                .tabItem { Label("Features", systemImage: "switch.2") }
+            PromoterSettingsView()
+                .tabItem { Label("Promoter", systemImage: "arrow.up.forward.app") }
+            ProfilesSettingsView()
+                .tabItem { Label("Profiles", systemImage: "doc.text") }
+            TestingSettingsView()
+                .tabItem { Label("Testing", systemImage: "checkmark.seal") }
             GitSettingsView()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             BuildSettingsView()
@@ -18,13 +29,13 @@ struct SettingsView: View {
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 520)
+        .frame(width: 560)
     }
 }
 
-// MARK: - Features
+// MARK: - Promoter
 
-private struct FeatureSettingsView: View {
+private struct PromoterSettingsView: View {
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
@@ -48,6 +59,21 @@ private struct FeatureSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: SettingsView.paneMinHeight)
+    }
+}
+
+// MARK: - Profiles
+
+private struct ProfilesSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
             Section {
                 Toggle("Enable Profiles tab", isOn: $settings.enableProfilesTab)
                 HStack {
@@ -63,18 +89,16 @@ private struct FeatureSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            TestingSettingsSection()
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 360)
+        .frame(minHeight: SettingsView.paneMinHeight)
     }
-
 }
 
-// MARK: - Testing section
+// MARK: - Testing
 
-private struct TestingSettingsSection: View {
+private struct TestingSettingsView: View {
     @Environment(AppSettings.self) private var settings
 
     @State private var tartStatus: TartStatus = .checking
@@ -89,7 +113,8 @@ private struct TestingSettingsSection: View {
 
     var body: some View {
         @Bindable var settings = settings
-        Section {
+        Form {
+            Section {
             Toggle("Enable Testing tab", isOn: $settings.enableTestingTab)
             TextField("Your name", text: $settings.testerName,
                       prompt: Text("Attributed to checklist updates"))
@@ -140,13 +165,17 @@ private struct TestingSettingsSection: View {
                     }
                 }
             }
-        } header: {
-            Text("Testing")
-        } footer: {
-            Text("Phase A/B: pkginfo schema validation, script lint, optional build via munkipkg, build-artifact check, and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Phase C uses Tart to clone an ephemeral macOS guest per install test — Apple's licensing caps macOS guests at 2 concurrent per host.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            } header: {
+                Text("Testing")
+            } footer: {
+                Text("Phase A/B: pkginfo schema validation, script lint, optional build via munkipkg, build-artifact check, and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Phase C uses Tart to clone an ephemeral macOS guest per install test — Apple's licensing caps macOS guests at 2 concurrent per host.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: SettingsView.paneMinHeight)
         .task { await refreshTartStatus() }
     }
 
@@ -248,7 +277,7 @@ private struct BuildSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 360)
+        .frame(minHeight: SettingsView.paneMinHeight)
         .task(id: settings.munkipkgExecutablePath) {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
@@ -292,7 +321,7 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 160)
+        .frame(minHeight: SettingsView.paneMinHeight)
     }
 }
 
@@ -327,7 +356,7 @@ private struct GitSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 160)
+        .frame(minHeight: SettingsView.paneMinHeight)
     }
 }
 
