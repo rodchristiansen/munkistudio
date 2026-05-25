@@ -28,48 +28,62 @@ struct TestingView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .toolbar {
+                    // Per-package workflow: run the validation pipeline on
+                    // the selected row, propose safe autofixes for it.
                     ToolbarItemGroup {
                         Button {
                             Task { await runSelected() }
                         } label: {
                             Label("Validate", systemImage: "checkmark.seal")
                         }
+                        .labelStyle(.titleAndIcon)
                         .disabled(localStore.selectedEntry == nil)
-
-                        Button {
-                            localStore.selectNextUntested()
-                        } label: {
-                            Label("Next untested", systemImage: "arrow.forward.circle")
-                        }
-                        .disabled(localStore.checklist.items.allSatisfy { $0.status != .untested })
 
                         Button {
                             Task { await prepareAutofix() }
                         } label: {
-                            Label("Autofix…", systemImage: "wand.and.stars")
+                            Label("Autofix", systemImage: "wand.and.stars")
                         }
+                        .labelStyle(.titleAndIcon)
                         .disabled(localStore.selectedEntry == nil)
-
+                    }
+                    // Navigation: jump to the next untested entry.
+                    ToolbarItemGroup {
                         Button {
-                            Task { await save() }
+                            localStore.selectNextUntested()
                         } label: {
-                            Label("Save checklist", systemImage: "tray.and.arrow.down")
+                            Label("Next", systemImage: "arrow.forward.circle")
                         }
-
+                        .labelStyle(.titleAndIcon)
+                        .disabled(localStore.checklist.items.allSatisfy { $0.status != .untested })
+                    }
+                    // Bulk run: validate every checklist row + JSON export.
+                    ToolbarItemGroup {
                         if localStore.isBulkValidating {
                             Button(role: .cancel) {
                                 localStore.cancelBulk()
                             } label: {
                                 Label("Stop", systemImage: "stop.circle")
                             }
+                            .labelStyle(.titleAndIcon)
                         } else {
                             Button {
                                 Task { await runAll() }
                             } label: {
                                 Label("Validate all", systemImage: "checkmark.seal.text.page")
                             }
+                            .labelStyle(.titleAndIcon)
                             .disabled(localStore.checklist.items.isEmpty)
                         }
+                    }
+                    // Persistence: flush the checklist (JSON + Markdown).
+                    ToolbarItemGroup {
+                        Button {
+                            Task { await save() }
+                        } label: {
+                            Label("Save checklist", systemImage: "tray.and.arrow.down")
+                        }
+                        .labelStyle(.titleAndIcon)
                     }
                 }
                 .sheet(isPresented: Binding(
@@ -396,6 +410,7 @@ private struct ChecklistColumn: View {
             }
             .listStyle(.inset)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var passCount: Int {
@@ -447,14 +462,17 @@ private struct StepTimelineColumn: View {
                     systemImage: "play.circle",
                     description: Text("Click Validate in the toolbar to run the schema checks.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     "No selection",
                     systemImage: "checkmark.seal",
                     description: Text("Pick a package on the left.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -568,8 +586,10 @@ private struct DetailInspectorColumn: View {
                     systemImage: "doc.text",
                     description: Text("Pick a package on the left.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
