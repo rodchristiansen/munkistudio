@@ -47,6 +47,18 @@ public struct TartDetector: Sendable {
         return candidates.first { fm.isExecutableFile(atPath: $0) }
     }
 
+    /// Pull a Tart base image (`tart pull <ref>`). The call resolves
+    /// when the pull finishes — typical pulls are 6–10 GB so callers
+    /// should show progress while awaiting. Returns nil if Tart isn't
+    /// installed.
+    public func pullImage(_ ref: String) async throws -> CommandResult? {
+        guard let path = await locate() else { return nil }
+        return try await HostTestEnvironment.run(
+            command: path,
+            arguments: ["pull", ref]
+        )
+    }
+
     /// List of VMs known to the local Tart store — useful when the user
     /// picks a base image. Output of `tart list --format json` is
     /// parsed; an empty array is returned on any failure so the UI

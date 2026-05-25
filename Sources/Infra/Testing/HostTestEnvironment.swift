@@ -34,7 +34,7 @@ public actor HostTestEnvironment: TestEnvironment {
     }
 
     static func run(command: String, arguments: [String]) async throws -> CommandResult {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CommandResult, any Error>) in
             let task = Process()
             task.executableURL = URL(fileURLWithPath: command)
             task.arguments = arguments
@@ -42,18 +42,23 @@ public actor HostTestEnvironment: TestEnvironment {
             let errPipe = Pipe()
             task.standardOutput = outPipe
             task.standardError = errPipe
-            do {
-                try task.run()
-                task.waitUntilExit()
+            // `terminationHandler` fires on a background dispatch queue
+            // when the child exits — no blocking `waitUntilExit()` on
+            // the calling thread, which previously meant a long-running
+            // shell-out (Tart pull, Tart run) would freeze the UI.
+            task.terminationHandler = { proc in
                 let outData = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
                 let errData = (try? errPipe.fileHandleForReading.readToEnd()) ?? Data()
                 continuation.resume(
                     returning: CommandResult(
-                        exitCode: task.terminationStatus,
+                        exitCode: proc.terminationStatus,
                         stdout: String(decoding: outData, as: UTF8.self),
                         stderr: String(decoding: errData, as: UTF8.self)
                     )
                 )
+            }
+            do {
+                try task.run()
             } catch {
                 continuation.resume(throwing: TestEnvironmentError("Failed to run \(command): \(error.localizedDescription)"))
             }

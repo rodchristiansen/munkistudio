@@ -104,13 +104,22 @@ private struct TestingSettingsView: View {
     @State private var tartStatus: TartStatus = .checking
     @State private var refreshingTart = false
     @State private var copiedInstallCommand = false
+    @State private var isPullingImage = false
+    @State private var pullErrorMessage: String?
+    @State private var pullSuccessMessage: String?
 
     private static let installCommand = "brew install cirruslabs/cli/tart"
+    private static let recommendedBaseImage = "ghcr.io/cirruslabs/macos-sequoia-base:latest"
 
     enum TartStatus: Equatable {
         case checking
         case missing
         case present(version: String, path: String)
+
+        var isPresent: Bool {
+            if case .present = self { return true }
+            return false
+        }
     }
 
     var body: some View {
@@ -130,8 +139,52 @@ private struct TestingSettingsView: View {
             .disabled(!settings.enableTestingTab)
 
             TextField("Tart base image", text: $settings.tartBaseImage,
-                      prompt: Text("e.g. ghcr.io/cirruslabs/macos-sequoia-base:latest"))
+                      prompt: Text(Self.recommendedBaseImage))
                 .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
+
+            // Image setup helpers — appear once Tart is installed so a
+            // first-time user can fill in the recommended image and
+            // kick off the pull without leaving the Settings pane.
+            if tartStatus.isPresent && settings.testingEnvironmentRaw == "tart" {
+                LabeledContent("Image setup") {
+                    HStack(spacing: 8) {
+                        Button("Use recommended") {
+                            settings.tartBaseImage = Self.recommendedBaseImage
+                        }
+                        .controlSize(.small)
+                        .disabled(settings.tartBaseImage == Self.recommendedBaseImage)
+
+                        if isPullingImage {
+                            ProgressView().controlSize(.small)
+                            Text("Pulling image — this may take several minutes")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Button("Pull image") { Task { await pullBaseImage() } }
+                                .controlSize(.small)
+                                .buttonStyle(.borderedProminent)
+                                .disabled(settings.tartBaseImage.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                        Spacer()
+                    }
+                }
+                if let pullSuccessMessage {
+                    LabeledContent("Last pull") {
+                        Label(pullSuccessMessage, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                    }
+                }
+                if let pullErrorMessage {
+                    LabeledContent("Pull error") {
+                        Text(pullErrorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
             TextField("Tart SSH user", text: $settings.tartSSHUser,
                       prompt: Text("admin"))
                 .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
@@ -213,6 +266,37 @@ private struct TestingSettingsView: View {
             }
         } else {
             tartStatus = .missing
+        }
+    }
+
+    /// Pull the configured Tart base image. Runs on a detached task so
+    /// the multi-GB transfer doesn't block the Settings UI.
+    @MainActor
+    private func pullBaseImage() async {
+        let image = settings.tartBaseImage.trimmingCharacters(in: .whitespaces)
+        guard !image.isEmpty else { return }
+        isPullingImage = true
+        pullErrorMessage = nil
+        pullSuccessMessage = nil
+        defer { isPullingImage = false }
+
+        let result: CommandResult? = await Task.detached {
+            try? await TartDetector().pullImage(image)
+        }.value
+
+        guard let result else {
+            pullErrorMessage = "Tart not found on PATH."
+            return
+        }
+        if result.success {
+            pullSuccessMessage = "Pulled \(image)."
+        } else {
+            let tail = result.stderr
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .last
+                .map(String.init)
+                ?? "tart pull exited \(result.exitCode)"
+            pullErrorMessage = tail
         }
     }
 
