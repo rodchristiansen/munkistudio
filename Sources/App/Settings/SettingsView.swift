@@ -103,7 +103,9 @@ private struct TestingSettingsView: View {
 
     @State private var tartStatus: TartStatus = .checking
     @State private var refreshingTart = false
-    @State private var homebrewPath: String?
+    @State private var copiedInstallCommand = false
+
+    private static let installCommand = "brew install cirruslabs/cli/tart"
 
     enum TartStatus: Equatable {
         case checking
@@ -136,32 +138,45 @@ private struct TestingSettingsView: View {
 
             LabeledContent("Tart status") {
                 HStack(spacing: 6) {
+                    Spacer(minLength: 0)
                     switch tartStatus {
                     case .checking:
                         ProgressView().controlSize(.small)
                         Text("Checking…").foregroundStyle(.secondary)
                     case .missing:
-                        Label("Not installed", systemImage: "exclamationmark.triangle.fill")
+                        Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
-                        if homebrewPath != nil {
-                            Button("Install via Homebrew") { installTartViaHomebrew() }
-                                .buttonStyle(.link)
-                                .font(.caption)
-                        }
-                        Link("GitHub Releases",
-                             destination: URL(string: "https://github.com/cirruslabs/tart/releases")!)
-                            .font(.caption)
+                        Text("Not installed").foregroundStyle(.orange)
                     case .present(let version, _):
-                        Label(version, systemImage: "checkmark.circle.fill")
+                        Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
+                        Text(version).foregroundStyle(.green)
                     }
-                    Spacer()
                     if refreshingTart {
                         ProgressView().controlSize(.small)
                     } else {
                         Button("Refresh") { Task { await refreshTartStatus() } }
                             .buttonStyle(.borderless)
                             .controlSize(.small)
+                    }
+                }
+            }
+
+            if case .missing = tartStatus {
+                LabeledContent("Install") {
+                    HStack(spacing: 6) {
+                        Text(Self.installCommand)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button(action: copyInstallCommand) {
+                            Image(systemName: copiedInstallCommand ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(copiedInstallCommand ? "Copied" : "Copy to clipboard")
+                        Spacer()
+                        Link("GitHub Releases",
+                             destination: URL(string: "https://github.com/cirruslabs/tart/releases")!)
+                            .font(.caption)
                     }
                 }
             }
@@ -190,27 +205,19 @@ private struct TestingSettingsView: View {
         } else {
             tartStatus = .missing
         }
-        homebrewPath = await detector.locateHomebrew()
     }
 
-    /// Open Terminal with `brew install cirruslabs/cli/tart` queued so
-    /// the user can watch the install progress and approve any prompts
-    /// directly. We don't run the install in-process — Homebrew expects
-    /// a tty and the user's shell environment.
-    private func installTartViaHomebrew() {
-        let command = "brew install cirruslabs/cli/tart && echo '' && echo 'Tart installed. Switch back to MunkiStudio and click Refresh.'"
-        let escaped = command
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let source = """
-        tell application "Terminal"
-            activate
-            do script "\(escaped)"
-        end tell
-        """
-        guard let script = NSAppleScript(source: source) else { return }
-        var error: NSDictionary?
-        script.executeAndReturnError(&error)
+    /// Drop the install command on the pasteboard and flash a checkmark
+    /// in the copy button for two seconds. Sidesteps the Automation
+    /// permission dance that scripting Terminal.app would need.
+    private func copyInstallCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(Self.installCommand, forType: .string)
+        copiedInstallCommand = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            copiedInstallCommand = false
+        }
     }
 }
 
