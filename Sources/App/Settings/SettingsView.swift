@@ -185,10 +185,6 @@ private struct TestingSettingsView: View {
                 }
             }
 
-            TextField("Tart SSH user", text: $settings.tartSSHUser,
-                      prompt: Text("admin"))
-                .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
-
             LabeledContent("Tart status") {
                 HStack(spacing: 6) {
                     Spacer(minLength: 0)

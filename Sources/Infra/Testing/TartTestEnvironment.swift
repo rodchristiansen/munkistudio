@@ -2,10 +2,11 @@ import Foundation
 import Core
 
 /// Ephemeral macOS guest backed by Tart. Each instance clones a base
-/// image into a uniquely-named throwaway VM, starts it headless, waits
-/// for its IP, and tears the clone down on `teardown()`. SSH-based file
-/// copy + command exec use `admin@<ip>` with key auth — the base image
-/// is expected to have the admin's `~/.ssh/authorized_keys` baked in.
+/// image into a uniquely-named throwaway VM, starts it headless with a
+/// shared host directory mounted in, and tears the clone down on
+/// `teardown()`. Command execution goes through `tart exec` (the bundled
+/// Tart Guest Agent in cirruslabs images), and file copy uses the shared
+/// mount — no SSH, no host keys, no Local Network permission prompt.
 ///
 /// Apple's 2-concurrent-macOS-VM licensing cap means callers should not
 /// run more than two `TartTestEnvironment`s in parallel on the same
@@ -18,32 +19,39 @@ public actor TartTestEnvironment: TestEnvironment {
     private let tartPath: String
     private let baseImage: String
     private let cloneName: String
-    private let sshUser: String
+    /// Host-side staging dir mounted into the guest under
+    /// `/Volumes/My Shared Files/<shareTag>/`. Everything we copy in goes
+    /// here first, then a `tart exec cp` moves it to its final path.
+    private let stagingDirURL: URL
+    private let shareTag = "staging"
 
     /// Background task running `tart run` — kept around so `teardown()`
-    /// can cancel it. The process is `tart stop`ed first; cancellation
-    /// is the fallback.
+    /// can cancel it. `tart stop` is tried first; cancellation is the
+    /// fallback.
     private var runProcess: Process?
-    private var ipAddress: String?
     private var prepared = false
 
     public init(
         tartPath: String,
         baseImage: String,
-        sshUser: String = "admin",
         cloneName: String = "munkistudio-test-\(UUID().uuidString.prefix(8))"
     ) {
         self.tartPath = tartPath
         self.baseImage = baseImage
         self.cloneName = cloneName
-        self.sshUser = sshUser
+        self.stagingDirURL = FileManager.default.temporaryDirectory
+            .appending(path: "munkistudio-tart-\(cloneName)", directoryHint: .isDirectory)
         self.displayName = "Tart '\(cloneName)' (from \(baseImage))"
     }
 
     public func prepare() async throws {
         guard !prepared else { return }
 
-        // Clone the base image — APFS clone, fast.
+        try FileManager.default.createDirectory(
+            at: stagingDirURL,
+            withIntermediateDirectories: true
+        )
+
         let clone = try await HostTestEnvironment.run(
             command: tartPath,
             arguments: ["clone", baseImage, cloneName]
@@ -52,10 +60,17 @@ public actor TartTestEnvironment: TestEnvironment {
             throw TestEnvironmentError("tart clone failed: \(clone.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
-        // Start the VM headless in the background.
+        // Mount the host staging dir into the guest. With Tart's default
+        // virtio-fs automount, the share appears at
+        // /Volumes/My Shared Files/<shareTag>/ inside the VM.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tartPath)
-        process.arguments = ["run", cloneName, "--no-graphics"]
+        process.arguments = [
+            "run",
+            cloneName,
+            "--no-graphics",
+            "--dir=\(shareTag):\(stagingDirURL.path)"
+        ]
         let null = Pipe()
         process.standardOutput = null
         process.standardError = null
@@ -66,50 +81,43 @@ public actor TartTestEnvironment: TestEnvironment {
         }
         runProcess = process
 
-        // Poll for the guest IP. macOS guests take ~10-30s to reach a
-        // usable network state; bail after a generous timeout.
-        let ip = try await waitForIP()
-        ipAddress = ip
-
-        // Wait until SSH actually accepts a connection — `tart ip`
-        // returns before sshd is ready.
-        try await waitForSSH(at: ip)
+        // Poll the Guest Agent until it accepts an exec — replaces the
+        // old IP/sshd wait. The agent comes up shortly after the VM
+        // finishes its first-boot setup.
+        try await waitForGuestAgent()
 
         prepared = true
     }
 
     public func copyFile(from localURL: URL, toGuestPath: String) async throws {
-        guard let ip = ipAddress else {
+        guard prepared else {
             throw TestEnvironmentError("Environment not prepared.")
         }
-        let result = try await HostTestEnvironment.run(
-            command: "/usr/bin/scp",
-            arguments: [
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                localURL.path,
-                "\(sshUser)@\(ip):\(toGuestPath)"
-            ]
+        let basename = localURL.lastPathComponent
+        let stagedURL = stagingDirURL.appending(path: basename)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: stagedURL.path) {
+            try fm.removeItem(at: stagedURL)
+        }
+        try fm.copyItem(at: localURL, to: stagedURL)
+
+        // Move the file from the shared mount to its requested guest
+        // path. `cp -f` overwrites any prior copy from a previous run.
+        let mountPath = "/Volumes/My Shared Files/\(shareTag)/\(basename)"
+        let result = try await runTartExec(
+            command: "/bin/cp",
+            arguments: ["-f", mountPath, toGuestPath]
         )
         if result.exitCode != 0 {
-            throw TestEnvironmentError("scp failed: \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+            throw TestEnvironmentError("Failed to stage \(basename) at \(toGuestPath): \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
     }
 
     public func runCommand(_ command: String, arguments: [String]) async throws -> CommandResult {
-        guard let ip = ipAddress else {
+        guard prepared else {
             throw TestEnvironmentError("Environment not prepared.")
         }
-        let remote = ([command] + arguments).map(Self.shellEscape).joined(separator: " ")
-        return try await HostTestEnvironment.run(
-            command: "/usr/bin/ssh",
-            arguments: [
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                "\(sshUser)@\(ip)",
-                remote
-            ]
-        )
+        return try await runTartExec(command: command, arguments: arguments)
     }
 
     public func teardown() async {
@@ -119,61 +127,35 @@ public actor TartTestEnvironment: TestEnvironment {
         }
         runProcess = nil
         _ = try? await HostTestEnvironment.run(command: tartPath, arguments: ["delete", cloneName])
-        ipAddress = nil
+        try? FileManager.default.removeItem(at: stagingDirURL)
         prepared = false
     }
 
     // MARK: - Helpers
 
-    private func waitForIP() async throws -> String {
-        let deadline = Date().addingTimeInterval(120)
-        while Date() < deadline {
-            let result = try? await HostTestEnvironment.run(
-                command: tartPath,
-                arguments: ["ip", cloneName]
-            )
-            if let result, result.exitCode == 0 {
-                let ip = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !ip.isEmpty { return ip }
-            }
-            try? await Task.sleep(for: .seconds(2))
-        }
-        throw TestEnvironmentError("Timed out waiting for Tart guest IP.")
+    private func runTartExec(command: String, arguments: [String]) async throws -> CommandResult {
+        try await HostTestEnvironment.run(
+            command: tartPath,
+            arguments: ["exec", cloneName, command] + arguments
+        )
     }
 
-    private func waitForSSH(at ip: String) async throws {
-        // 180s instead of 60s — first-boot Tart guests can take longer
-        // to bring sshd up than the prior budget allowed, especially
-        // when macOS is doing first-run setup tasks in the background.
+    private func waitForGuestAgent() async throws {
+        // Generous: first-boot macOS guests can spend a minute or two on
+        // setup before the agent answers. The old SSH wait used 180s; we
+        // keep that budget.
         let deadline = Date().addingTimeInterval(180)
         while Date() < deadline {
             if Task.isCancelled {
-                throw TestEnvironmentError("Cancelled while waiting for sshd.")
+                throw TestEnvironmentError("Cancelled while waiting for Tart Guest Agent.")
             }
-            let result = try? await HostTestEnvironment.run(
-                command: "/usr/bin/ssh",
-                arguments: [
-                    "-o", "ConnectTimeout=3",
-                    "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-o", "BatchMode=yes",
-                    "\(sshUser)@\(ip)",
-                    "true"
-                ]
+            let probe = try? await HostTestEnvironment.run(
+                command: tartPath,
+                arguments: ["exec", cloneName, "/usr/bin/true"]
             )
-            if result?.exitCode == 0 { return }
+            if probe?.exitCode == 0 { return }
             try? await Task.sleep(for: .seconds(2))
         }
-        throw TestEnvironmentError("Timed out waiting for sshd in Tart guest after 180s. The base image may not have admin SSH keys baked in, or local-network permission was denied (System Settings → Privacy & Security → Local Network → MunkiStudio).")
-    }
-
-    /// Quote a single token for safe inclusion in a remote shell command.
-    /// Single-quoted with embedded single quotes escaped.
-    private nonisolated static func shellEscape(_ token: String) -> String {
-        guard !token.isEmpty else { return "''" }
-        if token.range(of: "[^A-Za-z0-9_./:=@-]", options: .regularExpression) == nil {
-            return token
-        }
-        return "'" + token.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        throw TestEnvironmentError("Timed out waiting for the Tart Guest Agent after 180s. Confirm the base image is a cirruslabs image (which bundles the agent) — vanilla VMs need `tart guest install` run inside them once.")
     }
 }

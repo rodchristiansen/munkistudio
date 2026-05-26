@@ -342,36 +342,31 @@ public struct FileTestingService: TestingService {
             )
         }
 
-        // Run installer(8). Falls back to a friendly message for .dmg
-        // payloads, which need a different flow (mount + drag-copy or
-        // installer against an inner .pkg) that v1 doesn't tackle.
-        if localURL.pathExtension.lowercased() != "pkg" {
-            return TestingStepResult(
-                kind: .install,
-                title: "Install",
-                success: true,
-                severity: .warning,
-                messages: messages + ["Skipping `.\(localURL.pathExtension)` — only .pkg installs are wired in v1."],
-                duration: Date().timeIntervalSince(started)
-            )
-        }
-
+        let ext = localURL.pathExtension.lowercased()
         do {
-            let result = try await environment.runCommand(
-                "/usr/bin/sudo",
-                arguments: ["/usr/sbin/installer", "-pkg", guestPath, "-target", "/"]
-            )
-            messages.append("installer exited \(result.exitCode).")
-            let tail = Self.tail(of: result.stdout, lines: 6)
-            if !tail.isEmpty { messages.append(tail) }
-            if !result.success {
-                severity = .error
-                let errTail = Self.tail(of: result.stderr, lines: 4)
-                if !errTail.isEmpty { messages.append(errTail) }
+            switch ext {
+            case "pkg", "mpkg":
+                try await Self.runPkgInstall(
+                    guestPath: guestPath,
+                    environment: environment,
+                    messages: &messages,
+                    severity: &severity
+                )
+            case "dmg":
+                try await Self.installFromDmg(
+                    dmgGuestPath: guestPath,
+                    record: record,
+                    environment: environment,
+                    messages: &messages,
+                    severity: &severity
+                )
+            default:
+                severity = .warning
+                messages.append("Skipping `.\(ext)` — no install path wired for that artifact type.")
             }
         } catch {
             severity = .error
-            messages.append("Install command failed: \(error.localizedDescription)")
+            messages.append("Install failed: \(error.localizedDescription)")
         }
 
         return TestingStepResult(
@@ -382,6 +377,221 @@ public struct FileTestingService: TestingService {
             messages: messages,
             duration: Date().timeIntervalSince(started)
         )
+    }
+
+    // MARK: - .pkg / .dmg install dispatch
+
+    private static func runPkgInstall(
+        guestPath: String,
+        environment: any TestEnvironment,
+        messages: inout [String],
+        severity: inout TestingStepResult.Severity
+    ) async throws {
+        let result = try await environment.runCommand(
+            "/usr/bin/sudo",
+            arguments: ["/usr/sbin/installer", "-pkg", guestPath, "-target", "/"]
+        )
+        messages.append("installer exited \(result.exitCode).")
+        let tail = Self.tail(of: result.stdout, lines: 6)
+        if !tail.isEmpty { messages.append(tail) }
+        if !result.success {
+            severity = .error
+            let errTail = Self.tail(of: result.stderr, lines: 4)
+            if !errTail.isEmpty { messages.append(errTail) }
+        }
+    }
+
+    /// Install a `.dmg` payload in the guest. Mounts the image, dispatches
+    /// to one of three flavors (inner `.pkg`, `copy_from_dmg`, or implicit
+    /// drag-from-dmg), then always detaches the volume.
+    ///
+    /// We deliberately mount at a fixed path (`/tmp/munki-dmg-<name>`) so
+    /// we don't have to parse `hdiutil attach -plist` to discover where
+    /// the volume ended up. `-nobrowse` keeps it out of Finder; `-noverify`
+    /// skips the checksum step (the artifact-validation step already
+    /// caught corruption).
+    private static func installFromDmg(
+        dmgGuestPath: String,
+        record: PkginfoRecord,
+        environment: any TestEnvironment,
+        messages: inout [String],
+        severity: inout TestingStepResult.Severity
+    ) async throws {
+        let mountPoint = "/tmp/munki-dmg-\(UUID().uuidString.prefix(8))"
+        let attach = try await environment.runCommand(
+            "/usr/bin/sudo",
+            arguments: [
+                "/usr/bin/hdiutil", "attach", dmgGuestPath,
+                "-mountpoint", mountPoint,
+                "-nobrowse", "-noverify", "-readonly"
+            ]
+        )
+        guard attach.success else {
+            severity = .error
+            messages.append("hdiutil attach failed (exit \(attach.exitCode)).")
+            let errTail = Self.tail(of: attach.stderr, lines: 4)
+            if !errTail.isEmpty { messages.append(errTail) }
+            return
+        }
+        messages.append("Mounted dmg at \(mountPoint).")
+
+        // Always detach, even when the install branch throws — leaking a
+        // mount would block subsequent runs on the same VM.
+        defer {
+            Task.detached {
+                _ = try? await environment.runCommand(
+                    "/usr/bin/sudo",
+                    arguments: ["/usr/bin/hdiutil", "detach", "-force", mountPoint]
+                )
+            }
+        }
+
+        // Flavor dispatch — explicit installer_type wins, then items_to_copy,
+        // then inner .pkg auto-detect, then implicit drag-from-dmg.
+        let installerType = record.pkginfo.installerType
+        let items = record.pkginfo.itemsToCopy ?? []
+
+        if installerType == .copyFromDmg || (installerType == nil && !items.isEmpty) {
+            try await Self.runCopyFromDmg(
+                items: items,
+                mountPoint: mountPoint,
+                environment: environment,
+                messages: &messages,
+                severity: &severity
+            )
+            return
+        }
+
+        // Try the inner-pkg path first when there's no explicit drag flavor.
+        if let innerPkg = try await Self.findInnerPkg(at: mountPoint, environment: environment) {
+            messages.append("Found inner pkg: \(innerPkg).")
+            try await Self.runPkgInstall(
+                guestPath: innerPkg,
+                environment: environment,
+                messages: &messages,
+                severity: &severity
+            )
+            return
+        }
+
+        // Implicit drag-from-dmg: copy every .app at the dmg root into
+        // /Applications. Matches Munki's behavior when no items_to_copy
+        // is supplied and the dmg holds a vanilla drag-installer payload.
+        let apps = try await Self.findRootApps(at: mountPoint, environment: environment)
+        guard !apps.isEmpty else {
+            severity = .error
+            messages.append("Couldn't find an installer in the dmg — no inner .pkg, no .app bundles at the root, and no items_to_copy[] in the pkginfo.")
+            return
+        }
+        for app in apps {
+            let src = "\(mountPoint)/\(app)"
+            let dst = "/Applications/\(app)"
+            let cp = try await environment.runCommand(
+                "/usr/bin/sudo",
+                arguments: ["/bin/cp", "-R", src, dst]
+            )
+            if cp.success {
+                messages.append("Copied \(app) to /Applications/.")
+            } else {
+                severity = .error
+                messages.append("cp \(app) failed (exit \(cp.exitCode)).")
+                let errTail = Self.tail(of: cp.stderr, lines: 2)
+                if !errTail.isEmpty { messages.append(errTail) }
+            }
+        }
+    }
+
+    /// Run a `copy_from_dmg` install: for each `items_to_copy[]` entry,
+    /// `cp -R <mount>/<source_item> <destination_path>/<destination_item>`.
+    /// Permission fields (`user`, `group`, `mode`) are applied with chown /
+    /// chmod after the copy when present.
+    private static func runCopyFromDmg(
+        items: [ItemToCopy],
+        mountPoint: String,
+        environment: any TestEnvironment,
+        messages: inout [String],
+        severity: inout TestingStepResult.Severity
+    ) async throws {
+        guard !items.isEmpty else {
+            severity = .error
+            messages.append("copy_from_dmg requested but items_to_copy[] is empty.")
+            return
+        }
+        for item in items {
+            let src = "\(mountPoint)/\(item.sourceItem)"
+            let destPath = item.destinationPath ?? "/Applications"
+            let destItem = item.destinationItem ?? URL(fileURLWithPath: item.sourceItem).lastPathComponent
+            let dst = "\(destPath)/\(destItem)"
+
+            // mkdir -p the destination parent so /usr/local/bin etc. land
+            // even when the guest doesn't already have them.
+            _ = try await environment.runCommand(
+                "/usr/bin/sudo",
+                arguments: ["/bin/mkdir", "-p", destPath]
+            )
+            let cp = try await environment.runCommand(
+                "/usr/bin/sudo",
+                arguments: ["/bin/cp", "-R", src, dst]
+            )
+            if cp.success {
+                messages.append("Copied \(item.sourceItem) to \(dst).")
+            } else {
+                severity = .error
+                messages.append("cp \(item.sourceItem) failed (exit \(cp.exitCode)).")
+                let errTail = Self.tail(of: cp.stderr, lines: 2)
+                if !errTail.isEmpty { messages.append(errTail) }
+                continue
+            }
+            if let user = item.user, !user.isEmpty {
+                let owner = item.group.map { "\(user):\($0)" } ?? user
+                _ = try await environment.runCommand(
+                    "/usr/bin/sudo",
+                    arguments: ["/usr/sbin/chown", "-R", owner, dst]
+                )
+            }
+            if let mode = item.mode, !mode.isEmpty {
+                _ = try await environment.runCommand(
+                    "/usr/bin/sudo",
+                    arguments: ["/bin/chmod", "-R", mode, dst]
+                )
+            }
+        }
+    }
+
+    /// Look for a single `.pkg` (flat file or bundle) at the root of the
+    /// mounted dmg. Returns its absolute path in the guest, or nil. When
+    /// multiple .pkg files are present we don't pick — that's a pkginfo
+    /// authoring decision (`package_path`) we don't replicate in v1.
+    private static func findInnerPkg(
+        at mountPoint: String,
+        environment: any TestEnvironment
+    ) async throws -> String? {
+        let listing = try await environment.runCommand(
+            "/bin/ls",
+            arguments: ["-1", mountPoint]
+        )
+        guard listing.success else { return nil }
+        let pkgs = listing.stdout
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { $0.hasSuffix(".pkg") || $0.hasSuffix(".mpkg") }
+        guard pkgs.count == 1, let pkg = pkgs.first else { return nil }
+        return "\(mountPoint)/\(pkg)"
+    }
+
+    private static func findRootApps(
+        at mountPoint: String,
+        environment: any TestEnvironment
+    ) async throws -> [String] {
+        let listing = try await environment.runCommand(
+            "/bin/ls",
+            arguments: ["-1", mountPoint]
+        )
+        guard listing.success else { return [] }
+        return listing.stdout
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { $0.hasSuffix(".app") }
     }
 
     public func validateInstallsArray(
@@ -546,6 +756,8 @@ public struct FileTestingService: TestingService {
             effectiveMethod = .script
         } else if method == "removepackages" {
             effectiveMethod = .removePackages
+        } else if method == "remove_copied_items" {
+            effectiveMethod = .removeCopiedItems
         } else if method.isEmpty && script.isEmpty {
             return TestingStepResult(
                 kind: .uninstall,
@@ -561,7 +773,7 @@ public struct FileTestingService: TestingService {
                 title: "Uninstall",
                 success: true,
                 severity: .warning,
-                messages: ["uninstall_method='\(method)' isn't implemented yet — supported: uninstall_script, removepackages."],
+                messages: ["uninstall_method='\(method)' isn't implemented yet — supported: uninstall_script, removepackages, remove_copied_items."],
                 duration: Date().timeIntervalSince(started)
             )
         }
@@ -579,12 +791,19 @@ public struct FileTestingService: TestingService {
                 environment: environment,
                 startedAt: started
             )
+        case .removeCopiedItems:
+            return await runRemoveCopiedItemsUninstall(
+                items: pkginfo.itemsToCopy ?? [],
+                environment: environment,
+                startedAt: started
+            )
         }
     }
 
     private enum UninstallPath {
         case script
         case removePackages
+        case removeCopiedItems
     }
 
     private func runScriptUninstall(
@@ -672,6 +891,62 @@ public struct FileTestingService: TestingService {
         return TestingStepResult(
             kind: .uninstall,
             title: "Uninstall (removepackages)",
+            success: severity != .error,
+            severity: severity,
+            messages: messages,
+            duration: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    /// `uninstall_method: remove_copied_items` — mirrors what the install
+    /// step did for `copy_from_dmg`: walk `items_to_copy[]` and `rm -rf`
+    /// each destination. Source paths are ignored (they live inside the
+    /// dmg, not on the guest); only destination_path + destination_item
+    /// (or the source basename) matter.
+    private func runRemoveCopiedItemsUninstall(
+        items: [ItemToCopy],
+        environment: any TestEnvironment,
+        startedAt: Date
+    ) async -> TestingStepResult {
+        guard !items.isEmpty else {
+            return TestingStepResult(
+                kind: .uninstall,
+                title: "Uninstall (remove_copied_items)",
+                success: false,
+                severity: .error,
+                messages: ["uninstall_method='remove_copied_items' but items_to_copy[] is empty."],
+                duration: Date().timeIntervalSince(startedAt)
+            )
+        }
+
+        var messages: [String] = []
+        var severity: TestingStepResult.Severity = .success
+
+        for item in items {
+            let destPath = item.destinationPath ?? "/Applications"
+            let destItem = item.destinationItem ?? URL(fileURLWithPath: item.sourceItem).lastPathComponent
+            let target = "\(destPath)/\(destItem)"
+            do {
+                let result = try await environment.runCommand(
+                    "/usr/bin/sudo",
+                    arguments: ["/bin/rm", "-rf", target]
+                )
+                if result.success {
+                    messages.append("pass rm -rf \(target)")
+                } else {
+                    messages.append("fail rm -rf \(target) - exit \(result.exitCode)")
+                    severity = max(severity, .error)
+                }
+            } catch {
+                messages.append("fail rm -rf \(target) - \(error.localizedDescription)")
+                severity = max(severity, .error)
+            }
+        }
+
+        messages.insert("\(items.count) item\(items.count == 1 ? "" : "s") to remove.", at: 0)
+        return TestingStepResult(
+            kind: .uninstall,
+            title: "Uninstall (remove_copied_items)",
             success: severity != .error,
             severity: severity,
             messages: messages,

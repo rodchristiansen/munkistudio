@@ -28,13 +28,11 @@ enum TestEnvironmentFactory {
     struct Configuration: Sendable {
         var backend: String
         var tartBaseImage: String
-        var tartSSHUser: String
 
         @MainActor
         init(settings: AppSettings) {
             self.backend = settings.testingEnvironmentRaw
             self.tartBaseImage = settings.tartBaseImage
-            self.tartSSHUser = settings.tartSSHUser
         }
     }
 
@@ -53,11 +51,9 @@ enum TestEnvironmentFactory {
             guard !baseImage.isEmpty else {
                 throw FactoryError.missingBaseImage
             }
-            let sshUser = configuration.tartSSHUser.trimmingCharacters(in: .whitespaces)
             return TartTestEnvironment(
                 tartPath: tartPath,
-                baseImage: baseImage,
-                sshUser: sshUser.isEmpty ? "admin" : sshUser
+                baseImage: baseImage
             )
         default:
             return nil

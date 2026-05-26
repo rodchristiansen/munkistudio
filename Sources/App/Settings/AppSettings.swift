@@ -114,12 +114,6 @@ final class AppSettings {
         didSet { defaults.set(tartBaseImage, forKey: Key.tartBaseImage) }
     }
 
-    /// SSH user inside the Tart guest. The base image is expected to
-    /// have the admin's authorized_keys set up for this account.
-    var tartSSHUser: String {
-        didSet { defaults.set(tartSSHUser, forKey: Key.tartSSHUser) }
-    }
-
     /// Set the first time MunkiStudio sees Tart installed and promotes
     /// the install environment from "none" to "tart" automatically. The
     /// flag exists so a user who deliberately switches back to "none"
@@ -162,8 +156,6 @@ final class AppSettings {
             defaults.string(forKey: Key.testingEnvironmentRaw) ?? "none"
         self.tartBaseImage =
             defaults.string(forKey: Key.tartBaseImage) ?? ""
-        self.tartSSHUser =
-            defaults.string(forKey: Key.tartSSHUser) ?? "admin"
         self.testingEnvironmentAutoFlipped =
             defaults.bool(forKey: Key.testingEnvironmentAutoFlipped)
     }
@@ -184,7 +176,6 @@ final class AppSettings {
         static let testerName = "MunkiStudio.settings.testerName"
         static let testingEnvironmentRaw = "MunkiStudio.settings.testingEnvironment"
         static let tartBaseImage = "MunkiStudio.settings.tartBaseImage"
-        static let tartSSHUser = "MunkiStudio.settings.tartSSHUser"
         static let testingEnvironmentAutoFlipped = "MunkiStudio.settings.testingEnvironmentAutoFlipped"
     }
 }

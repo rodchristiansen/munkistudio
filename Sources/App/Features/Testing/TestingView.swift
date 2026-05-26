@@ -17,7 +17,7 @@ struct TestingView: View {
                 VStack(spacing: 0) {
                     BulkBanner(state: $localStore)
                     HSplitView {
-                        ChecklistColumn(state: $localStore, pkginfoByName: pkginfoByName)
+                        ChecklistColumn(state: $localStore, pkginfoRecordByName: pkginfoRecordByName)
                             .frame(minWidth: 260, idealWidth: 320, maxHeight: .infinity)
                         StepTimelineColumn(state: $localStore)
                             .frame(minWidth: 320, maxHeight: .infinity)
@@ -45,7 +45,7 @@ struct TestingView: View {
                                 Label("Validate", systemImage: "checkmark.seal")
                             }
                             .labelStyle(.titleAndIcon)
-                            .disabled(localStore.selectedEntry == nil)
+                            .disabled(validateButtonDisabled)
                         }
 
                         Button {
@@ -85,6 +85,27 @@ struct TestingView: View {
                             .disabled(localStore.checklist.items.isEmpty)
                         }
                     }
+                    // Refresh the persistent Tart VM. Only useful when a
+                    // VM is already cached — the next Validate auto-
+                    // prepares a fresh one. While the teardown is in
+                    // flight the button shows a spinner.
+                    ToolbarItemGroup {
+                        Button {
+                            Task { await localStore.refreshEnvironment() }
+                        } label: {
+                            if localStore.environmentBusy {
+                                HStack(spacing: 4) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Refreshing VM\u{2026}")
+                                }
+                            } else {
+                                Label("Refresh VM", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .labelStyle(.titleAndIcon)
+                        .disabled(!localStore.hasCachedEnvironment || localStore.environmentBusy || localStore.isValidatingSingle || localStore.isBulkValidating)
+                        .help(localStore.environmentDisplayName.map { "Tear down \($0). The next Validate will spin up a fresh VM." } ?? "No VM cached — the next Validate will create one.")
+                    }
                     // Export: write the checklist (JSON + Markdown) so the
                     // team can review it in PRs.
                     ToolbarItemGroup {
@@ -115,6 +136,16 @@ struct TestingView: View {
                 .task(id: repository.rootURL.path) {
                     await localStore.load(repository: repository, service: store.services.testing)
                     localStore.reconcile(with: store.snapshot)
+                    await localStore.loadMunkipkgProjects(
+                        via: store.services.munkipkg,
+                        from: munkipkgProjectsFolderURL
+                    )
+                }
+                .task(id: settings.munkipkgProjectsPath) {
+                    await localStore.loadMunkipkgProjects(
+                        via: store.services.munkipkg,
+                        from: munkipkgProjectsFolderURL
+                    )
                 }
                 .onChange(of: store.snapshot.pkginfos) {
                     localStore.reconcile(with: store.snapshot)
@@ -139,14 +170,43 @@ struct TestingView: View {
         }
     }
 
+    /// Validate is disabled when nothing is selected in the active
+    /// source. Selection state is parallel between pkgsinfo and
+    /// munkipkgs — pick whichever the user is currently in.
+    private var validateButtonDisabled: Bool {
+        switch localStore.source {
+        case .pkgsinfo: return localStore.selectedEntry == nil
+        case .munkipkgs: return localStore.selectedMunkipkg == nil
+        }
+    }
+
     private func runSelected() async {
+        switch localStore.source {
+        case .pkgsinfo:
+            await runSelectedPkginfo()
+        case .munkipkgs:
+            await runSelectedMunkipkg()
+        }
+    }
+
+    private func runSelectedMunkipkg() async {
+        guard let project = localStore.selectedMunkipkg else { return }
+        let task = Task { @MainActor in
+            await localStore.validateMunkipkg(project, services: store.services)
+        }
+        localStore.setValidateTask(task)
+        await task.value
+        localStore.setValidateTask(nil)
+    }
+
+    private func runSelectedPkginfo() async {
         guard let entry = localStore.selectedEntry,
               let repository = store.repository else { return }
         let configuration = TestEnvironmentFactory.Configuration(settings: settings)
         let environment: (any TestEnvironment)?
         var environmentError: String?
         do {
-            environment = try await TestEnvironmentFactory.make(configuration: configuration)
+            environment = try await localStore.environment(for: configuration)
         } catch {
             environment = nil
             environmentError = error.localizedDescription
@@ -175,13 +235,14 @@ struct TestingView: View {
         return configured.isEmpty ? NSFullUserName() : configured
     }
 
-    private var pkginfoByName: [String: Pkginfo] {
-        var lookup: [String: Pkginfo] = [:]
+    private var pkginfoRecordByName: [String: PkginfoRecord] {
+        var lookup: [String: PkginfoRecord] = [:]
         for record in store.snapshot.pkginfos {
             // Repos with multi-version pkginfos for the same name collapse
-            // to the latest record seen — good enough for grouping by
-            // category/developer.
-            lookup[record.pkginfo.name] = record.pkginfo
+            // to the latest record seen — good enough for the artifact
+            // chip and the row context menu (which only needs one URL to
+            // reveal).
+            lookup[record.pkginfo.name] = record
         }
         return lookup
     }
@@ -399,82 +460,87 @@ private struct AutofixSheet: View {
 private struct ChecklistColumn: View {
     @Binding var state: TestingStore
     @Environment(AppSettings.self) private var settings
-    let pkginfoByName: [String: Pkginfo]
+    @Environment(RepositoryStore.self) private var repoStore
+    let pkginfoRecordByName: [String: PkginfoRecord]
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Checklist").font(.headline)
-                Spacer()
-                Text("\(passCount)/\(state.checklist.items.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.tertiary)
-                TextField("Search", text: $state.searchQuery)
-                    .textFieldStyle(.plain)
-                if !state.searchQuery.isEmpty {
-                    Button { state.searchQuery = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+            // Source picker on top — matches the Packages / Manifests
+            // header pattern (full-width segmented control, filter
+            // field below). When munkipkgProjectsPath isn't set we
+            // collapse the picker entirely; pkgsinfo is the only source.
+            if showsSourcePicker {
+                HStack(spacing: 8) {
+                    Picker("", selection: $state.source) {
+                        ForEach(TestingStore.Source.allCases, id: \.self) { option in
+                            Text(option.title).tag(option)
+                        }
                     }
-                    .buttonStyle(.borderless)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
                 }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .padding(.horizontal, 10)
-            .padding(.bottom, 4)
 
-            Picker("Group", selection: $state.groupBy) {
-                ForEach(TestingStore.GroupBy.allCases, id: \.self) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 10)
-            .padding(.bottom, 8)
+            FilterField(text: $state.searchQuery, prompt: "Filter packages", focused: $searchFocused)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
 
             Divider()
 
-            List(selection: Binding(
-                get: { state.selectedEntryID },
-                set: { state.selectedEntryID = $0 }
-            )) {
-                ForEach(groups, id: \.title) { group in
-                    if state.groupBy == .none {
-                        ForEach(group.items) { entry in
-                            row(for: entry).tag(entry.id)
-                        }
-                    } else {
-                        Section {
-                            ForEach(group.items) { entry in
-                                row(for: entry).tag(entry.id)
-                            }
-                        } header: {
-                            HStack {
-                                Text(group.title).font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Text("\(group.items.count)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+            if state.source == .munkipkgs {
+                if filteredMunkipkgs.isEmpty {
+                    ContentUnavailableView(
+                        "No munkipkg projects",
+                        systemImage: "hammer",
+                        description: Text("Configure a munkipkg projects folder in Settings → Build, or check that the folder contains projects with a build-info file.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(selection: Binding(
+                        get: { state.selectedMunkipkgName },
+                        set: { state.selectedMunkipkgName = $0 }
+                    )) {
+                        ForEach(filteredMunkipkgs) { project in
+                            munkipkgRow(for: project)
+                                .tag(project.name)
+                                .simultaneousGesture(
+                                    TapGesture(count: 2).onEnded { openInBuild(project) }
+                                )
+                                .contextMenu { munkipkgContextMenu(project) }
                         }
                     }
+                    .listStyle(.inset)
                 }
+            } else {
+                List(selection: Binding(
+                    get: { state.selectedEntryID },
+                    set: { state.selectedEntryID = $0 }
+                )) {
+                    ForEach(filteredItems) { entry in
+                        row(for: entry)
+                            .tag(entry.id)
+                            .simultaneousGesture(
+                                TapGesture(count: 2).onEnded { openInPackages(entry) }
+                            )
+                            .contextMenu { pkginfoContextMenu(entry) }
+                    }
+                }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// True when the user has configured a munkipkg projects folder —
+    /// gating the Pkgsinfo|Munkipkgs source picker on that setting keeps
+    /// the Testing pane single-source for users who haven't wired up the
+    /// munkipkg side at all.
+    private var showsSourcePicker: Bool {
+        !settings.munkipkgProjectsPath.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private func row(for entry: ChecklistEntry) -> some View {
@@ -493,6 +559,32 @@ private struct ChecklistColumn: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+            if let chip = artifactType(for: entry) {
+                Text(chip.label)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(chip.tint.opacity(0.15), in: .capsule)
+                    .foregroundStyle(chip.tint)
+            }
+        }
+    }
+
+    /// Pull the artifact extension off the pkginfo's
+    /// `installer_item_location` and translate it to a label + tint.
+    /// Returns nil for pkginfos with no installer item (`nopkg`,
+    /// `apple_update_metadata`, etc.) so the chip doesn't show.
+    private func artifactType(for entry: ChecklistEntry) -> (label: String, tint: Color)? {
+        guard let record = pkginfoRecordByName[entry.packageName],
+              let location = record.pkginfo.installerItemLocation,
+              !location.isEmpty else { return nil }
+        let ext = (location as NSString).pathExtension.lowercased()
+        switch ext {
+        case "pkg", "mpkg": return ("pkg", .blue)
+        case "dmg":         return ("dmg", .purple)
+        case "zip":         return ("zip", .orange)
+        case "":            return nil
+        default:            return (ext, .secondary)
         }
     }
 
@@ -500,56 +592,139 @@ private struct ChecklistColumn: View {
         state.checklist.items.filter { $0.status == .pass }.count
     }
 
-    private struct Group: Equatable {
-        var title: String
-        var items: [ChecklistEntry]
-    }
-
-    /// Apply the search filter then bucket the result by the selected
-    /// grouping. The flat "All" case is returned as a single nameless
-    /// bucket so the view's `ForEach(groups)` shape stays uniform.
-    private var groups: [Group] {
+    /// Search-filtered flat list of checklist entries, sorted by name.
+    private var filteredItems: [ChecklistEntry] {
         let query = state.searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        let filtered: [ChecklistEntry]
+        let items: [ChecklistEntry]
         if query.isEmpty {
-            filtered = state.checklist.items
+            items = state.checklist.items
         } else {
-            filtered = state.checklist.items.filter {
+            items = state.checklist.items.filter {
                 $0.packageName.lowercased().contains(query)
             }
         }
+        return items.sorted {
+            $0.packageName.localizedCaseInsensitiveCompare($1.packageName) == .orderedAscending
+        }
+    }
 
-        switch state.groupBy {
-        case .none:
-            return [Group(title: "All", items: filtered)]
-        case .category:
-            return bucketed(filtered) { pkginfoByName[$0.packageName]?.category ?? "Uncategorized" }
-        case .developer:
-            return bucketed(filtered) { pkginfoByName[$0.packageName]?.developer ?? "Unknown" }
-        case .status:
-            let order: [ChecklistStatus] = [.fail, .warning, .pass, .untested]
-            let grouped = Dictionary(grouping: filtered) { $0.status }
-            return order.compactMap { status in
-                guard let items = grouped[status], !items.isEmpty else { return nil }
-                return Group(title: status.title, items: items.sorted {
-                    $0.packageName.localizedCaseInsensitiveCompare($1.packageName) == .orderedAscending
-                })
+    // MARK: - Munkipkgs source rendering
+
+    /// Search-filtered munkipkg projects list, sorted by project name.
+    private var filteredMunkipkgs: [MunkipkgProject] {
+        let query = state.searchQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let items: [MunkipkgProject]
+        if query.isEmpty {
+            items = state.munkipkgProjects
+        } else {
+            items = state.munkipkgProjects.filter {
+                $0.name.lowercased().contains(query)
+                || $0.buildInfo.identifier.lowercased().contains(query)
+            }
+        }
+        return items
+    }
+
+    private func munkipkgRow(for project: MunkipkgProject) -> some View {
+        let result = state.munkipkgResultsByName[project.name]
+        let status = munkipkgStatus(for: result)
+        return HStack(spacing: 8) {
+            Image(systemName: status.systemImage)
+                .foregroundStyle(status.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.name).font(.body)
+                Text(project.buildInfo.version).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let finishedAt = result?.finishedAt {
+                Text(finishedAt, format: .relative(presentation: .numeric))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
     }
 
-    private func bucketed(
-        _ items: [ChecklistEntry],
-        by keyFor: (ChecklistEntry) -> String
-    ) -> [Group] {
-        let grouped = Dictionary(grouping: items, by: keyFor)
-        return grouped
-            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-            .map { key, items in
-                Group(title: key, items: items.sorted {
-                    $0.packageName.localizedCaseInsensitiveCompare($1.packageName) == .orderedAscending
-                })
+    /// Map a munkipkg validation result to the same icon/tint vocabulary
+    /// pkgsinfo rows use, so the column reads consistently regardless
+    /// of source.
+    private func munkipkgStatus(for result: TestingResult?) -> (systemImage: String, tint: Color) {
+        guard let result, !result.steps.isEmpty else {
+            return ("circle", .secondary)
+        }
+        if result.failed > 0 { return ("xmark.octagon.fill", .red) }
+        if result.warnings > 0 { return ("exclamationmark.triangle.fill", .orange) }
+        return ("checkmark.circle.fill", .green)
+    }
+
+    // MARK: - Context menus & cross-section navigation
+
+    /// Jump to the Packages section with this pkginfo selected. Sets
+    /// `pendingRevealItemID` so PackageTreeList scrolls the row into
+    /// view; expanding the category mirrors the Catalogs-list pattern.
+    private func openInPackages(_ entry: ChecklistEntry) {
+        guard let record = pkginfoRecordByName[entry.packageName] else { return }
+        repoStore.selectedSection = .packages
+        repoStore.selectedItemID = AnyHashable(record.id)
+        repoStore.pendingRevealItemID = AnyHashable(record.id)
+        let category = (record.pkginfo.category?.trimmingCharacters(in: .whitespaces)).flatMap {
+            $0.isEmpty ? nil : $0
+        } ?? "Uncategorized"
+        repoStore.expandedCategories.insert(category)
+    }
+
+    /// Jump to the Build section with this munkipkg project selected.
+    /// `pendingBuildProjectID` is consumed by BuildView on its next
+    /// appearance / change tick.
+    private func openInBuild(_ project: MunkipkgProject) {
+        repoStore.pendingBuildProjectID = project.id
+        repoStore.selectedSection = .build
+    }
+
+    @ViewBuilder
+    private func pkginfoContextMenu(_ entry: ChecklistEntry) -> some View {
+        Button("Open in Packages") { openInPackages(entry) }
+        if let record = pkginfoRecordByName[entry.packageName] {
+            Divider()
+            Button("Reveal pkginfo in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([record.fileURL])
             }
+            if let installer = installerURL(for: record) {
+                Button("Reveal installer in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([installer])
+                }
+            }
+            Divider()
+            Button("Copy package name") { copyToPasteboard(entry.packageName) }
+            Button("Copy pkginfo path") { copyToPasteboard(record.fileURL.path) }
+        }
+    }
+
+    @ViewBuilder
+    private func munkipkgContextMenu(_ project: MunkipkgProject) -> some View {
+        Button("Open in Build") { openInBuild(project) }
+        Divider()
+        Button("Reveal project in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([project.directoryURL])
+        }
+        if FileManager.default.fileExists(atPath: project.buildDirectory.path) {
+            Button("Reveal build/ in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([project.buildDirectory])
+            }
+        }
+        Divider()
+        Button("Copy project name") { copyToPasteboard(project.name) }
+        Button("Copy identifier") { copyToPasteboard(project.buildInfo.identifier) }
+        Button("Copy project path") { copyToPasteboard(project.directoryURL.path) }
+    }
+
+    /// Resolve the on-disk installer for a pkginfo (under `pkgs/`) if
+    /// the file exists. Returns nil for `nopkg`-style entries.
+    private func installerURL(for record: PkginfoRecord) -> URL? {
+        guard let repo = repoStore.repository,
+              let location = record.pkginfo.installerItemLocation,
+              !location.isEmpty else { return nil }
+        let url = repo.pkgsURL.appending(path: location)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }
 
@@ -557,13 +732,40 @@ private struct StepTimelineColumn: View {
     @Binding var state: TestingStore
     @Environment(AppSettings.self) private var settings
 
+    /// Title in the column header — package name for pkgsinfo, project
+    /// name for munkipkgs.
+    private var headerTitle: String {
+        switch state.source {
+        case .pkgsinfo: state.selectedEntry?.packageName ?? "Select a package"
+        case .munkipkgs: state.selectedMunkipkg?.name ?? "Select a project"
+        }
+    }
+
+    /// Active result — pkgsinfo reads from resultsByEntry, munkipkgs
+    /// from munkipkgResultsByName.
+    private var activeResult: TestingResult? {
+        switch state.source {
+        case .pkgsinfo: state.selectedResult
+        case .munkipkgs: state.selectedMunkipkgResult
+        }
+    }
+
+    /// True when the active source has a current selection — gates the
+    /// "Not validated yet" empty state vs the "No selection" one.
+    private var hasSelection: Bool {
+        switch state.source {
+        case .pkgsinfo: state.selectedEntry != nil
+        case .munkipkgs: state.selectedMunkipkg != nil
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(state.selectedEntry?.packageName ?? "Select a package")
+                Text(headerTitle)
                     .font(.headline)
                 Spacer()
-                if let entry = state.selectedEntry {
+                if state.source == .pkgsinfo, let entry = state.selectedEntry {
                     StatusMenu(entry: entry, state: $state)
                 }
             }
@@ -587,7 +789,7 @@ private struct StepTimelineColumn: View {
                 Divider()
             }
 
-            if let result = state.selectedResult, !result.steps.isEmpty {
+            if let result = activeResult, !result.steps.isEmpty {
                 List {
                     Section {
                         ForEach(result.steps) { step in
@@ -596,17 +798,25 @@ private struct StepTimelineColumn: View {
                     } header: {
                         HStack {
                             Text("\(result.passed) passed · \(result.warnings) warnings · \(result.failed) errors")
-                                .font(.caption)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             Spacer()
+                            Button {
+                                copyToPasteboard(StepRow.transcript(of: result))
+                            } label: {
+                                Label("Copy all", systemImage: "doc.on.doc")
+                                    .labelStyle(.titleAndIcon)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy the full timeline transcript")
                             Text(result.finishedAt, style: .time)
-                                .font(.caption2)
+                                .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
                     }
                 }
                 .listStyle(.inset)
-            } else if state.selectedEntry != nil {
+            } else if hasSelection {
                 ContentUnavailableView(
                     state.isValidatingSingle ? "Validating…" : "Not validated yet",
                     systemImage: state.isValidatingSingle ? "hourglass" : "play.circle",
@@ -659,29 +869,73 @@ private struct StatusMenu: View {
 
 private struct StepRow: View {
     let step: TestingStepResult
+    @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: step.severity.systemImage)
                     .foregroundStyle(step.severity.tint)
-                Text(step.title).font(.body)
+                    .imageScale(.large)
+                Text(step.title).font(.headline)
                 Spacer()
+                if !step.messages.isEmpty {
+                    Button {
+                        copyToPasteboard(Self.transcript(of: step))
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .imageScale(.small)
+                    }
+                    .buttonStyle(.borderless)
+                    .opacity(isHovering ? 1 : 0.35)
+                    .help("Copy this step")
+                }
                 if step.duration > 0 {
                     Text(step.duration, format: .number.precision(.fractionLength(2)))
-                        .font(.caption2)
+                        .font(.callout)
                         .foregroundStyle(.tertiary)
+                        .monospacedDigit()
                 }
             }
             ForEach(step.messages, id: \.self) { message in
                 Text(message)
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+        .contentShape(.rect)
+        .onHover { isHovering = $0 }
     }
+
+    /// Render one step as a copy-friendly text block: title line first,
+    /// followed by each message indented. Used by both the per-step Copy
+    /// button and the timeline-header Copy-all.
+    static func transcript(of step: TestingStepResult) -> String {
+        var lines: [String] = [step.title]
+        for message in step.messages {
+            lines.append("  " + message)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Full-run transcript — every step concatenated with blank lines
+    /// between, so a paste lands as a readable log block.
+    static func transcript(of result: TestingResult) -> String {
+        let header = "\(result.packageName) — \(result.passed) passed, \(result.warnings) warnings, \(result.failed) errors"
+        let body = result.steps.map(Self.transcript(of:)).joined(separator: "\n\n")
+        return header + "\n\n" + body
+    }
+}
+
+/// Push a string onto the macOS general pasteboard. Module-private so
+/// the Testing pane's Copy buttons share one implementation.
+private func copyToPasteboard(_ string: String) {
+    let pb = NSPasteboard.general
+    pb.clearContents()
+    pb.setString(string, forType: .string)
 }
 
 private struct DetailInspectorColumn: View {

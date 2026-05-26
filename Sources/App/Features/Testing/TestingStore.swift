@@ -1,6 +1,8 @@
+import AppKit
 import Foundation
 import Observation
 import Core
+import Infra
 
 /// State for the Testing pane. Holds the checklist mirror, the
 /// currently selected entry's most recent ``TestingResult``, and any in-flight
@@ -41,21 +43,36 @@ final class TestingStore {
     /// Free-text filter for the checklist column.
     var searchQuery: String = ""
 
-    /// How the checklist column groups rows.
-    var groupBy: GroupBy = .none
+    /// Which slice of the repo the checklist is currently showing.
+    /// `pkgsinfo` = every pkginfo file under `pkgsinfo/`; `munkipkgs` =
+    /// every munkipkg project under the configured projects folder. The
+    /// source picker only appears when a munkipkg projects folder is
+    /// configured — otherwise the Testing tab stays pinned to pkgsinfo.
+    var source: Source = .pkgsinfo
+
+    /// Munkipkg projects loaded from the configured projects folder.
+    /// Populated by ``loadMunkipkgProjects`` and reloaded when the
+    /// folder path changes. Used to back the Munkipkgs source.
+    var munkipkgProjects: [MunkipkgProject] = []
+
+    /// Currently selected project in the Munkipkgs source. Parallel to
+    /// ``selectedEntryID`` for Pkgsinfo.
+    var selectedMunkipkgName: String?
+
+    /// Per-project most-recent validation result, keyed by project name.
+    /// Lives next to ``resultsByEntry`` (which is keyed by ChecklistEntry id).
+    var munkipkgResultsByName: [String: TestingResult] = [:]
 
     /// Human-readable label for the step currently in flight. Drives
     /// the "Validating … (current stage)" affordance.
     var validationStage: String?
 
-    enum GroupBy: String, CaseIterable, Hashable {
-        case none, category, developer, status
+    enum Source: String, CaseIterable, Hashable {
+        case pkgsinfo, munkipkgs
         var title: String {
             switch self {
-            case .none:      "All"
-            case .category:  "Category"
-            case .developer: "Developer"
-            case .status:    "Status"
+            case .pkgsinfo: "Pkgsinfo"
+            case .munkipkgs: "Munkipkgs"
             }
         }
     }
@@ -96,6 +113,40 @@ final class TestingStore {
     /// Pending autofix proposal awaiting user confirmation. Set by
     /// ``prepareAutofix(for:)``; cleared when the sheet dismisses.
     var pendingAutofix: AutofixProposal?
+
+    /// Persistent install environment kept alive across Validate runs in
+    /// a single app session. First Validate spins it up, subsequent
+    /// Validates skip the 15-20 s clone+boot. The Refresh VM button
+    /// forces a teardown so the next run starts fresh.
+    private var cachedEnvironment: (any TestEnvironment)?
+    /// Identity of the cached environment — `"backend|baseImage"`. When
+    /// the user changes either in Settings, this stops matching and the
+    /// old env is torn down before a new one is built.
+    private var cachedEnvironmentSignature: String?
+
+    /// True while the cached env is being torn down by Refresh VM, so
+    /// the toolbar can render a spinner.
+    var environmentBusy: Bool = false
+
+    /// User-visible label for the cached env (`displayName` or `nil` if
+    /// none cached). Drives a status line in the Testing pane.
+    var environmentDisplayName: String?
+
+    init() {
+        // The willTerminate observer is intentionally never removed —
+        // the store lives for the app's lifetime and the notification
+        // fires once at the very end. Storing the observer would just
+        // create a deinit/MainActor-isolation knot to untangle.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.synchronousTeardown()
+            }
+        }
+    }
 
     var selectedEntry: ChecklistEntry? {
         guard let selectedEntryID else { return nil }
@@ -150,6 +201,76 @@ final class TestingStore {
 
     // MARK: - Load / save
 
+    // MARK: - Munkipkgs source
+
+    /// Scan the configured munkipkg projects folder so the Munkipkgs
+    /// source has rows to show. Silently no-ops when the folder isn't
+    /// configured — the source picker is hidden in that case anyway.
+    func loadMunkipkgProjects(via service: any MunkipkgService, from folder: URL?) async {
+        guard let folder else {
+            munkipkgProjects = []
+            return
+        }
+        do {
+            munkipkgProjects = try await service.projects(in: folder)
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        } catch {
+            munkipkgProjects = []
+            errorMessage = "Couldn't load munkipkg projects: \(error.localizedDescription)"
+        }
+    }
+
+    /// Run the Build + Build-artifact steps against a single munkipkg
+    /// project, mirroring the static-only path the bulk pkgsinfo run
+    /// uses. Install / uninstall steps don't apply here — the project
+    /// is package source, not a deployed pkginfo.
+    func validateMunkipkg(
+        _ project: MunkipkgProject,
+        services: AppServices
+    ) async {
+        phase = .validating(packageName: project.name)
+        validationStage = "Build (munkipkg)"
+
+        var result = TestingResult(
+            packageName: project.name,
+            pkginfoURL: project.directoryURL,
+            steps: [],
+            startedAt: Date(),
+            finishedAt: Date()
+        )
+        munkipkgResultsByName[project.name] = result
+
+        let build = await services.testing.validateBuild(
+            project: project,
+            munkipkg: services.munkipkg
+        )
+        result.steps.append(build)
+        munkipkgResultsByName[project.name] = result
+        if Task.isCancelled {
+            validationStage = nil
+            phase = .ready
+            return
+        }
+
+        validationStage = nil
+        result.finishedAt = Date()
+        munkipkgResultsByName[project.name] = result
+        phase = .ready
+    }
+
+    /// Selected munkipkg project, resolved from `selectedMunkipkgName`.
+    var selectedMunkipkg: MunkipkgProject? {
+        guard let name = selectedMunkipkgName else { return nil }
+        return munkipkgProjects.first { $0.name == name }
+    }
+
+    /// Most recent munkipkg run for the current selection — drives the
+    /// timeline when source == .munkipkgs.
+    var selectedMunkipkgResult: TestingResult? {
+        guard let name = selectedMunkipkgName else { return nil }
+        return munkipkgResultsByName[name]
+    }
+
     func load(repository: MunkiRepository, service: any TestingService) async {
         do {
             checklist = try await service.loadChecklist(in: repository)
@@ -169,6 +290,65 @@ final class TestingStore {
         } catch {
             errorMessage = "Couldn't save checklist: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Persistent install environment
+
+    /// Return the cached environment if its signature matches `configuration`;
+    /// otherwise tear down the prior one (if any) and build a fresh one.
+    /// Returns `nil` when the backend is `.none`.
+    func environment(
+        for configuration: TestEnvironmentFactory.Configuration
+    ) async throws -> (any TestEnvironment)? {
+        let signature = "\(configuration.backend)|\(configuration.tartBaseImage)"
+        if let env = cachedEnvironment, cachedEnvironmentSignature == signature {
+            return env
+        }
+        if let env = cachedEnvironment {
+            await env.teardown()
+            cachedEnvironment = nil
+            cachedEnvironmentSignature = nil
+            environmentDisplayName = nil
+        }
+        let env = try await TestEnvironmentFactory.make(configuration: configuration)
+        cachedEnvironment = env
+        cachedEnvironmentSignature = env == nil ? nil : signature
+        environmentDisplayName = env?.displayName
+        return env
+    }
+
+    /// Tear down the cached env and clear the cache. The next Validate
+    /// will lazy-prepare a fresh environment.
+    func refreshEnvironment() async {
+        guard cachedEnvironment != nil else { return }
+        environmentBusy = true
+        defer { environmentBusy = false }
+        if let env = cachedEnvironment {
+            await env.teardown()
+        }
+        cachedEnvironment = nil
+        cachedEnvironmentSignature = nil
+        environmentDisplayName = nil
+    }
+
+    /// True when a cached environment is alive — drives the toolbar's
+    /// Refresh-VM affordance.
+    var hasCachedEnvironment: Bool { cachedEnvironment != nil }
+
+    /// Best-effort synchronous teardown for `NSApplication.willTerminate`.
+    /// `tart stop` + `tart delete` ordinarily run async; here we block
+    /// briefly so a clean Cmd-Q doesn't leave the VM stopped-but-present.
+    private func synchronousTeardown() {
+        guard let env = cachedEnvironment else { return }
+        cachedEnvironment = nil
+        cachedEnvironmentSignature = nil
+        environmentDisplayName = nil
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            await env.teardown()
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 5)
     }
 
     // MARK: - Run a validation
@@ -301,7 +481,9 @@ final class TestingStore {
         let entryID = checklist.items.first(where: { $0.packageName == result.packageName })?.id
 
         // Prepare the env. A failure here is itself a step result —
-        // we don't throw past the run loop.
+        // we don't throw past the run loop. `prepare()` is idempotent
+        // on the Tart actor, so a cached-and-already-prepared env reports
+        // a near-zero duration here instead of re-cloning.
         validationStage = "Preparing \(environment.displayName)"
         let prepareStart = Date()
         do {
@@ -329,7 +511,9 @@ final class TestingStore {
                 )
             )
             if let entryID { resultsByEntry[entryID] = result }
-            await environment.teardown()
+            // A failed prepare() leaves the cached env in a bad state —
+            // drop it so the next Validate (or Refresh VM) starts clean.
+            await refreshEnvironment()
             return
         }
 
@@ -363,8 +547,9 @@ final class TestingStore {
             if let entryID { resultsByEntry[entryID] = result }
         }
 
-        validationStage = "Tearing down VM"
-        await environment.teardown()
+        // Persistent-VM model: do NOT tear down here. The cached env is
+        // reused for the next Validate, and the Refresh VM toolbar
+        // button + app-quit hook are responsible for cleanup.
     }
 
     private static func findMunkipkgProject(
