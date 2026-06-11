@@ -93,4 +93,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
-        run: gh release create "$TAG_NAME" build/MunkiStudio-*.pkg --generate-notes
+        run: |
+          AUTO_NOTES=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$TAG_NAME" --jq .body)
+          AUTO_NOTES=$(printf '%s\n' "$AUTO_NOTES" | sed -E -e 's/ by @[A-Za-z0-9_-]+ in / in /g' -e '/^#+ New Contributors/d' -e '/made their first contribution/d')
+          gh release create "$TAG_NAME" build/MunkiStudio-*.pkg --notes "$AUTO_NOTES"
