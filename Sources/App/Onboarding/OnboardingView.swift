@@ -200,7 +200,7 @@ struct OnboardingView: View {
 
             Spacer()
 
-            if Step(rawValue: step.rawValue + 1) == nil {
+            if step == Step.allCases.last {
                 Button("Get Started") { finish() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
