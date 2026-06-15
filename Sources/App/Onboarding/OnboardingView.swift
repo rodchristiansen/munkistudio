@@ -4,15 +4,17 @@ import Core
 
 /// First-run onboarding wizard. Shown once, over `ContentView`, until the
 /// user finishes or skips it (tracked by `AppSettings.hasCompletedOnboarding`).
-/// Walks through the munkipkg tool, opening a repository, and the munkipkg
-/// projects folder — every step after Welcome is optional.
+/// Walks through the munkipkg tool and opening a repository — the two things
+/// a new install needs. Optional feature folders (Build projects, Promoter,
+/// Profiles) are deliberately left to Settings so the wizard never edits, or
+/// clobbers, a path the user already set.
 struct OnboardingView: View {
     @Environment(RepositoryStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
     enum Step: Int, CaseIterable {
-        case welcome, munkipkg, repository, projectsFolder, promoter, profiles
+        case welcome, munkipkg, repository
     }
 
     @State private var step: Step = .welcome
@@ -23,7 +25,7 @@ struct OnboardingView: View {
     @State private var picker: PickerKind?
 
     private enum PickerKind: Identifiable {
-        case repository, projects, autopkg, profiles
+        case repository
         var id: Self { self }
     }
 
@@ -57,9 +59,6 @@ struct OnboardingView: View {
         case .welcome: welcomeStep
         case .munkipkg: munkipkgStep
         case .repository: repositoryStep
-        case .projectsFolder: projectsFolderStep
-        case .promoter: promoterStep
-        case .profiles: profilesStep
         }
     }
 
@@ -75,9 +74,11 @@ struct OnboardingView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text("A few quick steps to get set up.")
+            Text("A couple of quick steps to get set up. The Build, Promoter and Profiles tabs are opt-in — turn them on any time in Settings.")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: 440)
         .frame(maxWidth: .infinity)
@@ -154,62 +155,6 @@ struct OnboardingView: View {
         }
     }
 
-    private var projectsFolderStep: some View {
-        @Bindable var settings = settings
-        return onboardingStep(
-            icon: "hammer.circle",
-            title: "munkipkg projects folder",
-            subtitle: "Optional — point MunkiStudio at a folder of munkipkg source projects to enable the Build tab. You can change this any time in Settings."
-        ) {
-            HStack {
-                TextField("Projects folder", text: $settings.munkipkgProjectsPath,
-                          prompt: Text("No folder set"))
-                    .textFieldStyle(.roundedBorder)
-                Button("Choose\u{2026}") { chooseProjectsFolder() }
-            }
-        }
-    }
-
-    private var promoterStep: some View {
-        @Bindable var settings = settings
-        return onboardingStep(
-            icon: "arrow.up.forward.app",
-            title: "Promoter tab",
-            subtitle: "Optional — surface a preview of AutoPkg imports, upcoming promotions, and promoter history, with per-item approve / promote-early / defer actions. Off by default."
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                Toggle("Enable the Promoter tab", isOn: $settings.enablePromoterTab)
-                HStack {
-                    TextField("Deployment folder", text: $settings.autopkgDeploymentPath,
-                              prompt: Text("Folder containing promoter.yml"))
-                        .textFieldStyle(.roundedBorder)
-                    Button("Choose\u{2026}") { chooseAutopkgFolder() }
-                }
-                .disabled(!settings.enablePromoterTab)
-            }
-        }
-    }
-
-    private var profilesStep: some View {
-        @Bindable var settings = settings
-        return onboardingStep(
-            icon: "doc.text",
-            title: "Profiles tab",
-            subtitle: "Optional — manage your folder of .mobileconfig profiles directly in MunkiStudio with an XML editor and live validation. Off by default."
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                Toggle("Enable the Profiles tab", isOn: $settings.enableProfilesTab)
-                HStack {
-                    TextField("Profiles folder", text: $settings.profilesDirectoryPath,
-                              prompt: Text("Folder of .mobileconfig files"))
-                        .textFieldStyle(.roundedBorder)
-                    Button("Choose\u{2026}") { chooseProfilesFolder() }
-                }
-                .disabled(!settings.enableProfilesTab)
-            }
-        }
-    }
-
     @ViewBuilder
     private func onboardingStep<Content: View>(
         icon: String,
@@ -255,7 +200,7 @@ struct OnboardingView: View {
 
             Spacer()
 
-            if step == .profiles {
+            if step == Step.allCases.last {
                 Button("Get Started") { finish() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
@@ -298,31 +243,19 @@ struct OnboardingView: View {
     }
 
     private func openRepository() { picker = .repository }
-    private func chooseProjectsFolder() { picker = .projects }
-    private func chooseAutopkgFolder() { picker = .autopkg }
-    private func chooseProfilesFolder() { picker = .profiles }
 
     private var pickerPresented: Binding<Bool> {
         Binding(get: { picker != nil }, set: { if !$0 { picker = nil } })
     }
 
     private func handlePickerResult(_ result: Result<[URL], any Error>) {
-        guard case .success(let urls) = result, let url = urls.first else {
-            picker = nil
-            return
-        }
+        defer { picker = nil }
+        guard case .success(let urls) = result, let url = urls.first else { return }
         switch picker {
         case .repository:
             Task { await store.open(rootURL: url) }
-        case .projects:
-            settings.munkipkgProjectsPath = url.path
-        case .autopkg:
-            settings.autopkgDeploymentPath = url.path
-        case .profiles:
-            settings.profilesDirectoryPath = url.path
         case .none:
             break
         }
-        picker = nil
     }
 }
