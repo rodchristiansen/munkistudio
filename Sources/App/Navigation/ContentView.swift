@@ -41,21 +41,43 @@ struct ContentView: View {
         )
     }
 
-    /// Drives the first-run onboarding sheet. Any dismissal — finishing,
-    /// skipping, or closing — marks onboarding complete so it shows once.
+    /// Drives the first-run onboarding sheet. It shows once on a fresh
+    /// install and never again after the user finishes, skips, or closes
+    /// it. It is also suppressed entirely when the app is already
+    /// configured — so a build that introduces new onboarding steps
+    /// can't re-prompt, and clobber, a working hand-built setup.
     private var onboardingPresented: Binding<Bool> {
         Binding(
-            get: { !settings.hasCompletedOnboarding },
+            get: { !settings.hasCompletedOnboarding && !isAlreadyConfigured },
             set: { presented in
                 if !presented { settings.hasCompletedOnboarding = true }
             }
         )
     }
 
+    /// True once the user has any real configuration: a previously
+    /// opened repository, or a feature folder set by hand in Settings.
+    /// Used to keep first-run onboarding away from an already-working
+    /// install (e.g. an upgrade that adds new onboarding steps).
+    private var isAlreadyConfigured: Bool {
+        if !store.recentRepositories.isEmpty { return true }
+        return [
+            settings.munkipkgProjectsPath,
+            settings.autopkgDeploymentPath,
+            settings.profilesDirectoryPath
+        ].contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
     /// Re-open the last repo automatically. Fires at most once per
     /// launch because `store.repository` is non-nil after the first
     /// successful open.
     private func autoOpenIfAvailable() async {
+        // An already-configured user upgrading into a build that adds
+        // onboarding steps should never see the wizard. Persist the
+        // completion flag so the suppression sticks across launches.
+        if !settings.hasCompletedOnboarding && isAlreadyConfigured {
+            settings.hasCompletedOnboarding = true
+        }
         guard settings.reopenLastRepositoryOnLaunch,
               store.repository == nil,
               let recent = store.recentRepositories.first,
