@@ -59,6 +59,12 @@ final class RepositoryStore {
     /// already-visible row doesn't yank the list around.
     var pendingRevealItemID: AnyHashable?
 
+    /// Build-pane equivalent of `pendingRevealItemID` — a munkipkg
+    /// project id (the project directory's path) that the Build view
+    /// should select on next appearance. Set by cross-section openers
+    /// (Testing tab's double-click, etc.); BuildView consumes and clears.
+    var pendingBuildProjectID: String?
+
     /// Cluster selected in the Dependencies section. Lives on the store
     /// (not view-local `@State`) so it survives the view being torn down
     /// when the user navigates away and back.

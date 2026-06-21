@@ -1,15 +1,27 @@
 import SwiftUI
 import Core
+import Infra
 
-/// Content of the Preferences window (Cmd-,). A `TabView` so each future
-/// feature can contribute its own pane without restructuring this view.
+/// Content of the Preferences window (Cmd-,). Each feature gets its
+/// own tab so settings stay grouped with what they actually affect.
+/// Every pane shares ``Self/paneMinHeight`` so the window doesn't
+/// jump around when switching between short tabs (General, Git) and
+/// tall ones (Testing) — width is fixed too.
 struct SettingsView: View {
+    /// Height matches the tallest pane (Testing) so the window stays
+    /// the same size across tabs.
+    static let paneMinHeight: CGFloat = 520
+
     var body: some View {
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gearshape") }
-            FeatureSettingsView()
-                .tabItem { Label("Features", systemImage: "switch.2") }
+            PromoterSettingsView()
+                .tabItem { Label("Promoter", systemImage: "arrow.up.forward.app") }
+            ProfilesSettingsView()
+                .tabItem { Label("Profiles", systemImage: "doc.text") }
+            TestingSettingsView()
+                .tabItem { Label("Testing", systemImage: "checkmark.seal") }
             GitSettingsView()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             BuildSettingsView()
@@ -17,13 +29,13 @@ struct SettingsView: View {
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 520)
+        .frame(width: 560)
     }
 }
 
-// MARK: - Features
+// MARK: - Promoter
 
-private struct FeatureSettingsView: View {
+private struct PromoterSettingsView: View {
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
@@ -47,6 +59,21 @@ private struct FeatureSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: SettingsView.paneMinHeight)
+    }
+}
+
+// MARK: - Profiles
+
+private struct ProfilesSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
             Section {
                 Toggle("Enable Profiles tab", isOn: $settings.enableProfilesTab)
                 HStack {
@@ -65,9 +92,222 @@ private struct FeatureSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 360)
+        .frame(minHeight: SettingsView.paneMinHeight)
+    }
+}
+
+// MARK: - Testing
+
+private struct TestingSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    @State private var tartStatus: TartStatus = .checking
+    @State private var refreshingTart = false
+    @State private var copiedInstallCommand = false
+    @State private var isPullingImage = false
+    @State private var pullErrorMessage: String?
+    @State private var pullSuccessMessage: String?
+
+    private static let installCommand = "brew install cirruslabs/cli/tart"
+    private static let recommendedBaseImage = "ghcr.io/cirruslabs/macos-sequoia-base:latest"
+
+    enum TartStatus: Equatable {
+        case checking
+        case missing
+        case present(version: String, path: String)
+
+        var isPresent: Bool {
+            if case .present = self { return true }
+            return false
+        }
     }
 
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+            Toggle("Enable Testing tab", isOn: $settings.enableTestingTab)
+            TextField("Your name", text: $settings.testerName,
+                      prompt: Text("Attributed to checklist updates"))
+                .disabled(!settings.enableTestingTab)
+
+            Picker("Install environment", selection: $settings.testingEnvironmentRaw) {
+                Text("None (skip install steps)").tag("none")
+                Text("Host Mac (smoke test only)").tag("host")
+                Text("Tart (ephemeral macOS VM)").tag("tart")
+            }
+            .disabled(!settings.enableTestingTab)
+
+            TextField("Tart base image", text: $settings.tartBaseImage,
+                      prompt: Text(Self.recommendedBaseImage))
+                .disabled(!settings.enableTestingTab || settings.testingEnvironmentRaw != "tart")
+
+            // Image setup helpers — appear once Tart is installed so a
+            // first-time user can fill in the recommended image and
+            // kick off the pull without leaving the Settings pane.
+            if tartStatus.isPresent && settings.testingEnvironmentRaw == "tart" {
+                LabeledContent("Image setup") {
+                    HStack(spacing: 8) {
+                        Button("Use recommended") {
+                            settings.tartBaseImage = Self.recommendedBaseImage
+                        }
+                        .controlSize(.small)
+                        .disabled(settings.tartBaseImage == Self.recommendedBaseImage)
+
+                        if isPullingImage {
+                            ProgressView().controlSize(.small)
+                            Text("Pulling image — this may take several minutes")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Button("Pull image") { Task { await pullBaseImage() } }
+                                .controlSize(.small)
+                                .buttonStyle(.borderedProminent)
+                                .disabled(settings.tartBaseImage.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                        Spacer()
+                    }
+                }
+                if let pullSuccessMessage {
+                    LabeledContent("Last pull") {
+                        Label(pullSuccessMessage, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                    }
+                }
+                if let pullErrorMessage {
+                    LabeledContent("Pull error") {
+                        Text(pullErrorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
+            LabeledContent("Tart status") {
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    switch tartStatus {
+                    case .checking:
+                        ProgressView().controlSize(.small)
+                        Text("Checking…").foregroundStyle(.secondary)
+                    case .missing:
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("Not installed").foregroundStyle(.orange)
+                    case .present(let version, _):
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(version).foregroundStyle(.green)
+                    }
+                    if refreshingTart {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("Refresh") { Task { await refreshTartStatus() } }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                    }
+                }
+            }
+
+            if case .missing = tartStatus {
+                LabeledContent("Install") {
+                    HStack(spacing: 6) {
+                        Text(Self.installCommand)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button(action: copyInstallCommand) {
+                            Image(systemName: copiedInstallCommand ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(copiedInstallCommand ? "Copied" : "Copy to clipboard")
+                        Spacer()
+                        Link("GitHub Releases",
+                             destination: URL(string: "https://github.com/cirruslabs/tart/releases")!)
+                            .font(.caption)
+                    }
+                }
+            }
+            } header: {
+                Text("Testing")
+            } footer: {
+                Text("Phase A/B: pkginfo schema validation, script lint, optional build via munkipkg, build-artifact check, and a repo-local checklist persisted to .munkistudio/testing-checklist.json. Phase C uses Tart to clone an ephemeral macOS guest per install test — Apple's licensing caps macOS guests at 2 concurrent per host.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: SettingsView.paneMinHeight)
+        .task { await refreshTartStatus() }
+    }
+
+    @MainActor
+    private func refreshTartStatus() async {
+        refreshingTart = true
+        defer { refreshingTart = false }
+        let detector = TartDetector()
+        if let path = await detector.locate() {
+            let version = await detector.version() ?? "installed"
+            tartStatus = .present(version: version, path: path)
+            // One-time promotion: when Tart shows up and the env is
+            // still at the default "none", flip to "tart" so the user
+            // doesn't have to. We don't repeat this — if they switch
+            // back to "none" later it stays sticky.
+            if !settings.testingEnvironmentAutoFlipped,
+               settings.testingEnvironmentRaw == "none" {
+                settings.testingEnvironmentRaw = "tart"
+                settings.testingEnvironmentAutoFlipped = true
+            }
+        } else {
+            tartStatus = .missing
+        }
+    }
+
+    /// Pull the configured Tart base image. Runs on a detached task so
+    /// the multi-GB transfer doesn't block the Settings UI.
+    @MainActor
+    private func pullBaseImage() async {
+        let image = settings.tartBaseImage.trimmingCharacters(in: .whitespaces)
+        guard !image.isEmpty else { return }
+        isPullingImage = true
+        pullErrorMessage = nil
+        pullSuccessMessage = nil
+        defer { isPullingImage = false }
+
+        let result: CommandResult? = await Task.detached {
+            try? await TartDetector().pullImage(image)
+        }.value
+
+        guard let result else {
+            pullErrorMessage = "Tart not found on PATH."
+            return
+        }
+        if result.success {
+            pullSuccessMessage = "Pulled \(image)."
+        } else {
+            let tail = result.stderr
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .last
+                .map(String.init)
+                ?? "tart pull exited \(result.exitCode)"
+            pullErrorMessage = tail
+        }
+    }
+
+    /// Drop the install command on the pasteboard and flash a checkmark
+    /// in the copy button for two seconds. Sidesteps the Automation
+    /// permission dance that scripting Terminal.app would need.
+    private func copyInstallCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(Self.installCommand, forType: .string)
+        copiedInstallCommand = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            copiedInstallCommand = false
+        }
+    }
 }
 
 // MARK: - Build
@@ -133,7 +373,7 @@ private struct BuildSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 360)
+        .frame(minHeight: SettingsView.paneMinHeight)
         .task(id: settings.munkipkgExecutablePath) {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
@@ -177,7 +417,7 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 160)
+        .frame(minHeight: SettingsView.paneMinHeight)
     }
 }
 
@@ -212,7 +452,7 @@ private struct GitSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 160)
+        .frame(minHeight: SettingsView.paneMinHeight)
     }
 }
 

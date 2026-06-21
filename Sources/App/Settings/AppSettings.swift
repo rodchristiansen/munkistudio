@@ -87,6 +87,41 @@ final class AppSettings {
         didSet { defaults.set(profilesDirectoryPath, forKey: Key.profilesDirectoryPath) }
     }
 
+    /// Show the Testing tab. Off by default — opt-in from Settings →
+    /// Features. Phase A surface is schema validation + a repo-local
+    /// checklist; Phase C adds ephemeral install testing in Tart VMs.
+    var enableTestingTab: Bool {
+        didSet { defaults.set(enableTestingTab, forKey: Key.enableTestingTab) }
+    }
+
+    /// Display name attributed to checklist updates ("last tested by …").
+    /// Empty = derive from the local user account at write time.
+    var testerName: String {
+        didSet { defaults.set(testerName, forKey: Key.testerName) }
+    }
+
+    /// Backend the Testing pane uses for install steps. `.none` skips
+    /// all install steps; `.host` runs against the admin's Mac (smoke
+    /// testing only); `.tart` spins up an ephemeral macOS guest per run.
+    var testingEnvironmentRaw: String {
+        didSet { defaults.set(testingEnvironmentRaw, forKey: Key.testingEnvironmentRaw) }
+    }
+
+    /// Tart base image used as the source for ephemeral clones — either
+    /// a local VM name (`tart list`) or a remote ref
+    /// (`ghcr.io/cirruslabs/macos-sequoia-base:latest`).
+    var tartBaseImage: String {
+        didSet { defaults.set(tartBaseImage, forKey: Key.tartBaseImage) }
+    }
+
+    /// Set the first time MunkiStudio sees Tart installed and promotes
+    /// the install environment from "none" to "tart" automatically. The
+    /// flag exists so a user who deliberately switches back to "none"
+    /// later won't keep getting flipped again on every Tart probe.
+    var testingEnvironmentAutoFlipped: Bool {
+        didSet { defaults.set(testingEnvironmentAutoFlipped, forKey: Key.testingEnvironmentAutoFlipped) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -113,6 +148,16 @@ final class AppSettings {
             defaults.bool(forKey: Key.enableProfilesTab)
         self.profilesDirectoryPath =
             defaults.string(forKey: Key.profilesDirectoryPath) ?? ""
+        self.enableTestingTab =
+            defaults.bool(forKey: Key.enableTestingTab)
+        self.testerName =
+            defaults.string(forKey: Key.testerName) ?? ""
+        self.testingEnvironmentRaw =
+            defaults.string(forKey: Key.testingEnvironmentRaw) ?? "none"
+        self.tartBaseImage =
+            defaults.string(forKey: Key.tartBaseImage) ?? ""
+        self.testingEnvironmentAutoFlipped =
+            defaults.bool(forKey: Key.testingEnvironmentAutoFlipped)
     }
 
     private enum Key {
@@ -127,5 +172,10 @@ final class AppSettings {
         static let promoterHiddenCatalogs = "MunkiStudio.settings.promoterHiddenCatalogs"
         static let enableProfilesTab = "MunkiStudio.settings.enableProfilesTab"
         static let profilesDirectoryPath = "MunkiStudio.settings.profilesDirectoryPath"
+        static let enableTestingTab = "MunkiStudio.settings.enableTestingTab"
+        static let testerName = "MunkiStudio.settings.testerName"
+        static let testingEnvironmentRaw = "MunkiStudio.settings.testingEnvironment"
+        static let tartBaseImage = "MunkiStudio.settings.tartBaseImage"
+        static let testingEnvironmentAutoFlipped = "MunkiStudio.settings.testingEnvironmentAutoFlipped"
     }
 }

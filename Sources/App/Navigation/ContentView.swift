@@ -228,6 +228,8 @@ private struct SidebarView: View {
                 return settings.enablePromoterTab
             case .profiles:
                 return settings.enableProfilesTab
+            case .testing:
+                return settings.enableTestingTab
             default:
                 return true
             }
@@ -268,6 +270,7 @@ private struct ContentColumn: View {
         case .clean: EmptyView()
         case .importer: EmptyView()
         case .promoter: EmptyView()
+        case .testing: EmptyView()
         case .git: GitView()
         }
     }
@@ -289,6 +292,7 @@ private struct DetailColumn: View {
         case .clean: EmptyView()
         case .importer: EmptyView()
         case .promoter: EmptyView()
+        case .testing: EmptyView()
         case .git: GitDetailView()
         }
     }
@@ -307,6 +311,7 @@ private struct FullWidthColumn: View {
             case .build: BuildView()
             case .clean: CleanView()
             case .promoter: PromoterView()
+            case .testing: TestingView()
             default: EmptyView()
             }
         }

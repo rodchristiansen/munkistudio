@@ -57,6 +57,10 @@ struct BuildView: View {
             .task(id: settings.munkipkgProjectsPath) {
                 await reload()
                 startWatching()
+                consumePendingBuildSelection()
+            }
+            .onChange(of: store.pendingBuildProjectID) { _, _ in
+                consumePendingBuildSelection()
             }
             .onDisappear {
                 folderWatcher?.cancel()
@@ -165,6 +169,19 @@ struct BuildView: View {
     }
 
     // MARK: data
+
+    /// Honor a pending cross-section selection request: if the store
+    /// has a project id queued up (set by Testing-tab double-click,
+    /// etc.) and we have a project that matches, select it and clear
+    /// the pending id. Runs after `reload()` so the project list is up
+    /// to date and we don't drop the request on the first appearance.
+    private func consumePendingBuildSelection() {
+        guard let pending = store.pendingBuildProjectID else { return }
+        if projects.contains(where: { $0.id == pending }) {
+            selectedProjectID = pending
+            store.pendingBuildProjectID = nil
+        }
+    }
 
     private func reload() async {
         guard let folder = projectsFolder else { projects = []; return }
