@@ -3,7 +3,6 @@ import UniformTypeIdentifiers
 
 struct RepositoryPickerView: View {
     @Environment(RepositoryStore.self) private var store
-    @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 96
     @State private var picking = false
 
@@ -49,16 +48,11 @@ struct RepositoryPickerView: View {
         }
     }
 
+    /// Plain window background — no brand wash. The tinted gradient read
+    /// as a stain across the top of an otherwise empty screen, and it
+    /// fought the app icon sitting on top of it.
     private var backdrop: some View {
-        LinearGradient(
-            colors: [
-                Color.munkiStudioBrand.opacity(colorScheme == .dark ? 0.18 : 0.10),
-                Color.munkiStudioBrand.opacity(0.0)
-            ],
-            startPoint: .top,
-            endPoint: .center
-        )
-        .background(.background)
+        Color.clear.background(.background)
     }
 
     private var hero: some View {

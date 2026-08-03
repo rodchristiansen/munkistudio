@@ -82,7 +82,11 @@ private enum AppIcon {
         rep.size = NSSize(width: size, height: size)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
-        let bounds = NSRect(x: 0, y: 0, width: size, height: size)
+        // A bitmap context's coordinate space is in *pixels*, not points.
+        // Drawing into a points-sized rect filled only the lower-left
+        // corner of a Retina backing store, which is why the icon came
+        // out both small and visibly off-centre.
+        let bounds = NSRect(x: 0, y: 0, width: CGFloat(pixels), height: CGFloat(pixels))
         if let aqua = NSAppearance(named: .aqua) {
             aqua.performAsCurrentDrawingAppearance {
                 source.draw(in: bounds)
