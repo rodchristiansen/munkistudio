@@ -87,7 +87,7 @@ final class AppSettings {
         didSet { defaults.set(profilesDirectoryPath, forKey: Key.profilesDirectoryPath) }
     }
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -114,6 +114,42 @@ final class AppSettings {
         self.profilesDirectoryPath =
             defaults.string(forKey: Key.profilesDirectoryPath) ?? ""
     }
+
+    /// Forget every stored preference and return to the values a fresh
+    /// install starts with. Reassigning each property writes the default
+    /// back through `didSet`, so the in-memory object and the defaults
+    /// domain stay in step — nothing has to be reloaded afterwards.
+    func resetToDefaults() {
+        for key in Self.allKeys { defaults.removeObject(forKey: key) }
+        reopenLastRepositoryOnLaunch = true
+        hasCompletedOnboarding = false
+        gitHooksPathOverride = ""
+        showGitSection = true
+        munkipkgProjectsPath = ""
+        munkipkgExecutablePath = ""
+        enablePromoterTab = false
+        autopkgDeploymentPath = ""
+        promoterHiddenCatalogs = ""
+        enableProfilesTab = false
+        profilesDirectoryPath = ""
+    }
+
+    /// Every defaults key this type owns. Kept next to ``Key`` so a new
+    /// setting that forgets to appear here is obvious in review — the
+    /// reset paths iterate this list, not the type's stored properties.
+    static let allKeys: [String] = [
+        Key.reopenLastRepository,
+        Key.hasCompletedOnboarding,
+        Key.gitHooksPathOverride,
+        Key.showGitSection,
+        Key.munkipkgProjectsPath,
+        Key.munkipkgExecutablePath,
+        Key.enablePromoterTab,
+        Key.autopkgDeploymentPath,
+        Key.promoterHiddenCatalogs,
+        Key.enableProfilesTab,
+        Key.profilesDirectoryPath,
+    ]
 
     private enum Key {
         static let reopenLastRepository = "MunkiStudio.settings.reopenLastRepositoryOnLaunch"

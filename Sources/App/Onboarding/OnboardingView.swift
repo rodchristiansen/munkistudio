@@ -4,17 +4,27 @@ import Core
 
 /// First-run onboarding wizard. Shown once, over `ContentView`, until the
 /// user finishes or skips it (tracked by `AppSettings.hasCompletedOnboarding`).
-/// Walks through the munkipkg tool and opening a repository — the two things
-/// a new install needs. Optional feature folders (Build projects, Promoter,
-/// Profiles) are deliberately left to Settings so the wizard never edits, or
-/// clobbers, a path the user already set.
+///
+/// It walks every surface a new install has to configure: the repository,
+/// the munkipkg tool and its projects folder, and the two opt-in tabs
+/// (Promoter, Profiles) plus Git. Only the repository step is required —
+/// each later step can be passed straight through.
+///
+/// Nothing here writes a path on the user's behalf. Every field is
+/// pre-filled from whatever is already configured and only changes when
+/// the user actively edits or picks, so re-running setup on a working
+/// install can't clobber it.
 struct OnboardingView: View {
     @Environment(RepositoryStore.self) private var store
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
 
+    /// Repository comes before the tooling steps on purpose: opening a
+    /// repo is the one thing the app can't work without, and everything
+    /// after it is optional. A user who bails out halfway still ends up
+    /// with a working install.
     enum Step: Int, CaseIterable {
-        case welcome, munkipkg, repository
+        case welcome, repository, munkipkg, promoter, profiles, git
     }
 
     @State private var step: Step = .welcome
@@ -57,8 +67,11 @@ struct OnboardingView: View {
     private var stepContent: some View {
         switch step {
         case .welcome: welcomeStep
-        case .munkipkg: munkipkgStep
         case .repository: repositoryStep
+        case .munkipkg: munkipkgStep
+        case .promoter: promoterStep
+        case .profiles: profilesStep
+        case .git: gitStep
         }
     }
 
@@ -74,7 +87,7 @@ struct OnboardingView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text("A couple of quick steps to get set up. The Build, Promoter and Profiles tabs are opt-in — turn them on any time in Settings.")
+            Text("A few quick steps to get set up. Only the repository is required — everything after it can be skipped and configured later in Settings.")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -85,7 +98,8 @@ struct OnboardingView: View {
     }
 
     private var munkipkgStep: some View {
-        onboardingStep(
+        @Bindable var settings = settings
+        return onboardingStep(
             icon: "hammer",
             title: "Set up munkipkg",
             subtitle: "The Build tab uses munkipkg to build packages from source projects. This step is optional — skip it if you don't build packages."
@@ -126,8 +140,209 @@ struct OnboardingView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Divider().padding(.vertical, 2)
+
+                Text("Projects folder")
+                    .font(.callout.weight(.medium))
+                HStack {
+                    TextField(
+                        "Projects folder",
+                        text: $settings.munkipkgProjectsPath,
+                        prompt: Text("Folder of munkipkg projects")
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    PathChooserButton.folder(path: $settings.munkipkgProjectsPath)
+                }
+                folderStatus(
+                    path: settings.munkipkgProjectsPath,
+                    emptyHint: "Optional — the Build tab stays empty until this is set.",
+                    describe: { url in
+                        let count = Self.subdirectoryCount(of: url) { $0.appending(path: "build-info.plist") }
+                        return count == 0
+                            ? "No munkipkg projects found directly under this folder."
+                            : "\(count) munkipkg project\(count == 1 ? "" : "s") found."
+                    }
+                )
             }
         }
+    }
+
+    private var promoterStep: some View {
+        @Bindable var settings = settings
+        return onboardingStep(
+            icon: "arrow.up.forward.square",
+            title: "Promoter",
+            subtitle: "Shows recent AutoPkg imports and upcoming catalog promotions, and lets you approve or defer them. Optional — skip if you don't run AutoPkg."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Enable the Promoter tab", isOn: $settings.enablePromoterTab)
+
+                HStack {
+                    TextField(
+                        "Deployment folder",
+                        text: $settings.autopkgDeploymentPath,
+                        prompt: Text("Folder containing promoter.yml")
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    PathChooserButton.folder(path: $settings.autopkgDeploymentPath)
+                }
+                .disabled(!settings.enablePromoterTab)
+
+                if settings.enablePromoterTab {
+                    folderStatus(
+                        path: settings.autopkgDeploymentPath,
+                        emptyHint: "Point this at the folder holding promoter.yml.",
+                        describe: { url in
+                            FileManager.default.fileExists(atPath: url.appending(path: "promoter.yml").path)
+                                ? "Found promoter.yml."
+                                : "No promoter.yml here — the Promoter tab will be empty."
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private var profilesStep: some View {
+        @Bindable var settings = settings
+        return onboardingStep(
+            icon: "doc.badge.gearshape",
+            title: "Configuration Profiles",
+            subtitle: "Lists every .mobileconfig under a folder and opens each in an XML editor with live validation. Optional — skip if you don't manage profiles here."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Enable the Profiles tab", isOn: $settings.enableProfilesTab)
+
+                HStack {
+                    TextField(
+                        "Profiles folder",
+                        text: $settings.profilesDirectoryPath,
+                        prompt: Text("Folder of .mobileconfig files")
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    PathChooserButton.folder(path: $settings.profilesDirectoryPath)
+                }
+                .disabled(!settings.enableProfilesTab)
+
+                if settings.enableProfilesTab {
+                    folderStatus(
+                        path: settings.profilesDirectoryPath,
+                        emptyHint: "Point this at a folder of .mobileconfig files.",
+                        describe: { url in
+                            let count = Self.fileCount(under: url, extension: "mobileconfig")
+                            return count == 0
+                                ? "No .mobileconfig files found under this folder."
+                                : "\(count) profile\(count == 1 ? "" : "s") found."
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private var gitStep: some View {
+        @Bindable var settings = settings
+        return onboardingStep(
+            icon: "arrow.triangle.branch",
+            title: "Git",
+            subtitle: "When your repo is a git working tree, MunkiStudio can stage, commit, and push from inside the app."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    if store.repository == nil {
+                        Image(systemName: "circle.dashed").foregroundStyle(.secondary)
+                        Text("Open a repository to check this.")
+                    } else if store.gitInfo != nil {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text("This repository is a git working tree.")
+                    } else {
+                        Image(systemName: "info.circle.fill").foregroundStyle(.secondary)
+                        Text("Not a git working tree — the Git tab stays hidden.")
+                    }
+                }
+                .font(.callout)
+
+                Toggle("Show the Git tab", isOn: $settings.showGitSection)
+
+                Text("Hooks directory")
+                    .font(.callout.weight(.medium))
+                TextField(
+                    "Hooks directory",
+                    text: $settings.gitHooksPathOverride,
+                    prompt: Text("Auto-detect")
+                )
+                .textFieldStyle(.roundedBorder)
+                .labelsHidden()
+                Text("Leave blank to auto-detect: core.hooksPath, then .githooks, then .git/hooks.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Inline feedback for a folder field — blank, missing, or what was
+    /// actually found inside it. Turns "I typed a path" into "the app
+    /// can see my files", which is the whole point of doing this in a
+    /// wizard rather than leaving it to Settings.
+    @ViewBuilder
+    private func folderStatus(
+        path: String,
+        emptyHint: String,
+        describe: (URL) -> String
+    ) -> some View {
+        let trimmed = path.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            Text(emptyHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            let url = URL(fileURLWithPath: trimmed)
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            if exists && isDirectory.boolValue {
+                Label(describe(url), systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label("That folder doesn't exist.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    /// Count immediate subdirectories that satisfy `marker` — used to
+    /// spot munkipkg projects without loading them.
+    private static func subdirectoryCount(of url: URL, marker: (URL) -> URL) -> Int {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        return contents.filter { child in
+            let candidates = ["build-info.plist", "build-info.yaml", "build-info.yml", "build-info.json"]
+            return candidates.contains { FileManager.default.fileExists(atPath: child.appending(path: $0).path) }
+        }.count
+    }
+
+    private static func fileCount(under url: URL, extension pathExtension: String) -> Int {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        var count = 0
+        for case let file as URL in enumerator where file.pathExtension == pathExtension {
+            count += 1
+        }
+        return count
     }
 
     private var repositoryStep: some View {
@@ -137,22 +352,64 @@ struct OnboardingView: View {
             subtitle: "Choose the root folder of your Munki repo — the one containing pkgsinfo/, pkgs/, catalogs/ and manifests/."
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                if let repo = store.repository {
+                switch store.loadState {
+                case .loading:
                     HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(repo.displayName).font(.callout.weight(.medium))
-                            Text(repo.rootURL.path)
-                                .font(.caption).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle)
+                        ProgressView().controlSize(.small)
+                        Text("Opening\u{2026}").font(.callout)
+                    }
+                case .failed(let message):
+                    // Silent failure here was the single worst part of
+                    // the old flow: a wrong folder looked identical to
+                    // no folder at all.
+                    Label {
+                        Text(message)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "exclamationmark.octagon.fill")
+                            .foregroundStyle(.red)
+                    }
+                case .idle, .ready:
+                    if let repo = store.repository {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(repo.displayName).font(.callout.weight(.medium))
+                                Text(repo.rootURL.path)
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle)
+                            }
                         }
+                        Text(loadedSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
+
+                ForEach(store.repositoryWarnings, id: \.self) { warning in
+                    Label {
+                        Text(warning).font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                }
+
                 Button(store.repository == nil ? "Open Repository\u{2026}" : "Open a Different Repository\u{2026}") {
                     openRepository()
                 }
+                .disabled(store.loadState == .loading)
             }
         }
+    }
+
+    /// What the app actually found, so a successful open is verifiable
+    /// at a glance rather than taken on trust.
+    private var loadedSummary: String {
+        let snapshot = store.snapshot
+        return "\(snapshot.pkginfos.count) pkginfos · \(snapshot.manifests.count) manifests · \(snapshot.catalogs.count) catalogs"
     }
 
     @ViewBuilder
@@ -188,6 +445,16 @@ struct OnboardingView: View {
             }
             .disabled(step == .welcome)
 
+            if AppDefaults.isSandbox() {
+                Text("SANDBOX")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.15), in: .capsule)
+                    .help("Running against a throwaway preference suite — your real settings aren't being touched.")
+            }
+
             Spacer()
 
             HStack(spacing: 6) {
@@ -220,6 +487,7 @@ struct OnboardingView: View {
 
     private func finish() {
         settings.hasCompletedOnboarding = true
+        store.isShowingOnboarding = false
         dismiss()
     }
 

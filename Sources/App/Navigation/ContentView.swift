@@ -22,6 +22,10 @@ struct ContentView: View {
         .task { await autoOpenIfAvailable() }
         .sheet(isPresented: onboardingPresented) {
             OnboardingView()
+                // The wizard leaves only through its own buttons. Without
+                // this, a stray dismissal drops the user at an empty app
+                // with no way back to setup.
+                .interactiveDismissDisabled()
         }
         .fileImporter(
             isPresented: openRepositoryPresented,
@@ -41,17 +45,28 @@ struct ContentView: View {
         )
     }
 
-    /// Drives the first-run onboarding sheet. It shows once on a fresh
-    /// install and never again after the user finishes, skips, or closes
-    /// it. It is also suppressed entirely when the app is already
-    /// configured — so a build that introduces new onboarding steps
-    /// can't re-prompt, and clobber, a working hand-built setup.
+    /// Drives the first-run onboarding sheet.
+    ///
+    /// Two rules here, both of them scar tissue:
+    ///
+    /// 1. The `get` reads *stored* state, never a recomputed condition.
+    ///    It used to be `!hasCompletedOnboarding && !isAlreadyConfigured`,
+    ///    so opening a repository inside the wizard — the wizard's own
+    ///    step — made the install "configured" and dismissed the sheet
+    ///    out from under the user. The decision is made once, in
+    ///    ``resolveOnboarding()``.
+    ///
+    /// 2. The `set` only mirrors presentation. It must **not** record
+    ///    completion: SwiftUI writes `false` through a sheet binding for
+    ///    reasons that have nothing to do with the user finishing
+    ///    (teardown, window changes, accessibility clients inspecting the
+    ///    hierarchy). Treating any of those as "onboarding done" burned
+    ///    the flag permanently after a stray write. Only ``finish()`` —
+    ///    reached from Skip Setup or Get Started — completes onboarding.
     private var onboardingPresented: Binding<Bool> {
         Binding(
-            get: { !settings.hasCompletedOnboarding && !isAlreadyConfigured },
-            set: { presented in
-                if !presented { settings.hasCompletedOnboarding = true }
-            }
+            get: { store.isShowingOnboarding },
+            set: { store.isShowingOnboarding = $0 }
         )
     }
 
@@ -60,25 +75,43 @@ struct ContentView: View {
     /// Used to keep first-run onboarding away from an already-working
     /// install (e.g. an upgrade that adds new onboarding steps).
     private var isAlreadyConfigured: Bool {
-        if !store.recentRepositories.isEmpty { return true }
-        return [
-            settings.munkipkgProjectsPath,
-            settings.autopkgDeploymentPath,
-            settings.profilesDirectoryPath
-        ].contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        OnboardingGate.isAlreadyConfigured(
+            recentRepositoryCount: store.recentRepositories.count,
+            featurePaths: [
+                settings.munkipkgProjectsPath,
+                settings.autopkgDeploymentPath,
+                settings.profilesDirectoryPath
+            ]
+        )
+    }
+
+    /// Settle the first-run question once per launch, before anything
+    /// else can change the inputs it reads.
+    private func resolveOnboarding() {
+        // An already-configured user upgrading into a build that adds
+        // onboarding steps should never see the wizard. Persist the
+        // completion flag so the suppression sticks across launches.
+        if OnboardingGate.shouldBackfillCompletion(
+            hasCompletedOnboarding: settings.hasCompletedOnboarding,
+            isAlreadyConfigured: isAlreadyConfigured
+        ) {
+            settings.hasCompletedOnboarding = true
+        }
+        store.isShowingOnboarding = OnboardingGate.shouldPresentOnLaunch(
+            hasCompletedOnboarding: settings.hasCompletedOnboarding,
+            isAlreadyConfigured: isAlreadyConfigured
+        )
     }
 
     /// Re-open the last repo automatically. Fires at most once per
     /// launch because `store.repository` is non-nil after the first
     /// successful open.
     private func autoOpenIfAvailable() async {
-        // An already-configured user upgrading into a build that adds
-        // onboarding steps should never see the wizard. Persist the
-        // completion flag so the suppression sticks across launches.
-        if !settings.hasCompletedOnboarding && isAlreadyConfigured {
-            settings.hasCompletedOnboarding = true
-        }
-        guard settings.reopenLastRepositoryOnLaunch,
+        resolveOnboarding()
+        // Don't race a repo open against the wizard — the wizard's own
+        // repository step is where a first-run user chooses one.
+        guard !store.isShowingOnboarding,
+              settings.reopenLastRepositoryOnLaunch,
               store.repository == nil,
               let recent = store.recentRepositories.first,
               FileManager.default.fileExists(atPath: recent.path) else { return }

@@ -17,6 +17,9 @@ struct RepositoryPickerView: View {
                     Spacer(minLength: 60)
                     hero
                     primaryActions
+                    if case .failed(let message) = store.loadState {
+                        openFailure(message)
+                    }
                     if !store.recentRepositories.isEmpty {
                         recentsSection
                     }
@@ -98,6 +101,28 @@ struct RepositoryPickerView: View {
         .buttonStyle(.borderedProminent)
     }
 
+    /// A failed open used to leave the picker looking untouched — the
+    /// user clicked, nothing happened, and there was nowhere to find out
+    /// why. `RepositoryStore` records the reason; this shows it.
+    private func openFailure(_ message: String) -> some View {
+        Label {
+            Text(message)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } icon: {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .foregroundStyle(.red)
+        }
+        .padding(12)
+        .frame(maxWidth: 520)
+        .background(.red.opacity(0.08), in: .rect(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(.red.opacity(0.25), lineWidth: 1)
+        )
+    }
+
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -114,9 +139,11 @@ struct RepositoryPickerView: View {
 
             VStack(spacing: 6) {
                 ForEach(store.recentRepositories, id: \.self) { url in
-                    RecentRepoRow(url: url) {
-                        Task { await store.open(rootURL: url) }
-                    }
+                    RecentRepoRow(
+                        url: url,
+                        action: { Task { await store.open(rootURL: url) } },
+                        remove: { store.removeRecent(url) }
+                    )
                 }
             }
         }
@@ -125,7 +152,16 @@ struct RepositoryPickerView: View {
 
     private var versionBadge: some View {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-        return Group {
+        return HStack(spacing: 8) {
+            if AppDefaults.isSandbox() {
+                Text("SANDBOX")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.15), in: .capsule)
+                    .help("Running against a throwaway preference suite — your real settings aren't being touched.")
+            }
             if let version {
                 Text("v\(version)")
                     .font(.caption.monospacedDigit())
@@ -142,21 +178,29 @@ struct RepositoryPickerView: View {
 private struct RecentRepoRow: View {
     let url: URL
     let action: () -> Void
+    let remove: () -> Void
     @State private var hovering = false
+
+    /// An unmounted share or a moved folder stays in the list — dropping
+    /// it silently is worse — but it is drawn as unavailable so clicking
+    /// it and getting nothing isn't a mystery.
+    private var isAvailable: Bool {
+        FileManager.default.fileExists(atPath: url.path)
+    }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: "folder.fill")
-                    .foregroundStyle(.tint)
+                Image(systemName: isAvailable ? "folder.fill" : "questionmark.folder")
+                    .foregroundStyle(isAvailable ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(url.lastPathComponent)
                         .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Text(url.path)
+                        .foregroundStyle(isAvailable ? .primary : .secondary)
+                    Text(isAvailable ? url.path : "Unavailable — \(url.path)")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isAvailable ? .secondary : .tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -176,5 +220,8 @@ private struct RecentRepoRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .contextMenu {
+            Button("Remove from Recent", role: .destructive, action: remove)
+        }
     }
 }

@@ -168,16 +168,66 @@ private struct BuildSettingsView: View {
 
 private struct GeneralSettingsView: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(RepositoryStore.self) private var store
+
+    @State private var confirmingReset = false
 
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Toggle("Reopen last repository on launch", isOn: $settings.reopenLastRepositoryOnLaunch)
-            LabeledContent("Version", value: AppInfo.version)
+            Section {
+                Toggle("Reopen last repository on launch", isOn: $settings.reopenLastRepositoryOnLaunch)
+                LabeledContent("Version", value: AppInfo.version)
+            }
+
+            Section {
+                Button("Run Setup Again\u{2026}") { replayOnboarding() }
+                Button("Reset All Settings\u{2026}", role: .destructive) {
+                    confirmingReset = true
+                }
+                if AppDefaults.isSandbox() {
+                    Label(
+                        "Sandbox mode — settings live in a throwaway suite that is wiped every launch.",
+                        systemImage: "flask"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Setup")
+            } footer: {
+                Text("Run Setup Again reopens the first-run wizard without changing anything you've already configured. Reset All Settings clears every MunkiStudio preference and the Recent list, returning the app to a fresh install — it never touches your repository.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 160)
+        .frame(minHeight: 260)
+        .confirmationDialog(
+            "Reset all MunkiStudio settings?",
+            isPresented: $confirmingReset,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Everything", role: .destructive) { resetEverything() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Clears every preference and the Recent list, then reopens the setup wizard. Your Munki repository is left untouched.")
+        }
+    }
+
+    /// Reopen the wizard over the main window. The Settings window is
+    /// closed first — otherwise the sheet raises behind it and looks
+    /// like the button did nothing.
+    private func replayOnboarding() {
+        store.isShowingOnboarding = true
+        NSApp.keyWindow?.performClose(nil)
+    }
+
+    private func resetEverything() {
+        settings.resetToDefaults()
+        store.clearRecents()
+        replayOnboarding()
     }
 }
 

@@ -9,11 +9,18 @@ import Infra
 @main
 struct MunkiStudioApp: SwiftUI.App {
     @State private var store: RepositoryStore
-    @State private var settings = AppSettings()
+    @State private var settings: AppSettings
     @State private var promoterStore = PromoterStore()
     @State private var profileStore = ProfileStore()
 
     init() {
+        // One defaults domain for the whole app, resolved once. A
+        // sandbox launch (`--sandbox`) gets a throwaway suite that is
+        // wiped here, so onboarding runs exactly as it does on a fresh
+        // install without disturbing real settings.
+        let defaults = AppDefaults.makeLaunchDefaults()
+        _settings = State(wrappedValue: AppSettings(defaults: defaults))
+
         let packages = FilePackageService()
         let manifests = FileManifestService()
         let catalogs = FileCatalogService()
@@ -39,7 +46,7 @@ struct MunkiStudioApp: SwiftUI.App {
             repoCleanHistory: RepoCleanHistoryStore(),
             promoter: FilePromoterService(packages: packages)
         )
-        _store = State(wrappedValue: RepositoryStore(services: services))
+        _store = State(wrappedValue: RepositoryStore(services: services, defaults: defaults))
     }
 
     var body: some Scene {
