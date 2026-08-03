@@ -35,12 +35,7 @@ struct OnboardingView: View {
     @State private var checkingMunkipkg = false
     @State private var installingMunkipkg = false
     @State private var munkipkgMessage: String?
-    @State private var picker: PickerKind?
-
-    private enum PickerKind: Identifiable {
-        case repository
-        var id: Self { self }
-    }
+    @State private var pickingRepository = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,7 +48,7 @@ struct OnboardingView: View {
         }
         .frame(width: 580, height: 480)
         .fileImporter(
-            isPresented: pickerPresented,
+            isPresented: $pickingRepository,
             allowedContentTypes: [.folder],
             allowsMultipleSelection: false
         ) { result in
@@ -546,20 +541,18 @@ struct OnboardingView: View {
         }
     }
 
-    private func openRepository() { picker = .repository }
+    private func openRepository() { pickingRepository = true }
 
-    private var pickerPresented: Binding<Bool> {
-        Binding(get: { picker != nil }, set: { if !$0 { picker = nil } })
-    }
-
+    /// Handle the chosen folder.
+    ///
+    /// This used to route through a `PickerKind?` that the `isPresented`
+    /// binding cleared on dismissal. SwiftUI writes `isPresented = false`
+    /// *before* invoking this handler, so the kind was already `nil` by
+    /// the time it was read and the `switch` fell through to a no-op —
+    /// picking a repository in the wizard silently did nothing at all.
+    /// There is only ever one picker here, so there is nothing to route.
     private func handlePickerResult(_ result: Result<[URL], any Error>) {
-        defer { picker = nil }
         guard case .success(let urls) = result, let url = urls.first else { return }
-        switch picker {
-        case .repository:
-            Task { await store.open(rootURL: url) }
-        case .none:
-            break
-        }
+        Task { await store.open(rootURL: url) }
     }
 }
