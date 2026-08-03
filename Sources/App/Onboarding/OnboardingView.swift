@@ -23,8 +23,11 @@ struct OnboardingView: View {
     /// repo is the one thing the app can't work without, and everything
     /// after it is optional. A user who bails out halfway still ends up
     /// with a working install.
+    /// Promoter goes last: it is the least common setup (it needs an
+    /// AutoPkg deployment folder) and the most likely to be skipped, so
+    /// it shouldn't stand between the user and the steps that matter.
     enum Step: Int, CaseIterable {
-        case welcome, repository, munkipkg, promoter, profiles, git
+        case welcome, repository, munkipkg, profiles, git, promoter
     }
 
     @State private var step: Step = .welcome
@@ -69,9 +72,9 @@ struct OnboardingView: View {
         case .welcome: welcomeStep
         case .repository: repositoryStep
         case .munkipkg: munkipkgStep
-        case .promoter: promoterStep
         case .profiles: profilesStep
         case .git: gitStep
+        case .promoter: promoterStep
         }
     }
 
@@ -194,12 +197,8 @@ struct OnboardingView: View {
                 if settings.enablePromoterTab {
                     folderStatus(
                         path: settings.autopkgDeploymentPath,
-                        emptyHint: "Point this at the folder holding promoter.yml.",
-                        describe: { url in
-                            FileManager.default.fileExists(atPath: url.appending(path: "promoter.yml").path)
-                                ? "Found promoter.yml."
-                                : "No promoter.yml here — the Promoter tab will be empty."
-                        }
+                        emptyHint: "Point this at the folder holding the promoter config.",
+                        describe: Self.describePromoterConfig
                     )
                 }
             }
@@ -318,6 +317,25 @@ struct OnboardingView: View {
         }
     }
 
+    /// Describe the promoter config found in `url`.
+    ///
+    /// plist is the project's default on-disk format, so a deployment
+    /// folder can legitimately hold `promoter.plist` rather than
+    /// `promoter.yml`. Both are recognised here — but `FilePromoterService`
+    /// currently parses YAML only, so a plist is reported honestly
+    /// instead of implying the tab will populate.
+    static func describePromoterConfig(in url: URL) -> String {
+        let fm = FileManager.default
+        for name in ["promoter.yml", "promoter.yaml"]
+        where fm.fileExists(atPath: url.appending(path: name).path) {
+            return "Found \(name)."
+        }
+        if fm.fileExists(atPath: url.appending(path: "promoter.plist").path) {
+            return "Found promoter.plist — the Promoter tab reads YAML only, so it won't load yet."
+        }
+        return "No promoter config here — the Promoter tab will be empty."
+    }
+
     /// Count immediate subdirectories that satisfy `marker` — used to
     /// spot munkipkg projects without loading them.
     private static func subdirectoryCount(of url: URL, marker: (URL) -> URL) -> Int {
@@ -401,6 +419,13 @@ struct OnboardingView: View {
                     openRepository()
                 }
                 .disabled(store.loadState == .loading)
+
+                if store.repository == nil {
+                    Text("Open a repository to continue, or Skip Setup to do it later.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -478,9 +503,20 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+                // The repository is the one thing the app can't work
+                // without. Leaving Continue live here let a user walk
+                // the whole wizard without ever opening one and land on
+                // an empty window with no idea what went wrong.
+                .disabled(!canContinue)
             }
         }
         .padding(16)
+    }
+
+    /// Whether the current step is satisfied enough to advance. Only the
+    /// repository step gates — everything after it is optional.
+    private var canContinue: Bool {
+        step != .repository || store.repository != nil
     }
 
     // MARK: Actions
