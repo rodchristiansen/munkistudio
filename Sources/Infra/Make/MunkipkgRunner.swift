@@ -6,22 +6,48 @@ import Core
 /// parsing, and script I/O are plain file operations; `build` streams
 /// `munkipkg --build` output through ``ProcessRunner``.
 public final class MunkipkgRunner: MunkipkgService {
-    /// The standard install location, and the fallback when no custom
-    /// path is set in Settings.
-    public static let defaultExecutablePath = "/usr/local/munki/munkipkg"
+    /// The standard munkipkg install location. Kept for callers that
+    /// reference it directly; resolution now goes through
+    /// ``PackagingTool``.
+    public static let defaultExecutablePath = PackagingTool.munkipkg.defaultExecutablePath
 
     public init() {}
 
-    /// Resolved from the `munkipkgExecutablePath` setting, falling back to
-    /// the standard location. Read per-call so a Settings change takes
-    /// effect without relaunching.
-    private var executableURL: URL {
+    /// The executable path configured in Settings, or `nil` when blank.
+    private var configuredExecutablePath: String? {
         let stored = UserDefaults.standard
             .string(forKey: MunkipkgDefaults.executablePathKey)?
             .trimmingCharacters(in: .whitespaces)
-        let path = (stored?.isEmpty == false) ? stored! : Self.defaultExecutablePath
-        return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        guard let stored, !stored.isEmpty else { return nil }
+        return (stored as NSString).expandingTildeInPath
     }
+
+    /// Which tool to run, and where.
+    ///
+    /// An explicit Settings path always wins — including its tool kind,
+    /// inferred from the binary's name, so pointing at a `swiftpkg`
+    /// build doesn't get driven with munkipkg's `--build` flag. With no
+    /// path set, the first tool in ``PackagingTool/detectionOrder`` that
+    /// exists on disk is used. Read per-call so a Settings change takes
+    /// effect without relaunching.
+    var resolved: (tool: PackagingTool, url: URL) {
+        if let configured = configuredExecutablePath {
+            // An unrecognised filename is assumed to be munkipkg — that
+            // was the only supported tool before swiftpkg, so it is the
+            // back-compatible reading of a hand-set path.
+            let tool = PackagingTool.inferred(fromExecutablePath: configured) ?? .munkipkg
+            return (tool, URL(fileURLWithPath: configured))
+        }
+        for candidate in PackagingTool.detectionOrder
+        where FileManager.default.isExecutableFile(atPath: candidate.defaultExecutablePath) {
+            return (candidate, URL(fileURLWithPath: candidate.defaultExecutablePath))
+        }
+        // Nothing installed — report the default so error messages name
+        // a concrete path rather than nothing at all.
+        return (.munkipkg, URL(fileURLWithPath: PackagingTool.munkipkg.defaultExecutablePath))
+    }
+
+    private var executableURL: URL { resolved.url }
 
     public func projects(in folder: URL) async throws -> [MunkipkgProject] {
         let fileManager = FileManager.default
@@ -129,20 +155,23 @@ public final class MunkipkgRunner: MunkipkgService {
         _ project: MunkipkgProject,
         options: MunkipkgBuildOptions
     ) -> AsyncThrowingStream<MunkipkgEvent, any Error> {
-        let executable = executableURL
+        let (tool, executable) = resolved
         let projectDirectory = project.directoryURL
         // munkipkg writes the package to `build/<name>.pkg` — the fork
         // appends `.pkg` to `name` itself when it isn't already there.
         let name = project.buildInfo.name
         let packageFileName = name.hasSuffix(".pkg") ? name : name + ".pkg"
         let productURL = project.buildDirectory.appending(path: packageFileName)
-        let baseArguments = options.arguments
-        let wantsSkipImport = options.skipImport
+        let baseArguments = options.arguments(for: tool)
+        // swiftpkg has no post-build import prompt, so there is no flag
+        // to suppress — probing its `--help` for one and appending a
+        // munkipkg spelling would just make it print usage and fail.
+        let wantsSkipImport = options.skipImport && tool.supportsSkipImport
 
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var arguments = ["--build"] + baseArguments
+                    var arguments = tool.buildModeArguments + baseArguments
                     if wantsSkipImport,
                        let flag = await Self.resolveSkipImportFlag(executable: executable) {
                         arguments.append(flag)
@@ -229,12 +258,35 @@ public final class MunkipkgRunner: MunkipkgService {
         return text.isEmpty ? nil : text
     }
 
-    /// Latest-release endpoint for the Swift munkipkg fork.
-    private static let releaseAPI = URL(
-        string: "https://api.github.com/repos/rodchristiansen/munki-pkg/releases/latest"
-    )!
+    public func installedTool() async -> InstalledPackagingTool? {
+        let (tool, url) = resolved
+        guard let version = await version() else { return nil }
+        return InstalledPackagingTool(
+            tool: tool,
+            version: version,
+            executablePath: url.path
+        )
+    }
 
-    public func installLatest() async throws {
+    /// Latest-release endpoints. munkipkg attaches a bare binary;
+    /// swiftpkg ships installer packages.
+    private static func releaseAPI(for tool: PackagingTool) -> URL {
+        switch tool {
+        case .munkipkg:
+            URL(string: "https://api.github.com/repos/rodchristiansen/munki-pkg/releases/latest")!
+        case .swiftpkg:
+            URL(string: "https://api.github.com/repos/codecarton/swiftpkg/releases/latest")!
+        }
+    }
+
+    public func installLatest(_ tool: PackagingTool) async throws {
+        switch tool {
+        case .munkipkg: try await installMunkipkg()
+        case .swiftpkg: try await installSwiftpkg()
+        }
+    }
+
+    private func installMunkipkg() async throws {
         let staged = try await downloadLatestRelease()
         defer { try? FileManager.default.removeItem(at: staged) }
         // Clear the download quarantine flag (best effort) before the
@@ -246,10 +298,80 @@ public final class MunkipkgRunner: MunkipkgService {
         try await installBinary(at: staged)
     }
 
+    /// swiftpkg publishes signed installer packages rather than a bare
+    /// binary, so this downloads the CLI package and hands it to
+    /// `installer`, which puts the tool at its own chosen location.
+    private func installSwiftpkg() async throws {
+        let release = try await fetchRelease(for: .swiftpkg)
+        guard let asset = Self.swiftpkgCLIAsset(in: release) else {
+            throw MunkipkgError(
+                "The latest swiftpkg release has no CLI installer package. "
+                + "Expected an asset named like \"swiftpkg-<version>-cli.pkg\"."
+            )
+        }
+        let (downloaded, _) = try await URLSession.shared.download(from: asset.browserDownloadURL)
+        let staged = FileManager.default.temporaryDirectory
+            .appending(path: "swiftpkg-\(UUID().uuidString).pkg")
+        try FileManager.default.moveItem(at: downloaded, to: staged)
+        defer { try? FileManager.default.removeItem(at: staged) }
+        _ = try? await ProcessRunner.run(
+            URL(fileURLWithPath: "/usr/bin/xattr"),
+            arguments: ["-d", "com.apple.quarantine", staged.path]
+        )
+        try await runInstaller(package: staged)
+    }
+
+    /// Pick the CLI-only package.
+    ///
+    /// The release also carries a "combined" package that bundles the
+    /// Swiftpkgr desktop app, a tarball, and a checksums file. Matching
+    /// the CLI package explicitly avoids installing a GUI app nobody
+    /// asked for — and avoids running whatever else happens to be
+    /// attached.
+    static func swiftpkgCLIAsset(in release: GitHubRelease) -> GitHubRelease.Asset? {
+        release.assets.first {
+            let name = $0.name.lowercased()
+            return name.hasPrefix("swiftpkg-") && name.hasSuffix("-cli.pkg")
+        }
+    }
+
+    /// Install a `.pkg` system-wide, prompting for administrator rights.
+    private func runInstaller(package: URL) async throws {
+        let shell = "/usr/sbin/installer -pkg \"\(package.path)\" -target /"
+        let escaped = shell
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let appleScript = "do shell script \"\(escaped)\" with administrator privileges"
+        let output = try await ProcessRunner.run(
+            URL(fileURLWithPath: "/usr/bin/osascript"),
+            arguments: ["-e", appleScript]
+        )
+        guard output.exitCode == 0 else {
+            let detail = output.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if detail.contains("User canceled") || detail.contains("-128") {
+                throw MunkipkgError("Installation cancelled.")
+            }
+            throw MunkipkgError(detail.isEmpty ? "Installation failed." : detail)
+        }
+    }
+
+    private func fetchRelease(for tool: PackagingTool) async throws -> GitHubRelease {
+        var request = URLRequest(url: Self.releaseAPI(for: tool))
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MunkipkgError("Couldn't reach GitHub.")
+        }
+        guard http.statusCode == 200 else {
+            throw MunkipkgError("No published \(tool.displayName) release found.")
+        }
+        return try JSONDecoder().decode(GitHubRelease.self, from: data)
+    }
+
     /// Resolve the fork's latest release, download its `munkipkg` asset
     /// to a temp file, and return that file.
     private func downloadLatestRelease() async throws -> URL {
-        var request = URLRequest(url: Self.releaseAPI)
+        var request = URLRequest(url: Self.releaseAPI(for: .munkipkg))
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -325,7 +447,7 @@ public final class MunkipkgRunner: MunkipkgService {
 }
 
 /// The slice of a GitHub release JSON payload the installer needs.
-private struct GitHubRelease: Decodable {
+struct GitHubRelease: Decodable {
     let assets: [Asset]
 
     struct Asset: Decodable {

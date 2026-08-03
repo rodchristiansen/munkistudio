@@ -51,17 +51,30 @@ public struct MunkipkgBuildOptions: Sendable, Hashable {
         self.envPath = envPath
     }
 
-    /// The munkipkg flags this options struct can express on its own —
-    /// the import-suppression flag is left to the runner, which picks a
+    /// The flags this options struct can express on its own — the
+    /// import-suppression flag is left to the runner, which picks a
     /// spelling the installed binary actually accepts.
-    public var arguments: [String] {
+    ///
+    /// Defaults to munkipkg's vocabulary; use ``arguments(for:)`` to
+    /// emit only what a given tool accepts.
+    public var arguments: [String] { arguments(for: .munkipkg) }
+
+    /// Flags `tool` actually accepts.
+    ///
+    /// `--export-bom-info`, `--skip-notarization`, `--skip-stapling` and
+    /// `--quiet` are common to both tools. `--env` is munkipkg-only, and
+    /// passing it to swiftpkg makes it print usage and exit non-zero
+    /// rather than ignoring it.
+    public func arguments(for tool: PackagingTool) -> [String] {
         var args: [String] = []
         if exportBomInfo { args.append("--export-bom-info") }
         if skipNotarization { args.append("--skip-notarization") }
         if skipStapling { args.append("--skip-stapling") }
         if quiet { args.append("--quiet") }
         let env = envPath.trimmingCharacters(in: .whitespaces)
-        if !env.isEmpty { args.append(contentsOf: ["--env", env]) }
+        if !env.isEmpty, tool.supportsEnvFile {
+            args.append(contentsOf: ["--env", env])
+        }
         return args
     }
 }
@@ -108,12 +121,37 @@ public protocol MunkipkgService: Sendable {
         options: MunkipkgBuildOptions
     ) -> AsyncThrowingStream<MunkipkgEvent, any Error>
 
-    /// The version string of the configured `munkipkg`, or `nil` when it
-    /// isn't installed or doesn't respond.
+    /// The version string of the configured tool, or `nil` when it isn't
+    /// installed or doesn't respond.
     func version() async -> String?
 
-    /// Download the latest `munkipkg` release of the Swift fork and
-    /// install it to `/usr/local/munki`, prompting for administrator
-    /// rights for the privileged copy.
-    func installLatest() async throws
+    /// Which tool is actually going to run, with its version and path —
+    /// the configured executable if one is set, otherwise the first of
+    /// ``PackagingTool/detectionOrder`` found on disk. `nil` when neither
+    /// is installed.
+    func installedTool() async -> InstalledPackagingTool?
+
+    /// Download the latest release of `tool` and install it, prompting
+    /// for administrator rights.
+    func installLatest(_ tool: PackagingTool) async throws
+}
+
+/// A packaging tool found on disk, ready to run.
+public struct InstalledPackagingTool: Sendable, Hashable {
+    public var tool: PackagingTool
+    public var version: String
+    public var executablePath: String
+
+    public init(tool: PackagingTool, version: String, executablePath: String) {
+        self.tool = tool
+        self.version = version
+        self.executablePath = executablePath
+    }
+
+    /// e.g. "swiftpkg 0.3.1" — what the UI shows when reporting status.
+    public var displayLabel: String {
+        version.localizedCaseInsensitiveContains(tool.displayName)
+            ? version
+            : "\(tool.displayName) \(version)"
+    }
 }
