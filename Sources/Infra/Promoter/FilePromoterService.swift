@@ -22,9 +22,31 @@ public struct FilePromoterService: PromoterService {
 
     // MARK: Config
 
+    /// Config filenames to look for, in order.
+    ///
+    /// munki-promoter's own default is `config.yml`; `promoter.yml` is
+    /// the name deployments commonly give it when it sits alongside
+    /// other AutoPkg files. Only looking for the latter meant a repo
+    /// following upstream's documentation showed an empty Promoter tab
+    /// with nothing to explain why.
+    ///
+    /// There is no plist form: munki-promoter parses its config with
+    /// `yaml.safe_load` only. (Its `plistlib` use is for reading pkginfo
+    /// files, which is a different thing entirely.)
+    public static let configFileNames = [
+        "promoter.yml", "promoter.yaml", "config.yml", "config.yaml",
+    ]
+
+    /// The config file backing `deploymentRoot`, or `nil` when none of
+    /// the recognised names is present.
+    public static func configURL(in deploymentRoot: URL) -> URL? {
+        configFileNames
+            .map { deploymentRoot.appending(path: $0) }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     public func loadConfig(at deploymentRoot: URL) async throws -> PromoterConfig {
-        let configURL = deploymentRoot.appending(path: "promoter.yml")
-        guard FileManager.default.fileExists(atPath: configURL.path) else {
+        guard let configURL = Self.configURL(in: deploymentRoot) else {
             return PromoterConfig(rules: [])
         }
         let data = try Data(contentsOf: configURL)
@@ -37,12 +59,18 @@ public struct FilePromoterService: PromoterService {
     public static func parseConfig(_ text: String) throws -> PromoterConfig {
         let yaml = try Yams.load(yaml: text) as? [String: Any] ?? [:]
         let promotionsAny = yaml["promotions"] as? [String: Any] ?? [:]
+        let defaultDays = yaml["default_days_in_catalog"] as? Int
+        let selection = parseSelection(yaml["selection"])
         var rules: [PromotionRule] = []
         for (name, body) in promotionsAny {
             guard let dict = body as? [String: Any] else { continue }
-            let promoteFrom = (dict["promote_from"] as? [String]) ?? []
+            // `promote_from` is optional upstream and falls back to the
+            // promotion's own name.
+            let promoteFrom = (dict["promote_from"] as? [String]) ?? [name]
             let promoteTo = (dict["promote_to"] as? [String]) ?? []
-            let daysInCatalog = (dict["days_in_catalog"] as? Int) ?? 1
+            // Aging window falls back to the top-level default before the
+            // hard-coded 1, which is what the promoter itself does.
+            let daysInCatalog = (dict["days_in_catalog"] as? Int) ?? defaultDays ?? 1
             var customItems: [String: PromotionRule.ItemOverride] = [:]
             if let custom = dict["custom_items"] as? [String: Any] {
                 for (pattern, overrideAny) in custom {
@@ -67,7 +95,27 @@ public struct FilePromoterService: PromoterService {
             }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
-        return PromoterConfig(rules: rules)
+        return PromoterConfig(
+            rules: rules,
+            defaultDaysInCatalog: defaultDays,
+            selection: selection
+        )
+    }
+
+    /// Parse the `selection` block.
+    ///
+    /// A block with no usable `type` is treated as absent, matching
+    /// `check_selection`: it only filters when `selection.type` is
+    /// present, and warns-but-allows otherwise.
+    static func parseSelection(_ raw: Any?) -> PromoterConfig.SelectionRule? {
+        guard let dict = raw as? [String: Any],
+              let typeName = dict["type"] as? String,
+              let type = PromoterConfig.SelectionRule.Kind(
+                  rawValue: typeName.trimmingCharacters(in: .whitespaces).lowercased()
+              )
+        else { return nil }
+        let items = (dict["items"] as? [String]) ?? []
+        return PromoterConfig.SelectionRule(type: type, items: items)
     }
 
     // MARK: Snapshot
@@ -104,6 +152,11 @@ public struct FilePromoterService: PromoterService {
         guard !config.rules.isEmpty else { return [] }
         var result: [PromotionCandidate] = []
         for record in pkginfos {
+            // The promoter checks its `selection` block before anything
+            // else. Without this the tab listed items — an excluded
+            // kiosk build, say — that the promoter would never touch,
+            // showing promotions that were never going to happen.
+            guard config.includes(record.pkginfo.name) else { continue }
             let catalogs = record.pkginfo.catalogs ?? []
             guard let rule = config.nextRule(forCatalogs: catalogs) else { continue }
             let editDate = lastEditDate(for: record) ?? record.modifiedAt ?? now

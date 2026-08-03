@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Infra
 @testable import App
 
 @Suite("Onboarding steps")
@@ -24,32 +25,35 @@ struct OnboardingStepTests {
         }
     }
 
-    @Test("a YAML promoter config reads as found", arguments: ["promoter.yml", "promoter.yaml"])
-    func findsYamlPromoterConfig(name: String) throws {
+    @Test(
+        "every config filename the Promoter tab reads is reported as found",
+        arguments: ["promoter.yml", "promoter.yaml", "config.yml", "config.yaml"]
+    )
+    func findsPromoterConfig(name: String) throws {
         let root = try Self.makeFolder(containing: [name])
         defer { try? FileManager.default.removeItem(at: root) }
         #expect(OnboardingView.describePromoterConfig(in: root) == "Found \(name).")
     }
 
-    /// plist is the project's default on-disk format, so a deployment
-    /// folder can legitimately hold `promoter.plist`. It must be
-    /// recognised — but reported honestly, because the promoter service
-    /// parses YAML only.
-    @Test("a plist promoter config is recognised but flagged as not yet loadable")
-    func findsPlistPromoterConfig() throws {
+    /// munki-promoter parses its config with `yaml.safe_load` only —
+    /// there is no plist form. Claiming otherwise sent people looking
+    /// for a file the tool never reads.
+    @Test("a plist is not treated as a promoter config")
+    func plistIsNotAConfig() throws {
         let root = try Self.makeFolder(containing: ["promoter.plist"])
         defer { try? FileManager.default.removeItem(at: root) }
-
-        let description = OnboardingView.describePromoterConfig(in: root)
-        #expect(description.contains("promoter.plist"))
-        #expect(description.contains("YAML only"))
+        #expect(OnboardingView.describePromoterConfig(in: root).contains("No promoter config"))
     }
 
-    @Test("YAML wins when both a YAML and a plist config are present")
-    func yamlWinsOverPlist() throws {
-        let root = try Self.makeFolder(containing: ["promoter.yml", "promoter.plist"])
-        defer { try? FileManager.default.removeItem(at: root) }
-        #expect(OnboardingView.describePromoterConfig(in: root) == "Found promoter.yml.")
+    /// What onboarding reports and what the tab loads must not drift, so
+    /// this step asks the service rather than keeping its own list.
+    @Test("the step reports exactly the filenames the service reads")
+    func stepAgreesWithService() throws {
+        for name in FilePromoterService.configFileNames {
+            let root = try Self.makeFolder(containing: [name])
+            defer { try? FileManager.default.removeItem(at: root) }
+            #expect(OnboardingView.describePromoterConfig(in: root) == "Found \(name).")
+        }
     }
 
     @Test("a folder with no promoter config says so")
