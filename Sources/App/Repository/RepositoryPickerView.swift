@@ -12,26 +12,31 @@ struct RepositoryPickerView: View {
             backdrop
                 .ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 36) {
-                    Spacer(minLength: 60)
-                    hero
-                    primaryActions
-                    if case .failed(let message) = store.loadState {
-                        openFailure(message)
+            // While the setup wizard is up, leave only the backdrop
+            // behind it. The hero otherwise peeks out around the sheet
+            // and reads as a second, half-hidden screen.
+            if !store.isShowingOnboarding {
+                ScrollView {
+                    VStack(spacing: 36) {
+                        Spacer(minLength: 60)
+                        hero
+                        primaryActions
+                        if case .failed(let message) = store.loadState {
+                            openFailure(message)
+                        }
+                        if !store.recentRepositories.isEmpty {
+                            recentsSection
+                        }
+                        Spacer(minLength: 40)
                     }
-                    if !store.recentRepositories.isEmpty {
-                        recentsSection
-                    }
-                    Spacer(minLength: 40)
+                    .padding(.horizontal, 48)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, 48)
-                .frame(maxWidth: 720)
-                .frame(maxWidth: .infinity)
-            }
 
-            versionBadge
-                .padding(16)
+                versionBadge
+                    .padding(16)
+            }
         }
         .fileImporter(
             isPresented: $picking,
@@ -58,22 +63,9 @@ struct RepositoryPickerView: View {
 
     private var hero: some View {
         VStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(.thinMaterial)
-                    .frame(width: heroSize * 1.6, height: heroSize * 1.6)
-                    .overlay(
-                        Circle()
-                            .stroke(.tertiary.opacity(0.4), lineWidth: 0.5)
-                    )
-                    .shadow(color: .accentColor.opacity(0.18), radius: 24, y: 6)
-                Image(systemName: "shippingbox.fill")
-                    .font(.system(size: heroSize, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(Color.munkiStudioBrand)
-            }
-            .accessibilityHidden(true)
-            .padding(.bottom, 6)
+            AppIconView(size: heroSize * 1.5)
+                .shadow(color: .accentColor.opacity(0.18), radius: 24, y: 6)
+                .padding(.bottom, 6)
 
             Text("MunkiStudio")
                 .font(.system(.largeTitle, design: .rounded).weight(.bold))

@@ -75,10 +75,7 @@ struct OnboardingView: View {
 
     private var welcomeStep: some View {
         VStack(spacing: 16) {
-            Image(systemName: "shippingbox.fill")
-                .font(.system(size: 72, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Color.munkiStudioBrand)
+            AppIconView(size: 96)
             Text("Welcome to MunkiStudio")
                 .font(.system(.largeTitle, design: .rounded).weight(.bold))
             Text("The Munki repository studio — package, import, edit, lint, commit and deploy, all in one place.")
