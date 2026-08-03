@@ -5,15 +5,20 @@ import Core
 /// feature can contribute its own pane without restructuring this view.
 struct SettingsView: View {
     var body: some View {
+        // One tab per feature, matching Git and Build. "Features" used to
+        // bundle Promoter and Profiles together while those two got their
+        // own tabs, so where a setting lived was inconsistent.
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gearshape") }
-            FeatureSettingsView()
-                .tabItem { Label("Features", systemImage: "switch.2") }
             GitSettingsView()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             BuildSettingsView()
                 .tabItem { Label("Build", systemImage: "hammer") }
+            PromoterSettingsView()
+                .tabItem { Label("Promoter", systemImage: "arrow.up.forward.square") }
+            ProfilesSettingsView()
+                .tabItem { Label("Profiles", systemImage: "doc.badge.gearshape") }
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -21,9 +26,9 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Features
+// MARK: - Promoter
 
-private struct FeatureSettingsView: View {
+private struct PromoterSettingsView: View {
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
@@ -40,13 +45,26 @@ private struct FeatureSettingsView: View {
                 TextField("Hidden catalogs", text: $settings.promoterHiddenCatalogs,
                           prompt: Text("Comma-separated names to hide from display"))
                     .disabled(!settings.enablePromoterTab)
-            } header: {
-                Text("Promoter")
             } footer: {
                 Text("The Promoter tab shows a preview of recent AutoPkg imports, upcoming promotions, and promoter history — and lets you approve, anticipate, or defer individual items. \"Hidden catalogs\" suppresses catalog names from transition labels and stats without changing which catalogs the promoter actually writes to.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: 260)
+    }
+}
+
+// MARK: - Profiles
+
+private struct ProfilesSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
             Section {
                 Toggle("Enable Profiles tab", isOn: $settings.enableProfilesTab)
                 HStack {
@@ -55,8 +73,6 @@ private struct FeatureSettingsView: View {
                     PathChooserButton.folder(path: $settings.profilesDirectoryPath)
                 }
                 .disabled(!settings.enableProfilesTab)
-            } header: {
-                Text("Profiles")
             } footer: {
                 Text("The Profiles tab lists every .mobileconfig under this folder, expanded by default, and opens an XML editor with live validation for each.")
                     .font(.caption)
@@ -65,9 +81,8 @@ private struct FeatureSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 360)
+        .frame(minHeight: 260)
     }
-
 }
 
 // MARK: - Build

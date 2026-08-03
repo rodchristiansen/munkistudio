@@ -432,6 +432,13 @@ struct OnboardingView: View {
         return "\(snapshot.pkginfos.count) pkginfos · \(snapshot.manifests.count) manifests · \(snapshot.catalogs.count) catalogs"
     }
 
+    /// Shared step chrome.
+    ///
+    /// Everything shares one left edge. The header used to be centred
+    /// while the content block sized itself to its widest child and got
+    /// centred as a block, so the two never lined up and each step looked
+    /// subtly crooked. Form rows can't be centred sensibly, so the header
+    /// aligns to the content rather than the other way round.
     @ViewBuilder
     private func onboardingStep<Content: View>(
         icon: String,
@@ -439,7 +446,7 @@ struct OnboardingView: View {
         subtitle: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 44))
                 .foregroundStyle(Color.munkiStudioBrand)
@@ -447,13 +454,14 @@ struct OnboardingView: View {
             Text(subtitle)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             content()
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 6)
         }
-        .frame(maxWidth: 440)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: 440, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     // MARK: Footer
