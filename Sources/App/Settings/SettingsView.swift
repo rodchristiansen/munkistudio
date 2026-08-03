@@ -5,15 +5,20 @@ import Core
 /// feature can contribute its own pane without restructuring this view.
 struct SettingsView: View {
     var body: some View {
+        // One tab per feature, matching Git and Build. "Features" used to
+        // bundle Promoter and Profiles together while those two got their
+        // own tabs, so where a setting lived was inconsistent.
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gearshape") }
-            FeatureSettingsView()
-                .tabItem { Label("Features", systemImage: "switch.2") }
             GitSettingsView()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             BuildSettingsView()
                 .tabItem { Label("Build", systemImage: "hammer") }
+            PromoterSettingsView()
+                .tabItem { Label("Promoter", systemImage: "arrow.up.forward.square") }
+            ProfilesSettingsView()
+                .tabItem { Label("Profiles", systemImage: "doc.badge.gearshape") }
             AboutSettingsView()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -21,9 +26,9 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Features
+// MARK: - Promoter
 
-private struct FeatureSettingsView: View {
+private struct PromoterSettingsView: View {
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
@@ -40,13 +45,26 @@ private struct FeatureSettingsView: View {
                 TextField("Hidden catalogs", text: $settings.promoterHiddenCatalogs,
                           prompt: Text("Comma-separated names to hide from display"))
                     .disabled(!settings.enablePromoterTab)
-            } header: {
-                Text("Promoter")
             } footer: {
                 Text("The Promoter tab shows a preview of recent AutoPkg imports, upcoming promotions, and promoter history — and lets you approve, anticipate, or defer individual items. \"Hidden catalogs\" suppresses catalog names from transition labels and stats without changing which catalogs the promoter actually writes to.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+        .frame(minHeight: 260)
+    }
+}
+
+// MARK: - Profiles
+
+private struct ProfilesSettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
             Section {
                 Toggle("Enable Profiles tab", isOn: $settings.enableProfilesTab)
                 HStack {
@@ -55,8 +73,6 @@ private struct FeatureSettingsView: View {
                     PathChooserButton.folder(path: $settings.profilesDirectoryPath)
                 }
                 .disabled(!settings.enableProfilesTab)
-            } header: {
-                Text("Profiles")
             } footer: {
                 Text("The Profiles tab lists every .mobileconfig under this folder, expanded by default, and opens an XML editor with live validation for each.")
                     .font(.caption)
@@ -65,9 +81,8 @@ private struct FeatureSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 360)
+        .frame(minHeight: 260)
     }
-
 }
 
 // MARK: - Build
@@ -168,16 +183,66 @@ private struct BuildSettingsView: View {
 
 private struct GeneralSettingsView: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(RepositoryStore.self) private var store
+
+    @State private var confirmingReset = false
 
     var body: some View {
         @Bindable var settings = settings
         Form {
-            Toggle("Reopen last repository on launch", isOn: $settings.reopenLastRepositoryOnLaunch)
-            LabeledContent("Version", value: AppInfo.version)
+            Section {
+                Toggle("Reopen last repository on launch", isOn: $settings.reopenLastRepositoryOnLaunch)
+                LabeledContent("Version", value: AppInfo.version)
+            }
+
+            Section {
+                Button("Run Setup Again\u{2026}") { replayOnboarding() }
+                Button("Reset All Settings\u{2026}", role: .destructive) {
+                    confirmingReset = true
+                }
+                if AppDefaults.isSandbox() {
+                    Label(
+                        "Sandbox mode — settings live in a throwaway suite that is wiped every launch.",
+                        systemImage: "flask"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Setup")
+            } footer: {
+                Text("Run Setup Again reopens the first-run wizard without changing anything you've already configured. Reset All Settings clears every MunkiStudio preference and the Recent list, returning the app to a fresh install — it never touches your repository.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scenePadding()
-        .frame(minHeight: 160)
+        .frame(minHeight: 260)
+        .confirmationDialog(
+            "Reset all MunkiStudio settings?",
+            isPresented: $confirmingReset,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Everything", role: .destructive) { resetEverything() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Clears every preference and the Recent list, then reopens the setup wizard. Your Munki repository is left untouched.")
+        }
+    }
+
+    /// Reopen the wizard over the main window. The Settings window is
+    /// closed first — otherwise the sheet raises behind it and looks
+    /// like the button did nothing.
+    private func replayOnboarding() {
+        store.isShowingOnboarding = true
+        NSApp.keyWindow?.performClose(nil)
+    }
+
+    private func resetEverything() {
+        settings.resetToDefaults()
+        store.clearRecents()
+        replayOnboarding()
     }
 }
 

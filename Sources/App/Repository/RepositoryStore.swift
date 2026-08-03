@@ -102,6 +102,18 @@ final class RepositoryStore {
 
     var loadState: LoadState = .idle
 
+    /// Non-fatal gaps in the open repository — a real Munki repo that is
+    /// missing `catalogs/`, say. Surfaced in onboarding and the picker so
+    /// a half-right folder choice doesn't read as unqualified success.
+    private(set) var repositoryWarnings: [String] = []
+
+    /// Drives the first-run onboarding sheet. Resolved once at launch by
+    /// ``ContentView`` and set back to `true` by Settings → Run Setup
+    /// Again. Deliberately *stored*: a computed equivalent flips as soon
+    /// as the wizard's own repository step succeeds, which tore the sheet
+    /// down mid-flow.
+    var isShowingOnboarding: Bool = false
+
     /// Free-text query backing the global search pane.
     var searchQuery: String = ""
 
@@ -156,15 +168,33 @@ final class RepositoryStore {
 
     let services: AppServices
 
-    init(services: AppServices) {
+    /// Defaults domain backing the recents list. Injected so a sandbox
+    /// launch writes to a throwaway suite and tests write to their own.
+    private let defaults: UserDefaults
+
+    init(services: AppServices, defaults: UserDefaults = .standard) {
         self.services = services
-        self.recentRepositories = Self.loadRecents()
+        self.defaults = defaults
+        self.recentRepositories = Self.loadRecents(from: defaults)
     }
 
     // MARK: Opening
 
     func open(rootURL: URL) async {
         loadState = .loading
+        repositoryWarnings = []
+
+        // Reject a folder that isn't a Munki repo *before* opening it.
+        // The service happily opens anything — it just builds URLs — so
+        // without this a wrong pick (a home folder, the repo's parent,
+        // an unmounted share point) succeeded into an empty studio with
+        // no hint of what went wrong.
+        let health = RepositoryHealth(probing: rootURL)
+        guard health.isMunkiRepository else {
+            loadState = .failed(message: health.rejectionMessage(for: rootURL))
+            return
+        }
+
         do {
             let repo = try await services.repository.open(rootURL: rootURL)
             self.repository = repo
@@ -172,7 +202,8 @@ final class RepositoryStore {
             self.snapshot = snapshot
             self.gitInfo = await services.git.discover(at: rootURL)
             await refreshGitStatus()
-            Self.appendRecent(rootURL, into: &recentRepositories)
+            appendRecent(rootURL)
+            repositoryWarnings = health.warnings
             loadState = .ready
             navHistory.removeAll()
             navIndex = -1
@@ -713,22 +744,35 @@ final class RepositoryStore {
 
     // MARK: Recent repositories
 
-    private static let recentsKey = "MunkiStudio.recentRepositories"
+    nonisolated static let recentsKey = "MunkiStudio.recentRepositories"
     private static let recentsLimit = 8
 
-    private static func loadRecents() -> [URL] {
-        let defaults = UserDefaults.standard
+    private static func loadRecents(from defaults: UserDefaults) -> [URL] {
         let paths = defaults.array(forKey: recentsKey) as? [String] ?? []
         return paths.map { URL(fileURLWithPath: $0) }
     }
 
-    private static func appendRecent(_ url: URL, into recents: inout [URL]) {
-        recents.removeAll { $0.path == url.path }
-        recents.insert(url, at: 0)
-        if recents.count > recentsLimit {
-            recents.removeLast(recents.count - recentsLimit)
+    private func appendRecent(_ url: URL) {
+        recentRepositories.removeAll { $0.path == url.path }
+        recentRepositories.insert(url, at: 0)
+        if recentRepositories.count > Self.recentsLimit {
+            recentRepositories.removeLast(recentRepositories.count - Self.recentsLimit)
         }
-        UserDefaults.standard.set(recents.map(\.path), forKey: recentsKey)
+        defaults.set(recentRepositories.map(\.path), forKey: Self.recentsKey)
+    }
+
+    /// Drop a repository from the Recent list — the escape hatch for a
+    /// path that has moved or a share that is never coming back.
+    func removeRecent(_ url: URL) {
+        recentRepositories.removeAll { $0.path == url.path }
+        defaults.set(recentRepositories.map(\.path), forKey: Self.recentsKey)
+    }
+
+    /// Forget every recent repository. Part of the settings reset, so a
+    /// reset install genuinely looks like a first run.
+    func clearRecents() {
+        recentRepositories.removeAll()
+        defaults.removeObject(forKey: Self.recentsKey)
     }
 
     enum LoadState: Equatable {

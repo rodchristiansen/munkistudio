@@ -11,6 +11,8 @@
 # Development:
 #   make app              debug build, ad-hoc signed, double-clickable .app
 #   make run              build (debug) and launch
+#   make run-sandbox      launch with throwaway settings — replays onboarding
+#   make reset-settings   clear all preferences so the next launch onboards
 #   make release          release build of the .app (ad-hoc signed)
 #
 # `make` builds and signs the release app, then hands it to munkipkg,
@@ -100,7 +102,25 @@ release: $(APP_BUNDLE)
 run: app
 	open $(APP_BUNDLE)
 
-# Run the unit tests — the CoreTests and InfraTests suites.
+# Launch against a throwaway preference suite that is wiped on every
+# start, so first-run onboarding runs exactly as it does on a new Mac.
+# Real settings and the Recent list are untouched.
+run-sandbox: app
+	open $(APP_BUNDLE) --args --sandbox
+
+# Wipe every MunkiStudio preference from the real domain, returning the
+# app to a fresh install. Quit MunkiStudio first — macOS rewrites the
+# domain from memory when a running app exits.
+reset-settings:
+	@if pgrep -qx $(APP_NAME); then \
+	    echo "Quit $(APP_NAME) first — a running app rewrites its preferences on exit."; \
+	    exit 1; \
+	fi
+	@defaults delete $(BUNDLE_ID) 2>/dev/null || true
+	@defaults delete $(BUNDLE_ID).sandbox 2>/dev/null || true
+	@echo "Cleared preferences for $(BUNDLE_ID). The next launch shows onboarding."
+
+# Run the unit tests — the App, Core and Infra suites.
 test:
 	swift test
 
@@ -248,8 +268,10 @@ help:
 	@echo "  make                  signed + notarized .pkg for the Munki repo"
 	@echo "  make app              debug build, double-clickable .app"
 	@echo "  make run              build (debug) and launch"
+	@echo "  make run-sandbox      launch with throwaway settings — replays first-run onboarding"
+	@echo "  make reset-settings   clear all preferences so the next launch onboards"
 	@echo "  make release          release build of the .app"
-	@echo "  make test             run the Core and Infra unit tests"
+	@echo "  make test             run the App, Core and Infra unit tests"
 	@echo "  make verify           re-check an existing package"
 	@echo "  make list-identities  show keychain signing identities"
 	@echo "  make clean            remove build artifacts"

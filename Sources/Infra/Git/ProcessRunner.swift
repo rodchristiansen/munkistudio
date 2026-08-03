@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import Synchronization
 
 /// Lightweight `Process` wrapper. We use it instead of pulling in a fuller
 /// async-process library so Infra stays dependency-light. The
@@ -145,14 +146,42 @@ public enum ProcessRunner {
                         return
                     }
                 }
-                process.waitUntilExit()
-                continuation.yield(.terminated(process.terminationStatus))
+                let status = await awaitExit(of: process)
+                continuation.yield(.terminated(status))
                 continuation.finish()
             }
 
             continuation.onTermination = { _ in
                 if process.isRunning { process.terminate() }
             }
+        }
+    }
+
+    /// Wait for `process` to exit without blocking the calling thread.
+    ///
+    /// `Process.waitUntilExit()` spins a run loop on whatever thread
+    /// calls it. Called from inside a `Task`, that thread belongs to the
+    /// cooperative pool, and enough concurrent streams park every thread
+    /// in the pool — including the ones that would deliver the output
+    /// the wait is waiting on. That deadlock showed up as an
+    /// intermittently hanging test suite. `terminationHandler` fires on
+    /// Foundation's own queue, so nothing here occupies a pool thread.
+    private static func awaitExit(of process: Process) async -> Int32 {
+        let hasResumed = Mutex(false)
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+            @Sendable func finish(_ status: Int32) {
+                let alreadyResumed = hasResumed.withLock { resumed in
+                    defer { resumed = true }
+                    return resumed
+                }
+                guard !alreadyResumed else { return }
+                continuation.resume(returning: status)
+            }
+            process.terminationHandler = { finish($0.terminationStatus) }
+            // A handler installed after the child has already exited
+            // never fires, so cover that race explicitly. `finish` is
+            // idempotent, so a double-call here is harmless.
+            if !process.isRunning { finish(process.terminationStatus) }
         }
     }
 

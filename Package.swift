@@ -43,6 +43,13 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "AppTests",
+            dependencies: ["App"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .testTarget(
             name: "CoreTests",
             dependencies: ["Core"],
             resources: [.copy("Fixtures")],
