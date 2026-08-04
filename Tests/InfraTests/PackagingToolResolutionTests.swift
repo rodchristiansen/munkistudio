@@ -78,11 +78,28 @@ struct PackagingToolResolutionTests {
         }
     }
 
-    @Test("with nothing configured the resolved path is a known default")
-    func detectionUsesKnownDefaults() {
+    @Test("with nothing configured the resolved path is one of the probed candidates")
+    func detectionUsesKnownCandidates() {
         Self.withConfiguredPath(nil) {
             let resolved = MunkipkgRunner().resolved
-            #expect(PackagingTool.allCases.map(\.defaultExecutablePath).contains(resolved.url.path))
+            let everyCandidate = PackagingTool.allCases.flatMap(\.candidateExecutablePaths)
+            #expect(everyCandidate.contains(resolved.url.path))
+            // Whatever was picked must belong to the tool it was picked as.
+            #expect(resolved.tool.candidateExecutablePaths.contains(resolved.url.path))
+        }
+    }
+
+    /// Detection must find a tool wherever it is actually installed, not
+    /// only at its installer's default location.
+    @Test("detection resolves to an executable that exists, when one does")
+    func detectionFindsAnInstalledTool() {
+        Self.withConfiguredPath(nil) {
+            let resolved = MunkipkgRunner().resolved
+            let installed = PackagingTool.allCases
+                .flatMap(\.candidateExecutablePaths)
+                .filter { FileManager.default.isExecutableFile(atPath: $0) }
+            guard !installed.isEmpty else { return }
+            #expect(FileManager.default.isExecutableFile(atPath: resolved.url.path))
         }
     }
 

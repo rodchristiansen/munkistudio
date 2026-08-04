@@ -55,25 +55,35 @@ public struct MunkipkgBuildOptions: Sendable, Hashable {
     /// import-suppression flag is left to the runner, which picks a
     /// spelling the installed binary actually accepts.
     ///
-    /// Defaults to munkipkg's vocabulary; use ``arguments(for:)`` to
-    /// emit only what a given tool accepts.
-    public var arguments: [String] { arguments(for: .munkipkg) }
+    /// Defaults to munkipkg's vocabulary; use ``arguments(capabilities:)``
+    /// to emit only what a specific installed binary accepts.
+    public var arguments: [String] {
+        arguments(capabilities: PackagingToolCapabilities(
+            skipImportFlag: "--skip-import",
+            envFileFlag: "--env"
+        ))
+    }
 
-    /// Flags `tool` actually accepts.
+    /// Flags this binary actually accepts.
     ///
     /// `--export-bom-info`, `--skip-notarization`, `--skip-stapling` and
-    /// `--quiet` are common to both tools. `--env` is munkipkg-only, and
-    /// passing it to swiftpkg makes it print usage and exit non-zero
-    /// rather than ignoring it.
-    public func arguments(for tool: PackagingTool) -> [String] {
+    /// `--quiet` are common to both tools and every version of them.
+    /// The env-file flag differs by tool and by version — munkipkg spells
+    /// it `--env`, swiftpkg spells it `--env-file`, and older swiftpkg
+    /// has neither — so its spelling comes from the probed capabilities
+    /// and is dropped entirely when unsupported.
+    ///
+    /// The import-suppression flag is left to the runner, which appends
+    /// it only when the user asked to suppress.
+    public func arguments(capabilities: PackagingToolCapabilities) -> [String] {
         var args: [String] = []
         if exportBomInfo { args.append("--export-bom-info") }
         if skipNotarization { args.append("--skip-notarization") }
         if skipStapling { args.append("--skip-stapling") }
         if quiet { args.append("--quiet") }
         let env = envPath.trimmingCharacters(in: .whitespaces)
-        if !env.isEmpty, tool.supportsEnvFile {
-            args.append(contentsOf: ["--env", env])
+        if !env.isEmpty, let flag = capabilities.envFileFlag {
+            args.append(contentsOf: [flag, env])
         }
         return args
     }

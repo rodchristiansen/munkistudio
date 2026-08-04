@@ -38,9 +38,11 @@ public final class MunkipkgRunner: MunkipkgService {
             let tool = PackagingTool.inferred(fromExecutablePath: configured) ?? .munkipkg
             return (tool, URL(fileURLWithPath: configured))
         }
-        for candidate in PackagingTool.detectionOrder
-        where FileManager.default.isExecutableFile(atPath: candidate.defaultExecutablePath) {
-            return (candidate, URL(fileURLWithPath: candidate.defaultExecutablePath))
+        for candidate in PackagingTool.detectionOrder {
+            for path in candidate.candidateExecutablePaths
+            where FileManager.default.isExecutableFile(atPath: path) {
+                return (candidate, URL(fileURLWithPath: path))
+            }
         }
         // Nothing installed — report the default so error messages name
         // a concrete path rather than nothing at all.
@@ -162,18 +164,18 @@ public final class MunkipkgRunner: MunkipkgService {
         let name = project.buildInfo.name
         let packageFileName = name.hasSuffix(".pkg") ? name : name + ".pkg"
         let productURL = project.buildDirectory.appending(path: packageFileName)
-        let baseArguments = options.arguments(for: tool)
-        // swiftpkg has no post-build import prompt, so there is no flag
-        // to suppress — probing its `--help` for one and appending a
-        // munkipkg spelling would just make it print usage and fail.
-        let wantsSkipImport = options.skipImport && tool.supportsSkipImport
+        let wantsSkipImport = options.skipImport
 
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var arguments = tool.buildModeArguments + baseArguments
-                    if wantsSkipImport,
-                       let flag = await Self.resolveSkipImportFlag(executable: executable) {
+                    // Ask the installed binary what it takes rather than
+                    // assuming from the tool's identity — the two tools
+                    // disagree on spelling and both are moving targets.
+                    let capabilities = await Self.capabilities(of: executable)
+                    var arguments = tool.buildModeArguments
+                        + options.arguments(capabilities: capabilities)
+                    if wantsSkipImport, let flag = capabilities.skipImportFlag {
                         arguments.append(flag)
                     }
                     arguments.append(projectDirectory.path)
@@ -207,45 +209,34 @@ public final class MunkipkgRunner: MunkipkgService {
         }
     }
 
-    /// Cache of the flag spelling this `munkipkg` accepts for
-    /// suppressing the post-build import prompt. Per-executable so a
-    /// Settings change re-detects. `nil` value means "no flag works —
-    /// run without it" so we don't probe again.
-    private static let importFlagCache = ImportFlagCache()
+    /// Cache of the optional flags each executable advertises, keyed by
+    /// path so a Settings change re-probes.
+    private static let capabilityCache = CapabilityCache()
 
-    private actor ImportFlagCache {
-        private var values: [String: String?] = [:]
-        func value(for path: String) -> (cached: Bool, value: String?) {
-            if let entry = values[path] { return (true, entry) }
-            return (false, nil)
-        }
-        func set(_ value: String?, for path: String) { values[path] = value }
+    private actor CapabilityCache {
+        private var values: [String: PackagingToolCapabilities] = [:]
+        func value(for path: String) -> PackagingToolCapabilities? { values[path] }
+        func set(_ value: PackagingToolCapabilities, for path: String) { values[path] = value }
     }
 
-    /// The flag name (`--skip-import` or `--no-import`) the installed
-    /// `munkipkg` advertises in `--help`, or `nil` if neither is present.
-    /// Callers should omit the flag when this returns `nil` rather than
-    /// blocking the build.
-    private static func resolveSkipImportFlag(executable: URL) async -> String? {
+    /// What `executable` advertises in its own `--help`.
+    ///
+    /// An unreadable or non-responding binary yields ``none`` — omitting
+    /// an optional flag still builds, whereas passing one the binary
+    /// doesn't take is a hard parse failure under swift-argument-parser.
+    static func capabilities(of executable: URL) async -> PackagingToolCapabilities {
         let path = executable.path
-        let lookup = await importFlagCache.value(for: path)
-        if lookup.cached { return lookup.value }
+        if let cached = await capabilityCache.value(for: path) { return cached }
         guard FileManager.default.isExecutableFile(atPath: path),
               let output = try? await ProcessRunner.run(executable, arguments: ["--help"])
         else {
-            await importFlagCache.set(nil, for: path)
-            return nil
+            await capabilityCache.set(.none, for: path)
+            return .none
         }
-        let help = output.stdout + "\n" + output.stderr
-        let resolved: String?
-        if help.contains("--skip-import") {
-            resolved = "--skip-import"
-        } else if help.contains("--no-import") {
-            resolved = "--no-import"
-        } else {
-            resolved = nil
-        }
-        await importFlagCache.set(resolved, for: path)
+        let resolved = PackagingToolCapabilities.detected(
+            fromHelp: output.stdout + "\n" + output.stderr
+        )
+        await capabilityCache.set(resolved, for: path)
         return resolved
     }
 
