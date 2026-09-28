@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import Core
+import Infra
 
 /// First-run onboarding wizard. Shown once, over `ContentView`, until the
 /// user finishes or skips it (tracked by `AppSettings.hasCompletedOnboarding`).
@@ -311,21 +312,16 @@ struct OnboardingView: View {
 
     /// Describe the promoter config found in `url`.
     ///
-    /// plist is the project's default on-disk format, so a deployment
-    /// folder can legitimately hold `promoter.plist` rather than
-    /// `promoter.yml`. Both are recognised here — but `FilePromoterService`
-    /// currently parses YAML only, so a plist is reported honestly
-    /// instead of implying the tab will populate.
+    /// Recognises exactly the filenames the Promoter tab reads, so what
+    /// this step reports and what the tab loads can't drift apart.
+    ///
+    /// There is no plist form to look for: munki-promoter parses its
+    /// config with `yaml.safe_load` only.
     static func describePromoterConfig(in url: URL) -> String {
-        let fm = FileManager.default
-        for name in ["promoter.yml", "promoter.yaml"]
-        where fm.fileExists(atPath: url.appending(path: name).path) {
-            return "Found \(name)."
+        guard let config = FilePromoterService.configURL(in: url) else {
+            return "No promoter config here — expected \(FilePromoterService.configFileNames[0]) or config.yml."
         }
-        if fm.fileExists(atPath: url.appending(path: "promoter.plist").path) {
-            return "Found promoter.plist — the Promoter tab reads YAML only, so it won't load yet."
-        }
-        return "No promoter config here — the Promoter tab will be empty."
+        return "Found \(config.lastPathComponent)."
     }
 
     /// Count immediate subdirectories that satisfy `marker` — used to

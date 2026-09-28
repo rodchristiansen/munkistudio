@@ -10,8 +10,54 @@ import Foundation
 public struct PromoterConfig: Sendable, Hashable {
     public var rules: [PromotionRule]
 
-    public init(rules: [PromotionRule]) {
+    /// Top-level `default_days_in_catalog`, used by any promotion that
+    /// doesn't set its own `days_in_catalog`.
+    public var defaultDaysInCatalog: Int?
+
+    /// Top-level `selection` block, gating which items are eligible for
+    /// promotion at all.
+    public var selection: SelectionRule?
+
+    public init(
+        rules: [PromotionRule],
+        defaultDaysInCatalog: Int? = nil,
+        selection: SelectionRule? = nil
+    ) {
         self.rules = rules
+        self.defaultDaysInCatalog = defaultDaysInCatalog
+        self.selection = selection
+    }
+
+    /// Whether `name` is eligible for promotion under the `selection`
+    /// block.
+    ///
+    /// Mirrors munki-promoter's `check_selection`, including its edge
+    /// cases: an inclusion list that is missing or malformed admits
+    /// *nothing*, while a malformed exclusion list admits *everything*.
+    /// Matching is exact — the promoter does no globbing here, unlike
+    /// `custom_items`.
+    public func includes(_ name: String) -> Bool {
+        guard let selection else { return true }
+        switch selection.type {
+        case .inclusion: return selection.items.contains(name)
+        case .exclusion: return !selection.items.contains(name)
+        case .all: return true
+        }
+    }
+
+    /// The `selection` block: an allow-list, a deny-list, or everything.
+    public struct SelectionRule: Sendable, Hashable {
+        public enum Kind: String, Sendable, Hashable, CaseIterable {
+            case inclusion, exclusion, all
+        }
+
+        public var type: Kind
+        public var items: [String]
+
+        public init(type: Kind, items: [String]) {
+            self.type = type
+            self.items = items
+        }
     }
 
     /// Look up the per-item override for a package name, if any. The
