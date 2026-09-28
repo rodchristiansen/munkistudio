@@ -32,6 +32,9 @@ jobs:
     # MunkiStudio targets macOS 26 (Tahoe) — the runner needs the
     # macOS 26 SDK / Xcode 26.
     runs-on: macos-26
+    # Notarization for a young team can sit in Apple's queue for hours; the
+    # notarize step gives up at five, so the job needs a little over that.
+    timeout-minutes: 330
     permissions:
       contents: write
     env:
@@ -119,7 +122,7 @@ jobs:
           id=$(xcrun notarytool submit "$pkg" --keychain-profile "$NOTARIZATION_PROFILE" \
                  --keychain "$KEYCHAIN" --output-format json | jq -r .id)
           echo "Submitted $(basename "$pkg") as $id"
-          deadline=$((SECONDS + 3 * 3600))
+          deadline=$((SECONDS + 5 * 3600))
           while :; do
             status=$(xcrun notarytool info "$id" --keychain-profile "$NOTARIZATION_PROFILE" \
                        --keychain "$KEYCHAIN" --output-format json | jq -r .status)
@@ -131,7 +134,7 @@ jobs:
                 exit 1 ;;
             esac
             if [ "$SECONDS" -gt "$deadline" ]; then
-              echo "::error::Still $status after 3 hours. Check later with: xcrun notarytool info $id"
+              echo "::error::Still $status after 5 hours. Check later with: xcrun notarytool info $id"
               exit 1
             fi
             sleep 30
