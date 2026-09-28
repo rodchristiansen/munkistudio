@@ -10,9 +10,14 @@
 #   DEVELOPER_ID_P12_PASSWORD   password set when exporting the .p12
 #   SIGNING_IDENTITY_APP        e.g. Developer ID Application: Org (TEAMID)
 #   SIGNING_IDENTITY_INSTALLER  e.g. Developer ID Installer: Org (TEAMID)
-#   NOTARIZATION_APPLE_ID       Apple ID used for notarization
-#   NOTARIZATION_PASSWORD       app-specific password for that Apple ID
-#   TEAM_ID                     Apple Developer Team ID
+#   NOTARY_KEY_BASE64           base64 of the App Store Connect API key .p8 —
+#                               base64 -i AuthKey_XXXXXXXXXX.p8
+#   NOTARY_KEY_ID               the key's ID, the XXXXXXXXXX in its filename
+#   NOTARY_ISSUER_ID            issuer UUID from App Store Connect → Integrations
+#
+# An API key is used rather than an Apple ID and app-specific password because
+# the password is revoked whenever the Apple Account's password changes, which
+# breaks the release silently and only at the notarization step.
 #
 # Triggered manually, or by pushing a tag like v2026.05.19.1430.
 name: Release
@@ -57,7 +62,7 @@ jobs:
           security set-keychain-settings -lut 3600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$RUNNER_TEMP/certs.p12" -k "$keychain" -P "$P12_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/productbuild
+            -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$keychain_password" "$keychain"
           security list-keychains -d user -s "$keychain" login.keychain-db
@@ -65,16 +70,19 @@ jobs:
 
       - name: Store notarization credentials
         env:
-          NOTARIZATION_APPLE_ID: ${{ secrets.NOTARIZATION_APPLE_ID }}
-          NOTARIZATION_PASSWORD: ${{ secrets.NOTARIZATION_PASSWORD }}
-          TEAM_ID: ${{ secrets.TEAM_ID }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
+          key="$RUNNER_TEMP/notary.p8"
+          echo "$NOTARY_KEY_BASE64" | base64 --decode > "$key"
           xcrun notarytool store-credentials "$NOTARIZATION_PROFILE" \
-            --apple-id "$NOTARIZATION_APPLE_ID" \
-            --password "$NOTARIZATION_PASSWORD" \
-            --team-id "$TEAM_ID" \
+            --key "$key" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
             --keychain "$KEYCHAIN"
+          rm "$key"
 
       - name: Build, sign, and notarize
         env:
