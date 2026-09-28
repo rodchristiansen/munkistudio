@@ -36,13 +36,15 @@ jobs:
       contents: write
     env:
       MUNKIPKG: ${{ github.workspace }}/.tools/munkipkg
+      # Named MPKG_*, not MUNKIPKG_*: munkipkg merges every MUNKIPKG_* variable
+      # in its environment into its own config.
       # munkipkg is the Swift rewrite in rodchristiansen/munki-pkg, not the
       # Python original in munki/munki-pkg — the Makefile speaks the rewrite's
       # CLI. It runs with the Developer ID key unlocked, so the release is
       # pinned and its binary checked against a hash recorded here rather than
       # against a checksum file from the same release. Bump both together.
-      MUNKIPKG_RELEASE: 2026.07.15.1838
-      MUNKIPKG_SHA256: d6170dea1ca592b50ce5e3105bd8f9b2da2feaf450e9d8c5d8446833ee549695
+      MPKG_RELEASE: 2026.07.15.1838
+      MPKG_SHA256: d6170dea1ca592b50ce5e3105bd8f9b2da2feaf450e9d8c5d8446833ee549695
       NOTARIZATION_PROFILE: notarization_credentials
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -51,8 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$MUNKIPKG")"
-          curl -fsSL "https://github.com/rodchristiansen/munki-pkg/releases/download/$MUNKIPKG_RELEASE/munkipkg" -o "$MUNKIPKG"
-          echo "$MUNKIPKG_SHA256  $MUNKIPKG" | shasum -a 256 -c -
+          curl -fsSL "https://github.com/rodchristiansen/munki-pkg/releases/download/$MPKG_RELEASE/munkipkg" -o "$MUNKIPKG"
+          echo "$MPKG_SHA256  $MUNKIPKG" | shasum -a 256 -c -
           chmod +x "$MUNKIPKG"
 
       - name: Import Developer ID certificates
@@ -92,7 +94,7 @@ jobs:
             --keychain "$KEYCHAIN"
           rm "$key"
 
-      - name: Build, sign, and notarize
+      - name: Build and sign
         env:
           SIGNING_IDENTITY_APP: ${{ secrets.SIGNING_IDENTITY_APP }}
           SIGNING_IDENTITY_INSTALLER: ${{ secrets.SIGNING_IDENTITY_INSTALLER }}
@@ -104,7 +106,38 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$REF_TYPE" = tag ]; then export VERSION="${REF_NAME#v}"; fi
-          make
+          make PKG_EXTRA_ARGS=--skip-notarization
+
+      # Notarized here rather than inside munkipkg so the log shows the
+      # submission ID at once and a status line every 30 seconds. munkipkg
+      # buffers notarytool until it finishes, and a first submission on a new
+      # team can sit in Apple's queue for hours.
+      - name: Notarize and staple
+        run: |
+          set -euo pipefail
+          pkg=$(ls build/MunkiStudio-*.pkg)
+          id=$(xcrun notarytool submit "$pkg" --keychain-profile "$NOTARIZATION_PROFILE" \
+                 --keychain "$KEYCHAIN" --output-format json | jq -r .id)
+          echo "Submitted $(basename "$pkg") as $id"
+          deadline=$((SECONDS + 3 * 3600))
+          while :; do
+            status=$(xcrun notarytool info "$id" --keychain-profile "$NOTARIZATION_PROFILE" \
+                       --keychain "$KEYCHAIN" --output-format json | jq -r .status)
+            echo "$(date -u +%H:%M:%S) $status"
+            case "$status" in
+              Accepted) break ;;
+              Invalid|Rejected)
+                xcrun notarytool log "$id" --keychain-profile "$NOTARIZATION_PROFILE" --keychain "$KEYCHAIN"
+                exit 1 ;;
+            esac
+            if [ "$SECONDS" -gt "$deadline" ]; then
+              echo "::error::Still $status after 3 hours. Check later with: xcrun notarytool info $id"
+              exit 1
+            fi
+            sleep 30
+          done
+          xcrun stapler staple "$pkg"
+          spctl -a -vvv -t install "$pkg"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

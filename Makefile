@@ -73,6 +73,10 @@ ENTITLEMENTS  := resources/MunkiStudio.entitlements
 
 # munkipkg builds, signs, notarizes, and staples the installer package.
 MUNKIPKG      ?= /usr/local/munki/munkipkg
+# Extra munkipkg flags. CI passes --skip-notarization and notarizes in its own
+# step, because munkipkg buffers notarytool's output until it finishes and the
+# log looks hung for however long Apple takes.
+PKG_EXTRA_ARGS ?=
 
 # Icon Composer (.icon) bundle — the macOS 26 Liquid Glass app icon.
 # Drop the artwork at $(ICON_SRC); builds without it ship iconless.
@@ -242,7 +246,7 @@ pkg: sign-app
 	    "notarization_info:" \
 	    "  keychain_profile: $(NOTARIZATION_PROFILE)" \
 	    > $(PKG_PROJECT)/build-info.yaml
-	$(MUNKIPKG) --build --no-import $(PKG_PROJECT)
+	$(MUNKIPKG) --build --no-import $(PKG_EXTRA_ARGS) $(PKG_PROJECT)
 	@cp $(PKG_PROJECT)/build/*.pkg $(PKG_OUTPUT)
 	@echo "Built $(PKG_OUTPUT)"
 
