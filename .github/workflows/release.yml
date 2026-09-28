@@ -10,9 +10,14 @@
 #   DEVELOPER_ID_P12_PASSWORD   password set when exporting the .p12
 #   SIGNING_IDENTITY_APP        e.g. Developer ID Application: Org (TEAMID)
 #   SIGNING_IDENTITY_INSTALLER  e.g. Developer ID Installer: Org (TEAMID)
-#   NOTARIZATION_APPLE_ID       Apple ID used for notarization
-#   NOTARIZATION_PASSWORD       app-specific password for that Apple ID
-#   TEAM_ID                     Apple Developer Team ID
+#   NOTARY_KEY_BASE64           base64 of the App Store Connect API key .p8 —
+#                               base64 -i AuthKey_XXXXXXXXXX.p8
+#   NOTARY_KEY_ID               the key's ID, the XXXXXXXXXX in its filename
+#   NOTARY_ISSUER_ID            issuer UUID from App Store Connect → Integrations
+#
+# An API key is used rather than an Apple ID and app-specific password because
+# the password is revoked whenever the Apple Account's password changes, which
+# breaks the release silently and only at the notarization step.
 #
 # Triggered manually, or by pushing a tag like v2026.05.19.1430.
 name: Release
@@ -31,15 +36,19 @@ jobs:
       contents: write
     env:
       MUNKIPKG: ${{ github.workspace }}/.tools/munkipkg
+      # munkipkg runs with the Developer ID key unlocked in the keychain, so it
+      # is fetched at a fixed commit, never from a moving branch. Bump both
+      # values together after reading the diff.
+      MUNKIPKG_SHA: 7d57d0750bd6787838322b7abf02693da033d584
       NOTARIZATION_PROFILE: notarization_credentials
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install munkipkg
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$MUNKIPKG")"
-          curl -fsSL https://raw.githubusercontent.com/munki/munki-pkg/main/munkipkg -o "$MUNKIPKG"
+          curl -fsSL "https://raw.githubusercontent.com/munki/munki-pkg/$MUNKIPKG_SHA/munkipkg" -o "$MUNKIPKG"
           chmod +x "$MUNKIPKG"
 
       - name: Import Developer ID certificates
@@ -57,7 +66,7 @@ jobs:
           security set-keychain-settings -lut 3600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$RUNNER_TEMP/certs.p12" -k "$keychain" -P "$P12_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/productbuild
+            -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$keychain_password" "$keychain"
           security list-keychains -d user -s "$keychain" login.keychain-db
@@ -65,16 +74,19 @@ jobs:
 
       - name: Store notarization credentials
         env:
-          NOTARIZATION_APPLE_ID: ${{ secrets.NOTARIZATION_APPLE_ID }}
-          NOTARIZATION_PASSWORD: ${{ secrets.NOTARIZATION_PASSWORD }}
-          TEAM_ID: ${{ secrets.TEAM_ID }}
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
+          key="$RUNNER_TEMP/notary.p8"
+          echo "$NOTARY_KEY_BASE64" | base64 --decode > "$key"
           xcrun notarytool store-credentials "$NOTARIZATION_PROFILE" \
-            --apple-id "$NOTARIZATION_APPLE_ID" \
-            --password "$NOTARIZATION_PASSWORD" \
-            --team-id "$TEAM_ID" \
+            --key "$key" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
             --keychain "$KEYCHAIN"
+          rm "$key"
 
       - name: Build, sign, and notarize
         env:
@@ -83,7 +95,7 @@ jobs:
         run: make
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: MunkiStudio-pkg
           path: build/MunkiStudio-*.pkg
