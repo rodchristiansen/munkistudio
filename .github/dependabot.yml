@@ -1,0 +1,9 @@
+# Actions are pinned to commit SHAs so a moved tag cannot change what runs
+# while the Developer ID key is unlocked. Dependabot keeps those pins current
+# through reviewed PRs, so pinning does not mean falling behind.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
