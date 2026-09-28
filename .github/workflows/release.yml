@@ -36,10 +36,13 @@ jobs:
       contents: write
     env:
       MUNKIPKG: ${{ github.workspace }}/.tools/munkipkg
-      # munkipkg runs with the Developer ID key unlocked in the keychain, so it
-      # is fetched at a fixed commit, never from a moving branch. Bump both
-      # values together after reading the diff.
-      MUNKIPKG_SHA: 7d57d0750bd6787838322b7abf02693da033d584
+      # munkipkg is the Swift rewrite in rodchristiansen/munki-pkg, not the
+      # Python original in munki/munki-pkg — the Makefile speaks the rewrite's
+      # CLI. It runs with the Developer ID key unlocked, so the release is
+      # pinned and its binary checked against a hash recorded here rather than
+      # against a checksum file from the same release. Bump both together.
+      MUNKIPKG_RELEASE: 2026.07.15.1838
+      MUNKIPKG_SHA256: d6170dea1ca592b50ce5e3105bd8f9b2da2feaf450e9d8c5d8446833ee549695
       NOTARIZATION_PROFILE: notarization_credentials
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -48,7 +51,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$MUNKIPKG")"
-          curl -fsSL "https://raw.githubusercontent.com/munki/munki-pkg/$MUNKIPKG_SHA/munkipkg" -o "$MUNKIPKG"
+          curl -fsSL "https://github.com/rodchristiansen/munki-pkg/releases/download/$MUNKIPKG_RELEASE/munkipkg" -o "$MUNKIPKG"
+          echo "$MUNKIPKG_SHA256  $MUNKIPKG" | shasum -a 256 -c -
           chmod +x "$MUNKIPKG"
 
       - name: Import Developer ID certificates
@@ -92,7 +96,15 @@ jobs:
         env:
           SIGNING_IDENTITY_APP: ${{ secrets.SIGNING_IDENTITY_APP }}
           SIGNING_IDENTITY_INSTALLER: ${{ secrets.SIGNING_IDENTITY_INSTALLER }}
-        run: make
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        # A tag build takes its version from the tag, so the package and the
+        # release it is attached to agree. Anything else falls back to the
+        # Makefile's build-time stamp.
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" = tag ]; then export VERSION="${REF_NAME#v}"; fi
+          make
 
       - name: Upload package artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

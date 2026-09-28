@@ -242,7 +242,7 @@ pkg: sign-app
 	    "notarization_info:" \
 	    "  keychain_profile: $(NOTARIZATION_PROFILE)" \
 	    > $(PKG_PROJECT)/build-info.yaml
-	$(MUNKIPKG) --build --skip-import $(PKG_PROJECT)
+	$(MUNKIPKG) --build --no-import $(PKG_PROJECT)
 	@cp $(PKG_PROJECT)/build/*.pkg $(PKG_OUTPUT)
 	@echo "Built $(PKG_OUTPUT)"
 
