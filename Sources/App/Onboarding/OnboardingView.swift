@@ -316,7 +316,7 @@ struct OnboardingView: View {
     /// `promoter.yml`. Both are recognised here — but `FilePromoterService`
     /// currently parses YAML only, so a plist is reported honestly
     /// instead of implying the tab will populate.
-    static func describePromoterConfig(in url: URL) -> String {
+    nonisolated static func describePromoterConfig(in url: URL) -> String {
         let fm = FileManager.default
         for name in ["promoter.yml", "promoter.yaml"]
         where fm.fileExists(atPath: url.appending(path: name).path) {
