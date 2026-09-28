@@ -33,7 +33,7 @@ export
 
 # Configuration — override via .env, the environment, or the command line.
 CONFIGURATION ?= debug
-BUNDLE_ID     ?= systems.focused.MunkiStudio
+BUNDLE_ID     ?= com.github.rodchristiansen.munkistudio
 PKG_ID        ?= $(BUNDLE_ID)
 SIGN_IDENTITY ?= -
 

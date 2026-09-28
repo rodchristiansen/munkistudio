@@ -12,7 +12,7 @@ import Foundation
 enum AppDefaults {
     /// Preference suite used in sandbox mode. A separate domain from the
     /// real one, so a sandbox run can never touch real settings.
-    static let sandboxSuiteName = "systems.focused.MunkiStudio.sandbox"
+    static let sandboxSuiteName = "com.github.rodchristiansen.munkistudio.sandbox"
 
     static let launchArgument = "--sandbox"
     static let environmentVariable = "MUNKISTUDIO_SANDBOX"
