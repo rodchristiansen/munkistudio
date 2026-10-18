@@ -31,7 +31,7 @@ struct OnboardingView: View {
     }
 
     @State private var step: Step = .welcome
-    @State private var munkipkgVersion: String?
+    @State private var installedTool: InstalledPackagingTool?
     @State private var checkingMunkipkg = false
     @State private var installingMunkipkg = false
     @State private var munkipkgMessage: String?
@@ -55,7 +55,7 @@ struct OnboardingView: View {
             handlePickerResult(result)
         }
         .task(id: step) {
-            if step == .munkipkg, munkipkgVersion == nil { await refreshMunkipkg() }
+            if step == .munkipkg, installedTool == nil { await refreshMunkipkg() }
         }
     }
 
@@ -96,35 +96,42 @@ struct OnboardingView: View {
         @Bindable var settings = settings
         return onboardingStep(
             icon: "hammer",
-            title: "Set up munkipkg",
-            subtitle: "The Build tab uses munkipkg to build packages from source projects. This step is optional — skip it if you don't build packages."
+            title: "Set up a packaging tool",
+            subtitle: "The Build tab builds packages with swiftpkg or munkipkg. This step is optional — skip it if you don't build packages."
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     if checkingMunkipkg {
                         ProgressView().controlSize(.small)
                         Text("Checking\u{2026}")
-                    } else if let munkipkgVersion {
+                    } else if let installedTool {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        Text("munkipkg \(munkipkgVersion) is installed.")
+                        Text("\(installedTool.displayLabel) is installed.")
                     } else {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        Text("munkipkg isn't installed.")
+                        Text("Neither swiftpkg nor munkipkg is installed.")
                     }
                 }
                 .font(.callout)
 
-                if munkipkgVersion == nil && !checkingMunkipkg {
+                if let installedTool {
+                    Text(installedTool.executablePath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+
+                if installedTool == nil && !checkingMunkipkg {
                     Button {
                         Task { await installMunkipkg() }
                     } label: {
                         HStack(spacing: 6) {
                             if installingMunkipkg { ProgressView().controlSize(.small) }
-                            Text("Install munkipkg")
+                            Text("Install swiftpkg")
                         }
                     }
                     .disabled(installingMunkipkg)
-                    Text("Downloads the Swift munkipkg fork and installs it to /usr/local/munki (asks for your password).")
+                    Text("Downloads the latest swiftpkg release from github.com/codecarton/swiftpkg and runs its installer (asks for your password). swiftpkg is the actively developed successor to munkipkg; an existing munkipkg install keeps working.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -529,7 +536,7 @@ struct OnboardingView: View {
 
     private func refreshMunkipkg() async {
         checkingMunkipkg = true
-        munkipkgVersion = await store.services.munkipkg.version()
+        installedTool = await store.services.munkipkg.installedTool()
         checkingMunkipkg = false
     }
 
@@ -538,8 +545,8 @@ struct OnboardingView: View {
         munkipkgMessage = nil
         defer { installingMunkipkg = false }
         do {
-            try await store.services.munkipkg.installLatest()
-            munkipkgMessage = "Installed to /usr/local/munki/munkipkg."
+            try await store.services.munkipkg.installLatest(.swiftpkg)
+            munkipkgMessage = "Installed swiftpkg to \(PackagingTool.swiftpkg.defaultExecutablePath)."
             await refreshMunkipkg()
         } catch {
             munkipkgMessage = error.localizedDescription

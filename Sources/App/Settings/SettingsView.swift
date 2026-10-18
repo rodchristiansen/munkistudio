@@ -91,7 +91,7 @@ private struct BuildSettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(RepositoryStore.self) private var store
 
-    @State private var munkipkgVersion: String?
+    @State private var installedTool: InstalledPackagingTool?
     @State private var checking = false
     @State private var installing = false
     @State private var installMessage: String?
@@ -106,9 +106,9 @@ private struct BuildSettingsView: View {
                     PathChooserButton.folder(path: $settings.munkipkgProjectsPath)
                 }
             } header: {
-                Text("munkipkg Projects")
+                Text("Package Projects")
             } footer: {
-                Text("The Build tab lists munkipkg package-source projects directly under this folder — each a directory with a build-info file and a payload.")
+                Text("The Build tab lists package-source projects directly under this folder — each a directory with a build-info file and a payload. The layout is the same for swiftpkg and munkipkg.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -117,21 +117,26 @@ private struct BuildSettingsView: View {
                 LabeledContent("Status") {
                     if checking {
                         ProgressView().controlSize(.small)
-                    } else if let munkipkgVersion {
-                        Label(munkipkgVersion, systemImage: "checkmark.circle.fill")
+                    } else if let installedTool {
+                        Label(installedTool.displayLabel, systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     } else {
                         Label("Not found", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     }
                 }
+                if let installedTool {
+                    LabeledContent("Path", value: installedTool.executablePath)
+                }
                 HStack {
                     TextField("Executable", text: $settings.munkipkgExecutablePath,
-                              prompt: Text("/usr/local/munki/munkipkg"))
+                              prompt: Text("Auto-detect"))
                     PathChooserButton.file(types: [.unixExecutable, .executable], path: $settings.munkipkgExecutablePath)
                 }
                 HStack {
-                    Button("Download & Install munkipkg") { Task { await install() } }
+                    Button("Install swiftpkg") { Task { await install(.swiftpkg) } }
+                        .disabled(installing)
+                    Button("Install munkipkg") { Task { await install(.munkipkg) } }
                         .disabled(installing)
                     if installing { ProgressView().controlSize(.small) }
                     if let installMessage {
@@ -139,9 +144,9 @@ private struct BuildSettingsView: View {
                     }
                 }
             } header: {
-                Text("munkipkg Tool")
+                Text("Packaging Tool")
             } footer: {
-                Text("MunkiStudio targets the Swift munkipkg fork — YAML build-info, skip-import, and --env support. Build also works with the stock python munkipkg; the import-suppression flag is auto-detected from --help. Download & Install fetches the latest fork release and installs it to /usr/local/munki (asks for your password). Leave the path blank to use that standard location.")
+                Text("The Build tab drives swiftpkg or munkipkg — they share the same project layout, so either builds the same sources. Leave Executable blank to auto-detect: swiftpkg first, then munkipkg. Set it to pick a specific binary; the tool is identified by its filename so the right command form is used (swiftpkg builds with `swiftpkg <project>`, munkipkg with `munkipkg --build <project>`). --env and import-suppression are munkipkg-only and are omitted for swiftpkg.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -158,19 +163,20 @@ private struct BuildSettingsView: View {
 
     private func refreshStatus() async {
         checking = true
-        munkipkgVersion = await store.services.munkipkg.version()
+        installedTool = await store.services.munkipkg.installedTool()
         checking = false
     }
 
-    private func install() async {
+    private func install(_ tool: PackagingTool) async {
         installing = true
         installMessage = nil
         defer { installing = false }
         do {
-            try await store.services.munkipkg.installLatest()
-            // Installed at the standard path — drop any custom override.
+            try await store.services.munkipkg.installLatest(tool)
+            // Installed at the tool's standard path — drop any custom
+            // override so detection picks the freshly installed binary.
             settings.munkipkgExecutablePath = ""
-            installMessage = "Installed to /usr/local/munki/munkipkg."
+            installMessage = "Installed \(tool.displayName) to \(tool.defaultExecutablePath)."
             await refreshStatus()
         } catch {
             installMessage = error.localizedDescription
