@@ -64,6 +64,25 @@ struct PromoterView: View {
                 )
             }
         }
+        .task(id: store.repository?.rootURL) {
+            if promoterStore.cveRepositoryURL != store.repository?.rootURL {
+                promoterStore.clearCVEReport()
+            }
+            if promoterStore.cveReport == nil, !promoterStore.cveScanning,
+               let root = store.repository?.rootURL,
+               let cached = try? LocalCVEScanner.cachedReportURL(for: root),
+               FileManager.default.fileExists(atPath: cached.path) {
+                await promoterStore.loadCVEReport(from: cached, repositoryURL: root)
+            }
+            #if DEBUG
+            // Local preview launch option; no report or repository path is bundled.
+            if promoterStore.cveReport == nil, !promoterStore.cveScanning,
+               let path = ProcessInfo.processInfo.environment["MUNKISTUDIO_CVE_REPORT"],
+               let root = store.repository?.rootURL {
+                await promoterStore.loadCVEReport(from: URL(fileURLWithPath: path), repositoryURL: root)
+            }
+            #endif
+        }
         .fileImporter(
             isPresented: $pickingDeploymentFolder,
             allowedContentTypes: [.folder],
@@ -102,6 +121,11 @@ struct PromoterView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            Button(action: startCVEScan) {
+                Text(promoterStore.cveScanning ? "Scanning CVEs…" : "Fresh CVE Scan")
+            }
+            .disabled(store.repository == nil || promoterStore.cveLoading || promoterStore.cveScanning)
+            .help("Fetch current public CVE advisories for the open repository")
             Button { showRulesSheet = true } label: {
                 Label("Promotion Rules", systemImage: "list.bullet.rectangle")
             }
@@ -132,7 +156,75 @@ struct PromoterView: View {
     // MARK: Content
 
     private var content: some View {
+        GeometryReader { geometry in
+            promoterContent
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+                .clipped()
+        }
+        .onAppear { recomputeCache(animated: false) }
+        .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCache(animated: false) }
+        .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCache(animated: false) }
+        .onChange(of: promoterStore.busyURL) { _, new in
+            if new == nil { recomputeCache(animated: true) }
+        }
+    }
+
+    private var promoterContent: some View {
         VStack(spacing: 0) {
+            if !promoterStore.cveScanProgress.isEmpty {
+                HStack {
+                    if promoterStore.cveScanning { ProgressView().controlSize(.small) }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(promoterStore.cveScanProgress).font(.caption).lineLimit(4)
+                        if promoterStore.cveScanning, let started = promoterStore.cveScanStartedAt {
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                let seconds = max(0, Int(context.date.timeIntervalSince(started)))
+                                HStack {
+                                    Text(String(format: "Elapsed %02d:%02d", seconds / 60, seconds % 60))
+                                    if let updated = promoterStore.cveScanLastUpdate,
+                                       context.date.timeIntervalSince(updated) >= 20 {
+                                        Text("Waiting for CIRCL response · \(Int(context.date.timeIntervalSince(updated)))s since last update")
+                                    }
+                                }
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Spacer()
+                    if promoterStore.cveScanning {
+                        Button("Cancel Scan") { promoterStore.cancelCVEScan() }
+                    }
+                }
+                .padding(10)
+            }
+            if promoterStore.cveLoading {
+                ProgressView("Loading CVE report…").padding(8)
+            }
+            if let error = promoterStore.cveError {
+                Text(error).font(.callout).foregroundStyle(.orange).padding(8)
+            }
+            if let report = promoterStore.cveReport,
+               promoterStore.cveRepositoryURL == store.repository?.rootURL {
+                PromoterCVESection(
+                    report: report,
+                    productionVersions: currentProductionVersions,
+                    candidates: cachedCandidates,
+                    config: promoterStore.snapshot.config,
+                    onOpenPackage: openInPackagesTab
+                )
+                Divider()
+            } else if !promoterStore.cveLoading {
+                HStack {
+                    Label("CVE Reporting", systemImage: "shield.lefthalf.filled")
+                        .font(.headline)
+                    Text("Use Fresh CVE Scan to check this repository.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(12)
+                Divider()
+            }
+            PromoterSOFASummary()
             if promoterStore.loading {
                 Label("Loading promoter data…", systemImage: "arrow.clockwise")
                     .font(.caption)
@@ -143,54 +235,52 @@ struct PromoterView: View {
                     .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1))
                     .padding(.top, 8)
             }
-            HSplitView {
-                columnScroll {
-                    PromoterImportsSection(
-                        imports: promoterStore.snapshot.imports,
-                        hiddenCatalogs: hiddenCatalogs,
-                        selectedRowID: $selectedRowID,
-                        onOpenPackage: openInPackagesTab
-                    )
+            GeometryReader { columns in
+                HStack(alignment: .top, spacing: 0) {
+                    columnScroll {
+                        PromoterImportsSection(
+                            imports: promoterStore.snapshot.imports,
+                            hiddenCatalogs: hiddenCatalogs,
+                            selectedRowID: $selectedRowID,
+                            onOpenPackage: openInPackagesTab
+                        )
+                    }
+                    .frame(width: columns.size.width / 3, height: columns.size.height, alignment: .topLeading)
+                    .clipped()
+                    columnScroll {
+                        PromoterUpcomingSection(
+                            candidates: cachedCandidates,
+                            busyURL: promoterStore.busyURL,
+                            hiddenCatalogs: hiddenCatalogs,
+                            pkginfoCount: store.snapshot.pkginfos.count,
+                            knownPromoteFromSets: promoterStore.snapshot.config.rules.map { $0.promoteFrom },
+                            pkginfoCatalogSamples: cachedCatalogSamples,
+                            repositoryPath: store.repository?.rootURL.path,
+                            selectedRowID: $selectedRowID,
+                            onPromote: handlePromote,
+                            onDefer: { candidate in
+                                Task { await promoterStore.apply(.defer_(candidate), store: store) }
+                            },
+                            cveReport: promoterStore.cveReport,
+                            onOpenPackage: openInPackagesTab
+                        )
+                    }
+                    .frame(width: columns.size.width / 3, height: columns.size.height, alignment: .topLeading)
+                    .clipped()
+                    columnScroll {
+                        PromoterHistorySection(
+                            entries: promoterStore.snapshot.history,
+                            hiddenCatalogs: hiddenCatalogs,
+                            selectedRowID: $selectedRowID,
+                            onOpenPackage: openInPackagesTab
+                        )
+                    }
+                    .frame(width: columns.size.width / 3, height: columns.size.height, alignment: .topLeading)
+                    .clipped()
                 }
-                columnScroll {
-                    PromoterUpcomingSection(
-                        candidates: cachedCandidates,
-                        busyURL: promoterStore.busyURL,
-                        hiddenCatalogs: hiddenCatalogs,
-                        pkginfoCount: store.snapshot.pkginfos.count,
-                        knownPromoteFromSets: promoterStore.snapshot.config.rules.map { $0.promoteFrom },
-                        pkginfoCatalogSamples: cachedCatalogSamples,
-                        repositoryPath: store.repository?.rootURL.path,
-                        selectedRowID: $selectedRowID,
-                        onPromote: handlePromote,
-                        onDefer: { candidate in
-                            Task { await promoterStore.apply(.defer_(candidate), store: store) }
-                        },
-                        onOpenPackage: openInPackagesTab
-                    )
-                }
-                columnScroll {
-                    PromoterHistorySection(
-                        entries: promoterStore.snapshot.history,
-                        hiddenCatalogs: hiddenCatalogs,
-                        selectedRowID: $selectedRowID,
-                        onOpenPackage: openInPackagesTab
-                    )
-                }
+                .frame(width: columns.size.width, height: columns.size.height, alignment: .topLeading)
             }
-        }
-        .onAppear { recomputeCache(animated: false) }
-        .onChange(of: store.snapshot.pkginfos.count) { _, _ in recomputeCache(animated: false) }
-        .onChange(of: promoterStore.snapshot.config.rules.count) { _, _ in recomputeCache(animated: false) }
-        // Animate when a promote / defer round-trip completes:
-        // busyURL goes nil → URL → nil, so the trailing-nil edge is
-        // the signal that the candidate list may have just changed
-        // for non-load reasons. easeOut(0.25) lets the approved row
-        // fade out cleanly instead of disappearing on the next tick.
-        .onChange(of: promoterStore.busyURL) { _, new in
-            if new == nil {
-                recomputeCache(animated: true)
-            }
+            .frame(minHeight: 0, maxHeight: .infinity)
         }
     }
 
@@ -230,17 +320,34 @@ struct PromoterView: View {
         return result
     }
 
+    private var currentProductionVersions: [String: String] {
+        var versions: [String: String] = [:]
+        for record in store.snapshot.pkginfos {
+            guard record.pkginfo.catalogs?.contains("Production") == true,
+                  let version = record.pkginfo.version else { continue }
+            let key = record.pkginfo.name.lowercased()
+            if let previous = versions[key],
+               previous.compare(version, options: .numeric) != .orderedAscending { continue }
+            versions[key] = version
+        }
+        return versions
+    }
+
     /// Plain scroll wrapper for one column. The title + count live
     /// *inside* each section view (e.g. "Recent AutoPkg Imports 51"),
     /// so the column itself stays chrome-free — no double headings.
     @ViewBuilder
-    private func columnScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        ScrollView {
-            content()
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+    private func columnScroll<Content: View>(@ViewBuilder content: @escaping () -> Content) -> some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content()
+                    .frame(width: max(0, geometry.size.width - 20), alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
-        .frame(minWidth: 280, idealWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// Jump to the Packages tab and select the matching pkginfo by
@@ -318,6 +425,14 @@ struct PromoterView: View {
     }
 
     // MARK: Actions
+
+    private func startCVEScan() {
+        guard let root = store.repository?.rootURL else { return }
+        promoterStore.startCVEScan(repositoryURL: root,
+                                   scriptPath: settings.cveScannerScript,
+                                   pythonPath: settings.cvePythonExecutable)
+    }
+
 
     private func handlePromote(_ candidate: PromotionCandidate) {
         if candidate.isEligible() {

@@ -50,6 +50,20 @@ private struct PromoterSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("CVE Scanning") {
+                HStack {
+                    TextField("Scanner script", text: $settings.cveScannerScript,
+                              prompt: Text("Path to export-reportmate.py"))
+                    PathChooserButton.file(types: [.pythonScript, .plainText], path: $settings.cveScannerScript)
+                }
+                HStack {
+                    TextField("Python executable", text: $settings.cvePythonExecutable,
+                              prompt: Text("Scanner virtual environment’s bin/python"))
+                    PathChooserButton.file(types: [.unixExecutable, .executable], path: $settings.cvePythonExecutable)
+                }
+                Text("Fresh CVE Scan queries CIRCL for the open repository’s public app/vendor identifiers. Python needs the scanner’s dependencies. Results stay in the local app cache.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scenePadding()

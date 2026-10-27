@@ -111,14 +111,16 @@ private struct ImportRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: "shippingbox.fill")
                 .foregroundStyle(.indigo)
                 .imageScale(.small)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(entry.pkgName).font(.callout.weight(.medium))
+                    Text(entry.pkgName)
+                        .font(.callout.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
                     if let version = entry.version {
                         Text(version).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                     }
@@ -129,19 +131,17 @@ private struct ImportRow: View {
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 8) {
                 Text(Self.dateFormatter.string(from: entry.date))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                // .textSelection intentionally omitted — it captures
-                // double-clicks for word selection and would prevent
-                // the row-level onTapGesture from firing.
+                Spacer(minLength: 0)
                 Text(String(entry.commitHash.prefix(7)))
                     .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

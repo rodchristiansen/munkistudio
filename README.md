@@ -35,6 +35,9 @@ Tests/     # CoreTests, InfraTests
   the plist/YAML file is always the source of truth.
 - **Git commit composer** built on libgit2 (reads) + shelled `git` (writes), so
   hooks, signing, SSH-agent and Keychain credentials all work.
+- **Promoter CVE reporting** with Production version context, advisory links,
+  eligibility estimates, and a brief SOFA reference. Fresh scans require a
+  separately configured compatible scanner; see [setup and report interface](docs/promoter-cve-reporting.md).
 
 ## License
 

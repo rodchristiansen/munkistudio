@@ -46,7 +46,13 @@ struct MunkiStudioApp: SwiftUI.App {
             repoCleanHistory: RepoCleanHistoryStore(),
             promoter: FilePromoterService(packages: packages)
         )
-        _store = State(wrappedValue: RepositoryStore(services: services, defaults: defaults))
+        let repositoryStore = RepositoryStore(services: services, defaults: defaults)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MUNKISTUDIO_CVE_REPORT"] != nil {
+            repositoryStore.selectedSection = .promoter
+        }
+        #endif
+        _store = State(wrappedValue: repositoryStore)
     }
 
     var body: some Scene {

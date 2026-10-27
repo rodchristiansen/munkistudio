@@ -89,8 +89,17 @@ final class AppSettings {
 
     let defaults: UserDefaults
 
+    var cveScannerScript: String {
+        didSet { defaults.set(cveScannerScript, forKey: Key.cveScannerScript) }
+    }
+    var cvePythonExecutable: String {
+        didSet { defaults.set(cvePythonExecutable, forKey: Key.cvePythonExecutable) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.cveScannerScript = defaults.string(forKey: Key.cveScannerScript) ?? ""
+        self.cvePythonExecutable = defaults.string(forKey: Key.cvePythonExecutable) ?? ""
         self.reopenLastRepositoryOnLaunch =
             defaults.object(forKey: Key.reopenLastRepository) as? Bool ?? true
         self.hasCompletedOnboarding =
@@ -132,6 +141,8 @@ final class AppSettings {
         promoterHiddenCatalogs = ""
         enableProfilesTab = false
         profilesDirectoryPath = ""
+        cveScannerScript = ""
+        cvePythonExecutable = ""
     }
 
     /// Every defaults key this type owns. Kept next to ``Key`` so a new
@@ -149,9 +160,13 @@ final class AppSettings {
         Key.promoterHiddenCatalogs,
         Key.enableProfilesTab,
         Key.profilesDirectoryPath,
+        Key.cveScannerScript,
+        Key.cvePythonExecutable,
     ]
 
     private enum Key {
+        static let cveScannerScript = "MunkiStudio.settings.cveScannerScript"
+        static let cvePythonExecutable = "MunkiStudio.settings.cvePythonExecutable"
         static let reopenLastRepository = "MunkiStudio.settings.reopenLastRepositoryOnLaunch"
         static let hasCompletedOnboarding = "MunkiStudio.settings.hasCompletedOnboarding"
         static let gitHooksPathOverride = "MunkiStudio.settings.gitHooksPathOverride"

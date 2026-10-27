@@ -20,6 +20,7 @@ struct PromoterUpcomingSection: View {
     @Binding var selectedRowID: String?
     let onPromote: (PromotionCandidate) -> Void
     let onDefer: (PromotionCandidate) -> Void
+    var cveReport: PromoterCVEReport? = nil
     /// Wired to double-click on a candidate row → open in Packages tab.
     var onOpenPackage: ((String) -> Void)? = nil
 
@@ -46,7 +47,8 @@ struct PromoterUpcomingSection: View {
                             isSelected: selectedRowID == selectionID(for: candidate),
                             onTap: { handleTap(candidate: candidate) },
                             onPromote: { onPromote(candidate) },
-                            onDefer: { onDefer(candidate) }
+                            onDefer: { onDefer(candidate) },
+                            findings: cveReport?.findings(for: candidate.pkgName) ?? []
                         )
                         .transition(.asymmetric(
                             insertion: .opacity,
@@ -158,6 +160,7 @@ private struct PromoterCandidateRow: View {
     let onTap: () -> Void
     let onPromote: () -> Void
     let onDefer: () -> Void
+    var findings: [PromoterCVEReport.Finding] = []
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -166,6 +169,7 @@ private struct PromoterCandidateRow: View {
                 HStack(spacing: 6) {
                     Text(candidate.pkgName)
                         .font(.callout.weight(.medium))
+                    PromoterCVELinks(findings: findings)
                     if let version = candidate.version {
                         Text(version)
                             .font(.callout.monospacedDigit())
@@ -216,12 +220,11 @@ private struct PromoterCandidateRow: View {
     @ViewBuilder
     private var timingLabel: some View {
         if candidate.isEligible() {
-            Text("Eligible")
+            Text(candidate.readinessLabel())
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.green)
         } else {
-            let days = candidate.daysRemaining()
-            Text("\(days)d remaining")
+            Text(candidate.readinessLabel())
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }

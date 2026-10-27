@@ -51,6 +51,51 @@ public struct PromotionCandidate: Sendable, Hashable, Identifiable {
         let days = Calendar.current.dateComponents([.day], from: referenceDate, to: eligibleAt).day ?? 0
         return days
     }
+
+    /// The catalogs being added by this promotion, rather than a generic
+    /// "eligible" label that could be mistaken for a Production deployment.
+    public var nextStageLabel: String {
+        let added = targetCatalogs.filter { !currentCatalogs.contains($0) }
+        return added.isEmpty ? "next stage" : added.joined(separator: ", ")
+    }
+
+    public func readinessLabel(on referenceDate: Date = Date()) -> String {
+        if isEligible(on: referenceDate) { return "Eligible for \(nextStageLabel)" }
+        let days = max(1, Int(ceil(eligibleAt.timeIntervalSince(referenceDate) / 86_400)))
+        return "\(nextStageLabel) eligible in \(days)d"
+    }
+
+    /// Earliest rule-based Production eligibility. Later stages assume each
+    /// preceding promotion happens immediately when eligible. Pipeline cadence,
+    /// approval and publication can make the actual delivery later.
+    public func productionEligibility(using config: PromoterConfig, on referenceDate: Date = Date()) -> ProductionEligibility? {
+        var catalogs = targetCatalogs
+        var date = max(eligibleAt, referenceDate)
+        var steps = 1
+        var visited: Set<Set<String>> = [Set(currentCatalogs)]
+        while !catalogs.contains("Production") {
+            guard visited.insert(Set(catalogs)).inserted,
+                  let rule = config.nextRule(forCatalogs: catalogs),
+                  rule.daysInCatalog(for: pkgName) >= 0,
+                  let next = Calendar.current.date(byAdding: .day, value: rule.daysInCatalog(for: pkgName), to: date)
+            else { return nil }
+            date = next
+            catalogs = rule.promoteTo
+            steps += 1
+        }
+        return ProductionEligibility(date: date, includesFutureStages: steps > 1)
+    }
+}
+
+public struct ProductionEligibility: Sendable {
+    public let date: Date
+    public let includesFutureStages: Bool
+
+    public func badgeLabel(on referenceDate: Date = Date()) -> String {
+        if date <= referenceDate { return "Eligible for Production" }
+        let days = max(1, Int(ceil(date.timeIntervalSince(referenceDate) / 86_400)))
+        return includesFutureStages ? "Production earliest in \(days)d" : "Production eligible in \(days)d"
+    }
 }
 
 /// One AutoPkg import event — a freshly added pkginfo file from a
